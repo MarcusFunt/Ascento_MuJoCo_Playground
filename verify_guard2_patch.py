@@ -6,7 +6,7 @@ from prepare_ascento import model
 from guard2_physics import LEG_Q_MIN, LEG_Q_MAX, Guard2ActuatorModel
 
 assert model.nu == 6, model.nu
-for name in ('ascento/hip_left','ascento/knee_left','ascento/hip_right','ascento/knee_right'):
+for name in ('left_hip', 'left_knee', 'right_hip', 'right_knee'):
     jid=mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_JOINT,name)
     assert model.jnt_limited[jid]
     lo,hi=model.jnt_range[jid]
