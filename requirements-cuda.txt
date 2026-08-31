@@ -1,0 +1,12 @@
+# Runtime validated on WSL2 Ubuntu, Python 3.10.12, CUDA 12, and NVIDIA driver
+# 591.86.  The project uses direct JAX/MJX torque control and Brax PPO.
+jax[cuda12]==0.6.2
+mujoco==3.3.5
+mujoco-mjx==3.3.5
+brax==0.13.0
+flax==0.10.4
+ml-collections==1.1.0
+numpy==2.2.6
+tqdm==4.70.0
+imageio==2.37.0
+imageio-ffmpeg==0.6.0

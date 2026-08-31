@@ -1,0 +1,26 @@
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Local tooling and machine-specific state
+.vscode/
+.idea/
+.DS_Store
+MUJOCO_LOG.TXT
+
+# Generated training and evaluation output
+training/artifacts*/
+training/runs/
+videos/*.mp4
+videos/*.mp4.b64
+videos/*.png
+
+# Legacy local policy exports; regenerate or keep outside version control.
+ascento_balance_policy.pt
+ascento_balance_policy.ts
