@@ -93,7 +93,7 @@ for joint in spec.joints:
         joint.limited = True
         joint.range = [LEG_Q_MIN, LEG_Q_MAX]
         # No passive stiffness: Guard 2.0 has no physical leg spring.
-        joint.stiffness = [0.0, 0.0, 0.0]
+        joint.stiffness = 0.0
 
 floor = spec.worldbody.add_geom()
 floor.name = 'floor'
