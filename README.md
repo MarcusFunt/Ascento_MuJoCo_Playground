@@ -34,7 +34,7 @@ with CUDA 12, and a CUDA-capable GPU. The dependency versions are pinned in
 [`requirements-cuda.txt`](requirements-cuda.txt).
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/MarcusFunt/Ascento_MuJoCo_Playground.git
 cd Ascento_MuJoCo_Playground
 ./scripts/setup.sh --dev
 source .venv/bin/activate
