@@ -34,7 +34,7 @@ STAGES = (
     # preserve that equilibrium before it is asked to reject real disturbances.
     # A standing rollout starts at the passive zero-torque equilibrium.  Keep
     # the wheel speed at zero here, then widen it in the disturbed stage.
-    StageSpec("balance", "balance", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.35, 0.12, 0.0, reset_wheel_velocity=0.0),
+    StageSpec("balance", "balance", 0.0, 0.0, 0.0, 0.02, 0.05, 0.03, 0.01, 0.35, 0.12, 0.0, reset_wheel_velocity=0.0),
     StageSpec("disturbed_balance", "balance", 0.0, 0.0, 0.0, 0.01, 0.03, 0.03, 0.01, 0.30, 0.08, 1e-4, reset_wheel_velocity=0.25),
     StageSpec("flat_commands", "balance", 0.4, 0.5, 0.08, 0.08, 0.25, 0.18, 0.05, 0.55, 0.12, 2e-4),
     StageSpec("recovery", "recovery", 0.5, 0.5, 0.08, 0.55, 3.0, 1.0, 0.30, 0.75, 0.18, 3e-4),
