@@ -17,6 +17,8 @@ MUJOCO_LOG.TXT
 # Generated training and evaluation output
 training/artifacts*/
 training/runs/
+tools/jump_open_loop_results/
+tools/rendered_rollouts/
 videos/*.mp4
 videos/*.mp4.b64
 videos/*.png

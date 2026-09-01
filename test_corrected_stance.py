@@ -1,7 +1,7 @@
 import math, mujoco, numpy as np
 from prepare_ascento import model
 TARGET=np.array([-3.14,-3.14,0,-3.14,-3.14,0])
-TORSO=mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_BODY,'base_link')
+TORSO=mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_BODY,'base')
 FLOOR=mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_GEOM,'floor')
 def hit(d):
  for c in d.contact[:d.ncon]:
