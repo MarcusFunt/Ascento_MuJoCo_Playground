@@ -18,4 +18,4 @@ def test_same_substep_direct_torque_application():
     state = env.reset(jax.random.PRNGKey(1))
     data, _, applied = actuator.substep(state.data, state.info["torque_state"], jp.ones(6), env.mjx_model)
     assert bool(jp.allclose(data.ctrl, applied))
-    assert float(jp.max(jp.abs(applied[jp.asarray([2, 5])]))) <= 8.0 + 1e-5
+    assert float(jp.max(jp.abs(applied[jp.asarray([2, 5])]))) <= 40.0 + 1e-5

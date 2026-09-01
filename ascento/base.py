@@ -30,7 +30,7 @@ from .constants import (
 
 _REWARD_KEYS = (
     "upright", "vx_tracking", "yaw_tracking", "height", "posture", "stable",
-    "action_rate", "action_smooth", "lateral_drift", "vertical_velocity", "angular_velocity",
+    "action_rate", "action_smooth", "action_magnitude", "lateral_drift", "vertical_velocity", "angular_velocity",
     "joint_limit", "torque_saturation", "collision",
     "jump_crouch", "jump_thrust", "jump_height", "jump_clearance", "jump_landing",
     "jump_recovery", "jump_failure",
@@ -52,6 +52,7 @@ class AscentoBaseEnv(mjx_env.MjxEnv):
         reset_angular_velocity: float = 0.30,
         reset_linear_velocity: float = 0.20,
         reset_leg_variation: float = 0.05,
+        reset_wheel_velocity: float = 2.0,
         jump_probability: float = 0.0,
         max_jump_height: float = 0.0,
         max_jump_distance: float = 0.0,
@@ -74,6 +75,7 @@ class AscentoBaseEnv(mjx_env.MjxEnv):
         self._reset_tilt = float(reset_tilt)
         self._reset_angular_velocity, self._reset_linear_velocity = float(reset_angular_velocity), float(reset_linear_velocity)
         self._reset_leg_variation = float(reset_leg_variation)
+        self._reset_wheel_velocity = float(reset_wheel_velocity)
         self._jump_probability, self._max_jump_height, self._max_jump_distance = float(jump_probability), float(max_jump_height), float(max_jump_distance)
         self._enable_jump_rewards = bool(enable_jump_rewards)
         self._action_scale = float(action_scale)
@@ -118,7 +120,14 @@ class AscentoBaseEnv(mjx_env.MjxEnv):
         qvel = jp.zeros((self._mj_model.nv,), dtype=jp.float32)
         qvel = qvel.at[:3].set(jax.random.uniform(key_linear, (3,), minval=-self._reset_linear_velocity, maxval=self._reset_linear_velocity))
         qvel = qvel.at[3:6].set(jax.random.uniform(key_angular, (3,), minval=-self._reset_angular_velocity, maxval=self._reset_angular_velocity))
-        qvel = qvel.at[jp.asarray([8, 11])].set(jax.random.uniform(key_wheels, (2,), minval=-2.0, maxval=2.0))
+        qvel = qvel.at[jp.asarray([8, 11])].set(
+            jax.random.uniform(
+                key_wheels,
+                (2,),
+                minval=-self._reset_wheel_velocity,
+                maxval=self._reset_wheel_velocity,
+            )
+        )
         return qpos, qvel
 
     def _reset_info(self, rng: jax.Array) -> dict[str, Any]:
@@ -205,7 +214,15 @@ class AscentoBaseEnv(mjx_env.MjxEnv):
         info = jump.update_jump_info(
             info, data, wheel_contact, gravity, data.xpos[self._wheel_body_ids, 2]
         )
-        terms = self._get_reward_terms(data, action, info, gravity, local_linear_velocity, local_angular_velocity, wheel_contact, nonwheel_collision)
+        # Reward the transition against the *previous* action history.  ``info``
+        # already stores the newly applied action for the next observation, so
+        # passing it directly here would make the rate term identically zero.
+        reward_info = dict(
+            info,
+            last_action=state.info["last_action"],
+            last_last_action=state.info["last_last_action"],
+        )
+        terms = self._get_reward_terms(data, action, reward_info, gravity, local_linear_velocity, local_angular_velocity, wheel_contact, nonwheel_collision)
         done = self._get_termination(data, gravity, nonwheel_collision).astype(jp.float32)
         reward = sum(terms.values()) + jp.where(done > 0, -10.0, 0.0)
         metrics = dict(state.metrics)

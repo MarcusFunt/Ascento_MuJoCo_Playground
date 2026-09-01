@@ -39,6 +39,9 @@ def base_terms(data, action, info, gravity, local_linear_velocity, local_angular
     action_smooth = -0.007 * jp.sum(
         jp.square(action - 2.0 * info["last_action"] + info["last_last_action"])
     )
+    # The rate terms prevent jitter; this term keeps a quiet equilibrium from
+    # being rewarded for applying a constant but unnecessary torque.
+    action_magnitude = -0.002 * jp.mean(jp.square(action))
     lateral_drift = -0.05 * jp.square(local_linear_velocity[1])
     vertical_velocity = -0.05 * jp.square(local_linear_velocity[2])
     angular_velocity = -0.03 * jp.sum(jp.square(local_angular_velocity[:2]))
@@ -56,6 +59,7 @@ def base_terms(data, action, info, gravity, local_linear_velocity, local_angular
         "stable": 0.20 * stable,
         "action_rate": action_rate,
         "action_smooth": action_smooth,
+        "action_magnitude": action_magnitude,
         "lateral_drift": lateral_drift,
         "vertical_velocity": vertical_velocity,
         "angular_velocity": angular_velocity,

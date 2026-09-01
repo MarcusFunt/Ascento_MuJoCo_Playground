@@ -25,7 +25,7 @@
           <geom size="0.045 0.015 0.125" pos="0 0.02 -0.125" type="box" conaffinity="2" rgba="0.18 0.3 0.48 1"/>
           <body name="left_wheel" pos="0 0.075 -0.25">
             <inertial pos="0 0 0" quat="0.706743 -0.0227194 -0.0227063 0.706741" mass="1.712" diaginertia="0.07635 0.0389109 0.0386891"/>
-            <joint name="left_wheel_joint" actuatorfrcrange="-8 8" frictionloss="0.2" axis="0 1 0"/>
+            <joint name="left_wheel_joint" actuatorfrcrange="-40 40" frictionloss="0.2" axis="0 1 0"/>
             <geom size="0.25 0.0025" quat="0.707107 0.707107 0 0" type="cylinder" conaffinity="2" condim="6" friction="0.8 0.02 0.002" solref="0.006" solimp="0.9 0.97" rgba="0.18 0.3 0.48 1"/>
             <geom size="0.22 0.03" quat="0.707107 0.707107 0 0" type="cylinder" conaffinity="2" condim="6" friction="0.8 0.02 0.002" solref="0.006" solimp="0.9 0.97" rgba="0.18 0.3 0.48 1"/>
           </body>
@@ -45,7 +45,7 @@
           <geom size="0.045 0.015 0.125" pos="0 0.02 -0.125" type="box" conaffinity="2" rgba="0.18 0.3 0.48 1"/>
           <body name="right_wheel" pos="0 0.075 -0.25">
             <inertial pos="0 0 0" quat="0.706743 -0.0227194 -0.0227063 0.706741" mass="1.712" diaginertia="0.07635 0.0389109 0.0386891"/>
-            <joint name="right_wheel_joint" actuatorfrcrange="-8 8" frictionloss="0.2" axis="0 -1 0"/>
+            <joint name="right_wheel_joint" actuatorfrcrange="-40 40" frictionloss="0.2" axis="0 -1 0"/>
             <geom size="0.25 0.0025" quat="0.707107 0.707107 0 0" type="cylinder" conaffinity="2" condim="6" friction="0.8 0.02 0.002" solref="0.006" solimp="0.9 0.97" rgba="0.18 0.3 0.48 1"/>
             <geom size="0.22 0.03" quat="0.707107 0.707107 0 0" type="cylinder" conaffinity="2" condim="6" friction="0.8 0.02 0.002" solref="0.006" solimp="0.9 0.97" rgba="0.18 0.3 0.48 1"/>
           </body>
@@ -57,9 +57,9 @@
   <actuator>
     <general name="left_hip_motor" joint="left_hip" ctrlrange="-40 40" ctrllimited="true" forcelimited="true" forcerange="-40 40"/>
     <general name="left_knee_motor" joint="left_knee" ctrlrange="-40 40" ctrllimited="true" forcelimited="true" forcerange="-40 40"/>
-    <general name="left_wheel_joint_motor" joint="left_wheel_joint" ctrlrange="-8 8" ctrllimited="true" forcelimited="true" forcerange="-8 8"/>
+    <general name="left_wheel_joint_motor" joint="left_wheel_joint" ctrlrange="-40 40" ctrllimited="true" forcelimited="true" forcerange="-40 40"/>
     <general name="right_hip_motor" joint="right_hip" ctrlrange="-40 40" ctrllimited="true" forcelimited="true" forcerange="-40 40"/>
     <general name="right_knee_motor" joint="right_knee" ctrlrange="-40 40" ctrllimited="true" forcelimited="true" forcerange="-40 40"/>
-    <general name="right_wheel_joint_motor" joint="right_wheel_joint" ctrlrange="-8 8" ctrllimited="true" forcelimited="true" forcerange="-8 8"/>
+    <general name="right_wheel_joint_motor" joint="right_wheel_joint" ctrlrange="-40 40" ctrllimited="true" forcelimited="true" forcerange="-40 40"/>
   </actuator>
 </mujoco>

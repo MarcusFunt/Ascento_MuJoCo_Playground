@@ -72,7 +72,7 @@ def main():
         raise RuntimeError(f"CUDA requested but JAX selected {backend}")
     env, stage = build_environment(args.stage, args.episode_length)
     train_env = wrapper.wrap_for_brax_training(env, episode_length=args.episode_length, action_repeat=1, full_reset=True)
-    ppo_kwargs = default_ppo_kwargs(args.smoke)
+    ppo_kwargs = default_ppo_kwargs(stage, args.smoke)
     for name in ("batch_size", "num_minibatches", "unroll_length"):
         value = getattr(args, name)
         if value is not None:
@@ -145,12 +145,15 @@ def main():
         num_envs=args.num_envs,
         episode_length=args.episode_length,
         action_repeat=1,
-        network_factory=network_factory(hidden),
+        network_factory=network_factory(hidden, stage.initial_noise_std),
         seed=args.seed,
-        # Brax invokes progress_fn once per training epoch.  Evaluations remain
-        # disabled; num_evals only partitions this finite PPO run for telemetry.
+        # Keep PPO loss telemetry, but also run deterministic episodes so an
+        # apparently converged optimizer cannot mask repeated physical falls.
         num_evals=args.telemetry_intervals + 1,
-        run_evals=False,
+        run_evals=True,
+        num_eval_envs=64,
+        deterministic_eval=True,
+        eval_env=train_env,
         progress_fn=progress,
         restore_params=restore_params,
         restore_checkpoint_path=str(args.resume_checkpoint) if args.resume_checkpoint else None,
@@ -176,6 +179,8 @@ def main():
         "num_envs": args.num_envs,
         "seed": args.seed,
         "network_hidden_layer_sizes": list(hidden),
+        "initial_noise_std": stage.initial_noise_std,
+        "entropy_cost": stage.entropy_cost,
         "metrics": {key: float(value) for key, value in metrics.items() if hasattr(value, "item")},
     }
     (args.output / "training_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

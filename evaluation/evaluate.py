@@ -20,6 +20,7 @@ import numpy as np
 from brax.training.acme import running_statistics
 from brax.training.agents.ppo import networks
 
+from training.bounded_distribution import BoundedNormalTanhDistribution
 from training.ppo_config import build_environment
 
 
@@ -38,7 +39,8 @@ def load_policy(artifact: Path, observation_size: int, action_size: int):
         value_hidden_layer_sizes=hidden,
         policy_obs_key="state",
         value_obs_key="state",
-    )
+        init_noise_std=float(manifest.get("initial_noise_std", 0.10)),
+    ).replace(parametric_action_distribution=BoundedNormalTanhDistribution(action_size))
     return networks.make_inference_fn(net)(params, deterministic=True), manifest
 
 

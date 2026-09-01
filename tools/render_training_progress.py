@@ -11,8 +11,10 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("MUJOCO_GL", "egl")
-os.environ.setdefault("ASCENTO_JAX_PLATFORM", "cpu")
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
+# Do not force a different MJX backend from the trainer.  CPU and CUDA can
+# diverge around contact-rich trajectories, making a CPU-only preview a poor
+# visual verification of a CUDA-trained policy.  Callers that need CPU can
+# still set JAX_PLATFORMS=cpu explicitly before starting this tool.
 
 import jax
 import imageio.v2 as imageio
@@ -26,7 +28,9 @@ from training.bounded_distribution import BoundedNormalTanhDistribution
 from training.ppo_config import build_environment
 
 
-def load_checkpoint_policy(checkpoint_path: Path, env, hidden_sizes: tuple[int, ...]):
+def load_checkpoint_policy(
+    checkpoint_path: Path, env, hidden_sizes: tuple[int, ...], initial_noise_std: float
+):
     """Builds the exact deterministic policy architecture used by training."""
     params = checkpoint.load(str(checkpoint_path.resolve()))
     net = networks.make_ppo_networks(
@@ -37,6 +41,7 @@ def load_checkpoint_policy(checkpoint_path: Path, env, hidden_sizes: tuple[int, 
         value_hidden_layer_sizes=hidden_sizes,
         policy_obs_key="state",
         value_obs_key="state",
+        init_noise_std=initial_noise_std,
     ).replace(parametric_action_distribution=BoundedNormalTanhDistribution(env.action_size))
     return networks.make_inference_fn(net)(params, deterministic=True)
 
@@ -57,14 +62,14 @@ def render_preview(env, policy, seed: int, output: Path, steps: int):
     camera = mujoco.MjvCamera()
     mujoco.mjv_defaultFreeCamera(env.mj_model, camera)
     camera.azimuth, camera.elevation, camera.distance = 135, -15, 1.65
-    data, frames, returns, done_steps = mujoco.MjData(env.mj_model), [], 0.0, 0
+    data, frames, returns, terminated = mujoco.MjData(env.mj_model), [], 0.0, False
     heights, gravity_z, max_abs_qvel, action_saturation = [], [], [], []
     sample_every = max(1, steps // 12)
     try:
         for index in range(steps):
-            state = step(state, action_fn(state.obs))
+            action = action_fn(state.obs)
+            state = step(state, action)
             returns += float(state.reward)
-            done_steps += int(state.done)
             heights.append(float(state.metrics["metric/body_height"]))
             gravity_z.append(float(state.metrics["metric/gravity_z"]))
             max_abs_qvel.append(float(state.metrics["metric/max_abs_qvel"]))
@@ -77,6 +82,9 @@ def render_preview(env, policy, seed: int, output: Path, steps: int):
                 camera.lookat[2] += 0.12
                 renderer.update_scene(data, camera=camera)
                 frames.append(renderer.render())
+            if bool(state.done):
+                terminated = True
+                break
     finally:
         renderer.close()
     rows = [np.concatenate(frames[index:index + 4], axis=1) for index in range(0, len(frames), 4)]
@@ -86,7 +94,8 @@ def render_preview(env, policy, seed: int, output: Path, steps: int):
         "seed": seed,
         "path": str(output.resolve()),
         "return": returns,
-        "done_steps": done_steps,
+        "terminated": terminated,
+        "survival_steps": len(heights),
         "mean_height": float(np.mean(heights)),
         "min_height": float(np.min(heights)),
         "mean_gravity_z": float(np.mean(gravity_z)),
@@ -106,18 +115,30 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--poll-seconds", type=float, default=20.0)
     parser.add_argument("--hidden-sizes", default="128,128")
+    parser.add_argument("--initial-noise-std", type=float)
+    parser.add_argument(
+        "--latest-only",
+        action="store_true",
+        help="render only the newest available checkpoint (useful for final inspection)",
+    )
     args = parser.parse_args()
     hidden_sizes = tuple(int(value) for value in args.hidden_sizes.split(",") if value)
-    env, _ = build_environment(args.stage, episode_length=args.steps)
+    env, stage = build_environment(args.stage, episode_length=args.steps)
+    initial_noise_std = args.initial_noise_std or stage.initial_noise_std
     args.output_dir.mkdir(parents=True, exist_ok=True)
     seen: set[str] = set()
     manifest_path = args.output_dir / "progress_renders.jsonl"
     while True:
-        for checkpoint_path in numeric_checkpoints(args.checkpoint_dir):
+        checkpoints = numeric_checkpoints(args.checkpoint_dir)
+        if args.latest_only and checkpoints:
+            checkpoints = checkpoints[-1:]
+        for checkpoint_path in checkpoints:
             if checkpoint_path.name in seen:
                 continue
             try:
-                policy = load_checkpoint_policy(checkpoint_path, env, hidden_sizes)
+                policy = load_checkpoint_policy(
+                    checkpoint_path, env, hidden_sizes, initial_noise_std
+                )
                 output = args.output_dir / f"{args.stage}_step_{int(checkpoint_path.name):09d}.png"
                 report = render_preview(env, policy, args.seed, output, args.steps)
                 record = {"checkpoint": str(checkpoint_path.resolve()), "step": int(checkpoint_path.name), **report}

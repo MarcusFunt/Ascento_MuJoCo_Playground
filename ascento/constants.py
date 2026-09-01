@@ -73,7 +73,10 @@ class ActuatorSpec:
     torque_time_constant_s: float
 
 LEG_ACTUATOR = ActuatorSpec(40.0, 15.0, 12.0, 4.0, 0.004)
-WHEEL_ACTUATOR = ActuatorSpec(8.0, 5.0, 20.0, 10.0, 0.003)
+# The simulation intentionally gives every learned direct-effort channel the
+# same requested peak authority.  Continuous wheel rating/speed remain wheel
+# specific; only the transient peak is raised for this simulation task.
+WHEEL_ACTUATOR = ActuatorSpec(40.0, 5.0, 20.0, 10.0, 0.003)
 ACTUATOR_SPECS = (LEG_ACTUATOR, LEG_ACTUATOR, WHEEL_ACTUATOR,
                   LEG_ACTUATOR, LEG_ACTUATOR, WHEEL_ACTUATOR)
 PEAK_TORQUE = np.array([s.peak_torque_nm for s in ACTUATOR_SPECS], dtype=np.float32)
