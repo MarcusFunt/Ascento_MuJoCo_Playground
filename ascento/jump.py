@@ -49,12 +49,15 @@ def update_jump_info(info: dict, data, wheel_contact, gravity, wheel_height):
     """Advances phase/event state using contacts, not a reference controller."""
     phase = info["jump_phase"]
     steps = info["phase_steps"] + 1
-    both_contact = jp.all(wheel_contact)
-    no_contact_steps = jp.where(both_contact, 0, info["no_contact_steps"] + 1)
-    landing_steps = jp.where(both_contact, info["landing_contact_steps"] + 1, 0)
+    all_contact = jp.all(wheel_contact)
+    any_contact = jp.any(wheel_contact)
+    # Flight requires both wheels to be clear.  A one-wheel lift must not
+    # count as airborne, while landing still requires both wheels down.
+    no_contact_steps = jp.where(any_contact, 0, info["no_contact_steps"] + 1)
+    landing_steps = jp.where(all_contact, info["landing_contact_steps"] + 1, 0)
     requested = info["command"][COMMAND_JUMP_TRIGGER] > 0.5
     upright = gravity[2] < -0.80
-    stable = upright & both_contact & (data.qpos[2] > 0.55) & (jp.linalg.norm(data.qvel[:6]) < 1.5)
+    stable = upright & all_contact & (data.qpos[2] > 0.55) & (jp.linalg.norm(data.qvel[:6]) < 1.5)
     recovery_steps = jp.where(stable, info["recovery_stable_steps"] + 1, 0)
 
     to_crouch = (phase == PHASE_IDLE) & requested

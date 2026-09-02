@@ -170,7 +170,9 @@ class AscentoBaseEnv(mjx_env.MjxEnv):
         body_to_world = data.xmat[self._base_body_id]
         gravity = body_to_world.T @ jp.asarray([0.0, 0.0, -1.0])
         local_linear_velocity = body_to_world.T @ data.qvel[:3]
-        local_angular_velocity = body_to_world.T @ data.qvel[3:6]
+        # MuJoCo free-joint angular velocity is already expressed in the
+        # local body frame; only the translational velocity is world-frame.
+        local_angular_velocity = data.qvel[3:6]
         wheel_contact, wheel_force = observations.wheel_contacts_and_forces(data, self._wheel_body_ids)
         nonwheel_collision = observations.non_wheel_contact(data, self._non_wheel_body_ids)
         return gravity, local_linear_velocity, local_angular_velocity, wheel_contact, wheel_force, nonwheel_collision
