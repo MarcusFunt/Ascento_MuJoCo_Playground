@@ -47,6 +47,18 @@ def test_manifest_marks_run_finished(tmp_path):
     assert summary["stage"] == "recovery"
 
 
+def test_status_stage_is_available_before_first_telemetry(tmp_path):
+    run = tmp_path / "startup_run"
+    run.mkdir()
+    (run / "run_status.json").write_text(
+        json.dumps({"state": "running", "stage": "balance"}), encoding="utf-8"
+    )
+
+    summary = summarize_run(run, tmp_path)
+
+    assert summary["stage"] == "balance"
+
+
 def test_explicit_error_status_wins(tmp_path):
     run = tmp_path / "failed"
     run.mkdir()

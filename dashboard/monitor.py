@@ -123,7 +123,12 @@ def run_modified_time(run_dir: Path) -> float:
     return max(mtimes, default=run_dir.stat().st_mtime if run_dir.exists() else 0.0)
 
 
-def _stage_name(run_dir: Path, telemetry: dict[str, Any] | None, manifest: dict[str, Any] | None) -> str:
+def _stage_name(
+    run_dir: Path,
+    telemetry: dict[str, Any] | None,
+    manifest: dict[str, Any] | None,
+    status: dict[str, Any] | None = None,
+) -> str:
     if telemetry and telemetry.get("stage"):
         return str(telemetry["stage"])
     if manifest:
@@ -132,6 +137,8 @@ def _stage_name(run_dir: Path, telemetry: dict[str, Any] | None, manifest: dict[
             return str(stage["name"])
         if isinstance(stage, str):
             return stage
+    if status and status.get("stage"):
+        return str(status["stage"])
     return run_dir.name
 
 
@@ -184,7 +191,7 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
     return {
         "id": sha1(relative.encode("utf-8")).hexdigest()[:12],
         "name": relative,
-        "stage": _stage_name(run_dir, telemetry, manifest),
+        "stage": _stage_name(run_dir, telemetry, manifest, status),
         "state": state,
         "modified_at": run_modified_time(run_dir),
         "status": status,

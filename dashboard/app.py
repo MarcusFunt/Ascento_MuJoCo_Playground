@@ -132,6 +132,12 @@ def render_image(run_id: str):
 @app.post("/api/runs/{run_id}/render-latest", status_code=202)
 def render_latest(run_id: str):
     ref = _run(run_id)
+    summary = summarize_run(ref.path, ARTIFACT_ROOT)
+    if summary["state"] in {"running", "starting"}:
+        raise HTTPException(
+            status_code=409,
+            detail="rendering is disabled while training is running",
+        )
     checkpoints = numeric_checkpoints(ref.path / "checkpoint")
     if not checkpoints:
         raise HTTPException(status_code=409, detail="this run has no numeric checkpoints")
@@ -140,7 +146,6 @@ def render_latest(run_id: str):
     if existing is not None and existing.poll() is None:
         return {"state": "already_running", "pid": existing.pid}
 
-    summary = summarize_run(ref.path, ARTIFACT_ROOT)
     output_dir = ref.path / "renders"
     output_dir.mkdir(parents=True, exist_ok=True)
     command = [

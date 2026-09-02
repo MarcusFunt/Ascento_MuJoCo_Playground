@@ -10,6 +10,15 @@ import {
 } from 'recharts'
 
 const POLL_MS = 5000
+const METRIC_PRIORITY = [
+  'eval/episode_reward',
+  'training/total_loss',
+  'training/invalid_update',
+  'eval/avg_episode_length',
+  'training/policy_loss',
+  'training/v_loss',
+  'training/entropy_loss',
+]
 
 function fmtNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—'
@@ -151,12 +160,16 @@ function App() {
 
   const metricKeys = useMemo(() => {
     const keys = [...new Set(telemetry.flatMap((record) => Object.keys(record.metrics || {})))]
-    const preferred = keys.filter((key) => /reward|episode|loss|entropy|eval|surviv|fall/i.test(key))
-    return [...preferred, ...keys.filter((key) => !preferred.includes(key))].slice(0, 4)
+    const preferred = METRIC_PRIORITY.filter((key) => keys.includes(key))
+    const fallback = keys.filter((key) => !preferred.includes(key) && /reward|episode|loss|entropy|eval|surviv|fall/i.test(key))
+    return [...preferred, ...fallback, ...keys.filter((key) => !preferred.includes(key) && !fallback.includes(key))].slice(0, 4)
   }, [telemetry])
 
   const progress = detail?.telemetry || {}
   const percent = Number(progress.percent_complete || 0)
+  const stage = progress.stage || detail?.status?.stage || detail?.stage
+  const trainingActive = detail?.state === 'running' || detail?.state === 'starting'
+  const renderDisabled = !detail?.has_checkpoint || trainingActive || renderState === 'running' || renderState === 'starting'
 
   async function requestRender() {
     if (!selectedId) return
@@ -194,7 +207,7 @@ function App() {
       {detail && (
         <>
           <section className="stats-grid">
-            <div className="stat-card"><span>Stage</span><strong>{detail.stage}</strong></div>
+            <div className="stat-card"><span>Stage</span><strong>{stage}</strong></div>
             <div className="stat-card"><span>Progress</span><strong>{fmtNumber(percent, 2)}%</strong></div>
             <div className="stat-card"><span>Steps</span><strong>{fmtNumber(progress.completed_steps, 0)}</strong><small>/ {fmtNumber(progress.total_steps, 0)}</small></div>
             <div className="stat-card"><span>Throughput</span><strong>{fmtNumber(progress.steps_per_second, 0)}</strong><small>steps/s</small></div>
@@ -218,7 +231,11 @@ function App() {
               <section className="panel render-panel">
                 <div className="panel-title-row">
                   <div className="panel-title">Latest rollout</div>
-                  <button onClick={requestRender} disabled={!detail.has_checkpoint || renderState === 'running' || renderState === 'starting'}>
+                  <button
+                    onClick={requestRender}
+                    disabled={renderDisabled}
+                    title={trainingActive ? 'Rendering is disabled while training is running to protect GPU throughput.' : undefined}
+                  >
                     {renderState === 'running' || renderState === 'starting' ? 'Rendering…' : 'Render latest'}
                   </button>
                 </div>
