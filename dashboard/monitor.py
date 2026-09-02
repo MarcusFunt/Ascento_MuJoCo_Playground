@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass
 from hashlib import sha1
@@ -19,6 +20,11 @@ RUN_MARKERS = (
   "run_status.json",
   "training_manifest.json",
 )
+_TENSORBOARD_CACHE: dict[Path, tuple[tuple[int, int], Any]] = {}
+_TENSORBOARD_RECORD_CACHE: dict[
+    Path, tuple[tuple[tuple[str, int, int], ...], int | None, list[dict[str, Any]]]
+] = {}
+_TENSORBOARD_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -85,28 +91,58 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
     except ImportError:
         return []
 
-    by_step: dict[int, dict[str, Any]] = {}
+    signatures = []
     for event_file in event_files:
         try:
-            accumulator = EventAccumulator(str(event_file), size_guidance={"scalars": 20_000})
-            accumulator.Reload()
-        except (KeyError, OSError, RuntimeError, ValueError):
+            stat = event_file.stat()
+        except OSError:
             continue
-        for tag in accumulator.Tags().get("scalars", []):
-            try:
-                events = accumulator.Scalars(tag)
-            except (KeyError, RuntimeError):
-                continue
-            for event in events:
-                record = by_step.setdefault(
-                    int(event.step),
-                    {"completed_steps": int(event.step), "metrics": {}},
-                )
-                record["metrics"][tag] = float(event.value)
-                record["wall_time"] = float(event.wall_time)
-
-    records = [by_step[step] for step in sorted(by_step)]
+        signatures.append((str(event_file), stat.st_mtime_ns, stat.st_size))
+    signature_key = tuple(signatures)
     total = _training_limit(run_dir)
+
+    with _TENSORBOARD_LOCK:
+        cached_records = _TENSORBOARD_RECORD_CACHE.get(run_dir)
+        if cached_records and cached_records[:2] == (signature_key, total):
+            records = cached_records[2]
+            return records[-limit:] if limit is not None else records
+
+        by_step: dict[int, dict[str, Any]] = {}
+        active_files = set(event_files)
+        for cached_file in set(_TENSORBOARD_CACHE) - active_files:
+            del _TENSORBOARD_CACHE[cached_file]
+        for event_file in event_files:
+            try:
+                stat = event_file.stat()
+                signature = (stat.st_mtime_ns, stat.st_size)
+                cached = _TENSORBOARD_CACHE.get(event_file)
+                if cached is None:
+                    accumulator = EventAccumulator(
+                        str(event_file), size_guidance={"scalars": 20_000}
+                    )
+                    accumulator.Reload()
+                    _TENSORBOARD_CACHE[event_file] = (signature, accumulator)
+                else:
+                    cached_signature, accumulator = cached
+                    if cached_signature != signature:
+                        accumulator.Reload()
+                        _TENSORBOARD_CACHE[event_file] = (signature, accumulator)
+            except (KeyError, OSError, RuntimeError, ValueError):
+                continue
+            for tag in accumulator.Tags().get("scalars", []):
+                try:
+                    events = accumulator.Scalars(tag)
+                except (KeyError, RuntimeError):
+                    continue
+                for event in events:
+                    record = by_step.setdefault(
+                        int(event.step),
+                        {"completed_steps": int(event.step), "metrics": {}},
+                    )
+                    record["metrics"][tag] = float(event.value)
+                    record["wall_time"] = float(event.wall_time)
+
+        records = [by_step[step] for step in sorted(by_step)]
     if total is not None:
         for record in records:
             completed = record["completed_steps"]
@@ -116,6 +152,8 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
             if fps is not None and fps > 0:
                 record["steps_per_second"] = fps
                 record["eta_seconds"] = max(0.0, (total - completed) / fps)
+    with _TENSORBOARD_LOCK:
+        _TENSORBOARD_RECORD_CACHE[run_dir] = (signature_key, total, records)
     return records[-limit:] if limit is not None else records
 
 
