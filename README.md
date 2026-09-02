@@ -18,14 +18,33 @@ PPO policy
 There are no PD targets, LQR, VMC, wheel-velocity PI loops, joint-position
 targets, or joint-velocity targets between the learned policy and the motors.
 
-## Current scope
+## Implemented task framework
 
-The tracked implementation provides the MJX physics model, direct-torque
-actuator model, and a nominal upright-balance PPO smoke task. Recovery,
-commanded locomotion, crouching, jumping, flight control, landing, and the
-sprite-export workflow are planned but not implemented yet. See
-[`PROJECT_GOALS_AND_ASSUMPTIONS.md`](PROJECT_GOALS_AND_ASSUMPTIONS.md) for the
-full target and [`PHYSICS_CHANGES.md`](PHYSICS_CHANGES.md) for physics choices.
+Every stage uses the same six actions and the same 49-value observation. The
+observation reserves forward-velocity, yaw-rate, height, and jump commands;
+wheel contact/force, applied torque, prior action, and six jump-phase channels
+are present from the first balance stage. Checkpoints therefore transfer without
+reshaping the actor or critic.
+
+Implemented environments:
+
+- `AscentoBalance`: near-upright balance and command tracking;
+- `AscentoRecovery`: broad but mechanically reachable tilted/velocity resets;
+- `AscentoJump`: an event-tracked six-phase jump task (`IDLE`, `CROUCH`,
+  `THRUST`, `FLIGHT`, `LANDING`, `RECOVERY`).
+
+The phase tracker supplies observation, reward gating, and metrics only. It
+does not generate motor commands. The policy remains the sole controller.
+
+The staged sequence is `balance → flat_commands → recovery → jump_flat →
+high_landing → clearance → moving_jump → unified_fine_tune`. Advancement uses
+deterministic physical metrics, not a single total-reward value. The framework
+is implemented, but each stage still needs its own training run and acceptance
+results before it can be called a learned capability.
+
+The project also includes deterministic evaluation, NPZ trajectory export, and
+an open-loop direct-torque jump feasibility sweep. Blender/rendering integration
+is deliberately not part of this implementation.
 
 ## Setup
 
@@ -53,13 +72,32 @@ python test_guard2_physics.py
 # Compile and smoke-test the MuJoCo model
 python verify_guard2_patch.py
 
-# Train the current nominal-balance smoke task
-ASCENTO_JAX_PLATFORM=cuda python -m training.train
+# Run the full implementation test suite
+ASCENTO_JAX_PLATFORM=cpu pytest -q tests
 
-# Evaluate a saved PPO artifact and optionally render an MP4
-ASCENTO_JAX_PLATFORM=cuda python evaluation/benchmark_balance.py \
-  --artifact training/artifacts_cuda_smoke \
-  --save-mp4 training/artifacts_cuda_smoke/best_balance.mp4
+# Train a direct-torque stage (use --smoke for a short validation run)
+ASCENTO_JAX_PLATFORM=cuda python -m training.train \
+  --stage balance --output training/artifacts/balance
+
+# Train sequential stages; later stages transfer the previous policy only
+ASCENTO_JAX_PLATFORM=cuda python -m training.staged_train
+
+# Evaluate an artifact deterministically on fixed seeds
+ASCENTO_JAX_PLATFORM=cuda python -m evaluation.evaluate \
+  --stage balance --artifact training/artifacts/balance
+
+# Check whether the physical plant can leave the ground before PPO jump training
+python tools/jump_open_loop_test.py
+
+# Export a deterministic trajectory for the future animation pipeline
+ASCENTO_JAX_PLATFORM=cuda python tools/export_motion.py \
+  --stage balance --artifact training/artifacts/balance \
+  --output training/artifacts/balance/motion.npz
+
+# Render deterministic MuJoCo rollouts without Blender
+MUJOCO_GL=egl ASCENTO_JAX_PLATFORM=cuda python tools/render_rollout.py \
+  --stage balance --artifact training/artifacts/balance \
+  --output-dir tools/rendered_rollouts
 ```
 
 Generated environments, videos, policy exports, and training artifacts are
@@ -68,10 +106,13 @@ any artifact you decide to publish separately.
 
 ## Repository layout
 
-- `ascento/`: canonical MJX environment and actuator implementation.
+- `ascento/`: canonical MJX environments, actuator, commands, observations,
+  rewards, jump state machine, and curriculum definitions.
 - `model/`: static Guard 2.0-like MJCF used by MJX.
-- `training/`: current PPO training entry point.
-- `evaluation/` and `verification/`: rollout and actuator/model checks.
+- `training/`: stage-configurable Brax PPO entry point and orchestrator.
+- `evaluation/`: deterministic physical-metric benchmarks.
+- `tools/`: non-rendering motion export and jump feasibility diagnostics.
+- `tests/`: model, JIT, actuator, contact, reward, and jump-state checks.
 - `mujoco_playground/`: vendored MuJoCo Playground source used by this project.
 
 The root-level Torch/PD tuning scripts are historical experiments. They are not

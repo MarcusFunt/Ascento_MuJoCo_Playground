@@ -6,7 +6,7 @@ from guard2_physics import Guard2ActuatorModel, apply_torque
 
 STANCE=np.array([-3.14,-3.14,0,-3.14,-3.14,0],dtype=np.float32)
 FLOOR=mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_GEOM,'floor')
-WHEEL_BODIES={mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_BODY,'ascento/wheel_left'),mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_BODY,'ascento/wheel_right')}
+WHEEL_BODIES={mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_BODY,'left_wheel'),mujoco.mj_name2id(model,mujoco.mjtObj.mjOBJ_BODY,'right_wheel')}
 
 class AscentoBalanceEnv:
  def __init__(self):
