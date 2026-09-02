@@ -1,25 +1,23 @@
 """Filesystem-backed monitoring helpers for Ascento training runs."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from hashlib import sha1
 import json
-import os
-from pathlib import Path
 import re
 import time
-from typing import Any, Iterable
-
+from dataclasses import dataclass
+from hashlib import sha1
+from pathlib import Path
+from typing import Any
 
 ERROR_PATTERN = re.compile(
     r"(traceback|\berror\b|exception|floatingpointerror|non-finite|cuda.*fail|out of memory|oom)",
     re.IGNORECASE,
 )
 RUN_MARKERS = (
-    "telemetry.jsonl",
-    "training.log",
-    "run_status.json",
-    "training_manifest.json",
+  "telemetry.jsonl",
+  "training.log",
+  "run_status.json",
+  "training_manifest.json",
 )
 
 
@@ -96,6 +94,9 @@ def discover_runs(root: Path) -> list[RunRef]:
     for marker in RUN_MARKERS:
         for path in root.rglob(marker):
             candidates.add(path.parent.resolve())
+    for pattern in ("events.out.tfevents.*", "model_*.pt"):
+        for path in root.rglob(pattern):
+            candidates.add(path.parent.resolve())
     refs = []
     for path in candidates:
         if not _inside(path, root):
@@ -120,6 +121,12 @@ def run_modified_time(run_dir: Path) -> float:
             mtimes.append(path.stat().st_mtime)
         except OSError:
             pass
+    for pattern in ("events.out.tfevents.*", "model_*.pt"):
+        for path in run_dir.glob(pattern):
+            try:
+                mtimes.append(path.stat().st_mtime)
+            except OSError:
+                pass
     return max(mtimes, default=run_dir.stat().st_mtime if run_dir.exists() else 0.0)
 
 
@@ -199,7 +206,7 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
         "errors": errors,
         "latest_render": latest_render(run_dir),
         "has_log": (run_dir / "training.log").is_file(),
-        "has_checkpoint": (run_dir / "checkpoint").is_dir(),
+        "has_checkpoint": (run_dir / "checkpoint").is_dir() or bool(list(run_dir.glob("model_*.pt"))),
     }
 
 

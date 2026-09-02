@@ -4,14 +4,16 @@ on:
   pull_request:
     paths:
       - 'dashboard/**'
-      - 'tests/test_dashboard_monitor.py'
-      - 'requirements-dashboard.txt'
+      - 'tests_mjlab/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/dashboard-ci.yml'
   push:
     paths:
       - 'dashboard/**'
-      - 'tests/test_dashboard_monitor.py'
-      - 'requirements-dashboard.txt'
+      - 'tests_mjlab/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/dashboard-ci.yml'
 
 jobs:
@@ -23,8 +25,8 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install --upgrade pip
-      - run: pip install -r requirements-dashboard.txt -r requirements-dev.txt
-      - run: python -m pytest -q tests/test_dashboard_monitor.py
+      - run: pip install .
+      - run: python -m pytest -q tests_mjlab
 
   frontend:
     runs-on: ubuntu-latest

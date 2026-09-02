@@ -1,2 +1,0 @@
-# Development and smoke-test tools. Install after requirements-cuda.txt.
-pytest==8.4.1
