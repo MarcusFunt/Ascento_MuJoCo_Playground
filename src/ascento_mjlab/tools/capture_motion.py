@@ -12,6 +12,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.managers.recorder_manager import RecorderTerm, RecorderTermCfg
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
+from mjlab.utils.wrappers import VideoRecorder
 
 import ascento_mjlab.tasks  # noqa: F401
 
@@ -55,6 +56,7 @@ def main() -> None:
   parser.add_argument("--takes", type=int, default=1)
   parser.add_argument("--steps", type=int, default=1000)
   parser.add_argument("--output-dir", type=Path, default=Path("captures"))
+  parser.add_argument("--video-dir", type=Path, default=None, help="Optional MP4 output directory")
   parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
   args = parser.parse_args()
   if args.takes < 1 or args.steps < 1:
@@ -67,7 +69,23 @@ def main() -> None:
     cfg.scene.num_envs = 1
     cfg.seed = take
     cfg.recorders = {"motion": RecorderTermCfg(func=MotionRecorder, params={})}
-    raw_env = ManagerBasedRlEnv(cfg, device=args.device)
+    base_env = ManagerBasedRlEnv(
+      cfg,
+      device=args.device,
+      render_mode="rgb_array" if args.video_dir is not None else None,
+    )
+    raw_env = (
+      VideoRecorder(
+        base_env,
+        video_folder=args.video_dir,
+        step_trigger=lambda step: step == 0,
+        video_length=args.steps,
+        name_prefix=f"take-{take:03d}",
+        disable_logger=True,
+      )
+      if args.video_dir is not None
+      else base_env
+    )
     env = RslRlVecEnvWrapper(raw_env, clip_actions=load_rl_cfg(args.task).clip_actions)
     if args.checkpoint is None:
       def policy(obs):
