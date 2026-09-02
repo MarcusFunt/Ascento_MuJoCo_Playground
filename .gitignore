@@ -19,6 +19,7 @@ dashboard/frontend/node_modules/
 dashboard/frontend/dist/
 
 # Generated training and evaluation output
+docker-data/
 training/artifacts*/
 training/runs/
 tools/jump_open_loop_results/
