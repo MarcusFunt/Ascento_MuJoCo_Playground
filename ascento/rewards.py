@@ -16,6 +16,7 @@ from .constants import (
     PHASE_RECOVERY,
     PHASE_THRUST,
     STANCE,
+    LEG_INDEX,
 )
 
 
@@ -33,7 +34,9 @@ def base_terms(data, action, info, gravity, local_linear_velocity, local_angular
     # signal before the orientation termination boundary is reached.
     upright_gate = gravity[2] < -0.80
     recovered_gate = upright_gate & (jp.abs(data.qpos[2] - command[COMMAND_HEIGHT]) < 0.10)
-    posture = jp.exp(-0.25 * jp.sum(jp.square(data.qpos[7:13] - STANCE))) * upright_gate
+    leg_q = data.qpos[7:13][jp.asarray(LEG_INDEX)]
+    leg_stance = jp.asarray(STANCE)[jp.asarray(LEG_INDEX)]
+    posture = jp.exp(-0.25 * jp.sum(jp.square(leg_q - leg_stance))) * upright_gate
     stable = jp.exp(-0.10 * jp.sum(jp.square(data.qvel[:6]))) * recovered_gate
     action_rate = -0.015 * jp.sum(jp.square(action - info["last_action"]))
     action_smooth = -0.007 * jp.sum(

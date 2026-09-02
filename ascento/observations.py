@@ -36,7 +36,9 @@ def bounded_kinematics(data: mjx.Data, body_to_world: jax.Array):
     receive values large enough to saturate its policy network.
     """
     linear_velocity = jp.clip(body_to_world.T @ data.qvel[:3] / 5.0, -3.0, 3.0)
-    angular_velocity = jp.clip(body_to_world.T @ data.qvel[3:6] / 10.0, -3.0, 3.0)
+    # Free-joint rotational velocity is body-local in MuJoCo.  Applying the
+    # base rotation here would transform it a second time.
+    angular_velocity = jp.clip(data.qvel[3:6] / 10.0, -3.0, 3.0)
     joint_velocity = jp.clip(data.qvel[6:12] / 20.0, -3.0, 3.0)
     return linear_velocity, angular_velocity, joint_velocity
 

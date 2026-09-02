@@ -53,6 +53,24 @@ def numeric_checkpoints(checkpoint_dir: Path):
     ) if checkpoint_dir.exists() else []
 
 
+def tile_frames(frames: list[np.ndarray], columns: int = 4) -> np.ndarray:
+    """Places rendered frames on a fixed-size canvas, including partial rows."""
+    if not frames:
+        raise ValueError("cannot build a preview grid with no frames")
+    if columns < 1:
+        raise ValueError("columns must be positive")
+
+    height, width, channels = frames[0].shape
+    if any(frame.shape != (height, width, channels) for frame in frames):
+        raise ValueError("all preview frames must have the same shape")
+    rows = (len(frames) + columns - 1) // columns
+    preview = np.zeros((rows * height, columns * width, channels), dtype=frames[0].dtype)
+    for index, frame in enumerate(frames):
+        row, column = divmod(index, columns)
+        preview[row * height:(row + 1) * height, column * width:(column + 1) * width] = frame
+    return preview
+
+
 def render_preview(env, policy, seed: int, output: Path, steps: int):
     """Writes a tiled PNG preview without spawning an ffmpeg subprocess."""
     reset, step = jax.jit(env.reset), jax.jit(env.step)
@@ -87,8 +105,7 @@ def render_preview(env, policy, seed: int, output: Path, steps: int):
                 break
     finally:
         renderer.close()
-    rows = [np.concatenate(frames[index:index + 4], axis=1) for index in range(0, len(frames), 4)]
-    preview = np.concatenate(rows, axis=0)
+    preview = tile_frames(frames)
     imageio.imwrite(output, preview)
     return {
         "seed": seed,
