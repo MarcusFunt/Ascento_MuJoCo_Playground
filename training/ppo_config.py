@@ -58,14 +58,15 @@ def network_factory(hidden_sizes=(512, 256, 128), initial_noise_std: float = 0.1
         base_policy = ppo_network.policy_network
         requested_std = min(max(float(initial_noise_std), 0.0201), 0.1999)
         scale_logit = math.log((requested_std - 0.02) / (0.20 - requested_std))
+        final_key = f"hidden_{len(hidden_sizes)}"
 
         def init_policy(key):
             params = base_policy.init(key)
-            final = params["params"]["hidden_2"]
+            final = params["params"][final_key]
             bias = jp.zeros_like(final["bias"])
             bias = bias.at[action_size:].set(scale_logit)
             final = dict(final, kernel=jp.zeros_like(final["kernel"]), bias=bias)
-            return dict(params, params=dict(params["params"], hidden_2=final))
+            return dict(params, params=dict(params["params"], **{final_key: final}))
 
         ppo_network = ppo_network.replace(
             policy_network=replace(ppo_network.policy_network, init=init_policy)
