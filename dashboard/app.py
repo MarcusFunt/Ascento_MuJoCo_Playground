@@ -16,6 +16,7 @@ from dashboard.monitor import (
     resolve_run,
     summarize_run,
     tail_lines,
+    training_log_path,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,13 +64,14 @@ def telemetry(run_id: str, limit: int = 2000):
 def logs(run_id: str, tail: int = 500):
     ref = _run(run_id)
     tail = max(1, min(tail, 5000))
-    return {"lines": [line.rstrip("\n") for line in tail_lines(ref.path / "training.log", tail)]}
+    log_path = training_log_path(ref.path, ARTIFACT_ROOT)
+    return {"lines": [line.rstrip("\n") for line in tail_lines(log_path, tail)]}
 
 
 @app.get("/api/runs/{run_id}/logs/stream")
 async def stream_logs(run_id: str, request: Request):
     ref = _run(run_id)
-    log_path = ref.path / "training.log"
+    log_path = training_log_path(ref.path, ARTIFACT_ROOT)
 
     async def event_stream():
         try:

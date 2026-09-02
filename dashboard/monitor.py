@@ -125,6 +125,19 @@ def load_training_records(run_dir: Path, limit: int | None = 2000) -> list[dict[
     return records if records else load_tensorboard_records(run_dir, limit=limit)
 
 
+def training_log_path(run_dir: Path, root: Path | None = None) -> Path:
+    """Find the run log, including launcher logs stored above the run directory."""
+    directories = [run_dir, *run_dir.parents]
+    for directory in directories:
+        if root is not None and not _inside(directory, root):
+            break
+        for filename in ("training.log", "train.log"):
+            path = directory / filename
+            if path.is_file():
+                return path
+    return run_dir / "training.log"
+
+
 def tail_lines(path: Path, count: int = 400) -> list[str]:
     if count <= 0 or not path.is_file():
         return []
@@ -247,7 +260,8 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
     telemetry = telemetry_records[-1] if telemetry_records else None
     manifest = load_json(run_dir / "training_manifest.json")
     status = load_json(run_dir / "run_status.json") or {}
-    errors = error_excerpt(run_dir / "training.log")
+    log_path = training_log_path(run_dir, root)
+    errors = error_excerpt(log_path)
 
     state = status.get("state")
     if not state:
@@ -273,7 +287,7 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
         "telemetry": telemetry,
         "errors": errors,
         "latest_render": latest_render(run_dir),
-        "has_log": (run_dir / "training.log").is_file(),
+        "has_log": log_path.is_file(),
         "has_checkpoint": (run_dir / "checkpoint").is_dir() or bool(list(run_dir.glob("model_*.pt"))),
     }
 
