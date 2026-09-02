@@ -1,0 +1,19 @@
+ARG BASE_IMAGE=ascento-dev:local
+FROM ${BASE_IMAGE}
+
+ARG GIT_COMMIT=unknown
+ARG DOCKER_IMAGE=unknown
+
+LABEL org.opencontainers.image.source-revision="$GIT_COMMIT" \
+      org.opencontainers.image.title="Ascento MuJoCo Playground snapshot" \
+      org.opencontainers.image.version="$DOCKER_IMAGE"
+
+ENV ASCENTO_BUILD_GIT_COMMIT=$GIT_COMMIT \
+    ASCENTO_DOCKER_IMAGE=$DOCKER_IMAGE \
+    ASCENTO_SOURCE_MODE=snapshot \
+    PYTHONPATH=/workspace
+
+WORKDIR /workspace
+COPY . /workspace
+
+CMD ["python", "-m", "training.train"]

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST="$ROOT/dashboard/frontend/dist"
+DIST="${ASCENTO_DASHBOARD_DIST:-$ROOT/dashboard/frontend/dist}"
 
 if [[ ! -f "$DIST/index.html" ]]; then
   echo "Dashboard frontend is not built." >&2
@@ -11,4 +11,6 @@ if [[ ! -f "$DIST/index.html" ]]; then
 fi
 
 cd "$ROOT"
-exec python -m uvicorn dashboard.app:app --host 127.0.0.1 --port "${ASCENTO_DASHBOARD_PORT:-8000}"
+exec python -m uvicorn dashboard.app:app \
+  --host "${ASCENTO_DASHBOARD_HOST:-127.0.0.1}" \
+  --port "${ASCENTO_DASHBOARD_PORT:-8000}"

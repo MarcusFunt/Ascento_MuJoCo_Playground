@@ -27,6 +27,7 @@ import jax.numpy as jp
 from brax.training.agents.ppo import train as ppo_train
 
 from mujoco_playground._src import wrapper
+from scripts.write_run_provenance import collect_provenance
 from training.ppo_config import build_environment, default_ppo_kwargs, network_factory, stage_manifest
 from training import safe_gradients
 from training import stable_ppo_loss
@@ -86,6 +87,20 @@ def main():
         with args.init_policy.open("rb") as handle:
             restore_params = pickle.load(handle)
     args.output.mkdir(parents=True, exist_ok=True)
+
+    training_arguments = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in vars(args).items()
+    }
+    provenance = collect_provenance(
+        Path(__file__).resolve().parents[1],
+        stage=stage.name,
+        training_arguments=training_arguments,
+    )
+    (args.output / "source_manifest.json").write_text(
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     telemetry_path = args.output / "telemetry.jsonl"
     started_at = time.perf_counter()
@@ -182,6 +197,7 @@ def main():
         "initial_noise_std": stage.initial_noise_std,
         "entropy_cost": stage.entropy_cost,
         "metrics": {key: float(value) for key, value in metrics.items() if hasattr(value, "item")},
+        "provenance": provenance,
     }
     (args.output / "training_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print("PPO_TRAINING_COMPLETE", flush=True)

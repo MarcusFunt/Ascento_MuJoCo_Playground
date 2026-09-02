@@ -54,7 +54,9 @@ def make_observation(
     gravity = body_to_world.T @ jp.asarray([0.0, 0.0, -1.0])
     linear_velocity, angular_velocity, joint_velocity = bounded_kinematics(data, body_to_world)
     joint_q = data.qpos[7:13]
-    leg_q = joint_q[jp.asarray([0, 1, 3, 4])]
+    # Keep joint-angle features bounded just like the other actor kinematics.
+    # The physical joint limits are wider than the policy input range.
+    leg_q = jp.clip(joint_q[jp.asarray([0, 1, 3, 4])], -3.0, 3.0)
     contact, force = wheel_contacts_and_forces(data, wheel_body_ids)
     phase = jax.nn.one_hot(info["jump_phase"], NUM_JUMP_PHASES, dtype=jp.float32)
     obs = jp.concatenate((
