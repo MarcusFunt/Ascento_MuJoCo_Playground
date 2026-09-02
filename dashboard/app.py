@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from dashboard.monitor import (
     list_run_summaries,
-    load_jsonl,
+    load_training_records,
     resolve_run,
     summarize_run,
     tail_lines,
@@ -56,7 +56,7 @@ def run_status(run_id: str):
 def telemetry(run_id: str, limit: int = 2000):
     ref = _run(run_id)
     limit = max(1, min(limit, 20_000))
-    return {"records": load_jsonl(ref.path / "telemetry.jsonl", limit=limit)}
+    return {"records": load_training_records(ref.path, limit=limit)}
 
 
 @app.get("/api/runs/{run_id}/logs")

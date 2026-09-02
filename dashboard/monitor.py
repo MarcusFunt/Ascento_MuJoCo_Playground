@@ -62,6 +62,69 @@ def load_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
     return records[-limit:] if limit is not None else records
 
 
+def _training_limit(run_dir: Path) -> int | None:
+  """Read the configured iteration count when an RSL-RL run recorded it."""
+  params_path = run_dir / "params" / "agent.yaml"
+  if not params_path.is_file():
+    return None
+  try:
+    contents = params_path.read_text(encoding="utf-8")
+  except OSError:
+    return None
+  match = re.search(r"^\s*max_iterations:\s*(\d+)\s*$", contents, re.MULTILINE)
+  return int(match.group(1)) if match else None
+
+
+def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
+    """Convert native RSL-RL TensorBoard scalars to the dashboard schema."""
+    event_files = sorted(run_dir.glob("events.out.tfevents.*"))
+    if not event_files:
+        return []
+    try:
+        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+    except ImportError:
+        return []
+
+    by_step: dict[int, dict[str, Any]] = {}
+    for event_file in event_files:
+        try:
+            accumulator = EventAccumulator(str(event_file), size_guidance={"scalars": 20_000})
+            accumulator.Reload()
+        except (KeyError, OSError, RuntimeError, ValueError):
+            continue
+        for tag in accumulator.Tags().get("scalars", []):
+            try:
+                events = accumulator.Scalars(tag)
+            except (KeyError, RuntimeError):
+                continue
+            for event in events:
+                record = by_step.setdefault(
+                    int(event.step),
+                    {"completed_steps": int(event.step), "metrics": {}},
+                )
+                record["metrics"][tag] = float(event.value)
+                record["wall_time"] = float(event.wall_time)
+
+    records = [by_step[step] for step in sorted(by_step)]
+    total = _training_limit(run_dir)
+    if total is not None:
+        for record in records:
+            completed = record["completed_steps"]
+            record["total_steps"] = total
+            record["percent_complete"] = min(100.0, 100.0 * completed / total)
+            fps = record["metrics"].get("Perf/total_fps")
+            if fps is not None and fps > 0:
+                record["steps_per_second"] = fps
+                record["eta_seconds"] = max(0.0, (total - completed) / fps)
+    return records[-limit:] if limit is not None else records
+
+
+def load_training_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
+    """Read legacy JSON telemetry or native RSL-RL TensorBoard telemetry."""
+    records = load_jsonl(run_dir / "telemetry.jsonl", limit=limit)
+    return records if records else load_tensorboard_records(run_dir, limit=limit)
+
+
 def tail_lines(path: Path, count: int = 400) -> list[str]:
     if count <= 0 or not path.is_file():
         return []
@@ -146,6 +209,9 @@ def _stage_name(
             return stage
     if status and status.get("stage"):
         return str(status["stage"])
+    experiment = run_dir.parent.name
+    if experiment.startswith("ascento_"):
+        return experiment.removeprefix("ascento_")
     return run_dir.name
 
 
@@ -177,7 +243,7 @@ def latest_render(run_dir: Path) -> dict[str, Any] | None:
 
 def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[str, Any]:
     now = time.time() if now is None else now
-    telemetry_records = load_jsonl(run_dir / "telemetry.jsonl", limit=1)
+    telemetry_records = load_training_records(run_dir, limit=1)
     telemetry = telemetry_records[-1] if telemetry_records else None
     manifest = load_json(run_dir / "training_manifest.json")
     status = load_json(run_dir / "run_status.json") or {}
@@ -189,8 +255,10 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
             state = "finished"
         elif errors and now - run_modified_time(run_dir) > 30:
             state = "error"
-        elif telemetry:
-            state = "running" if now - run_modified_time(run_dir) < 600 else "unknown"
+        elif telemetry and now - run_modified_time(run_dir) < 30:
+            state = "running"
+        elif telemetry or (run_dir / "params" / "agent.yaml").is_file():
+            state = "finished"
         else:
             state = "unknown"
 
