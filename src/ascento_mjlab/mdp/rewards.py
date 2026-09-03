@@ -18,7 +18,11 @@ def alive(env: ManagerBasedRlEnv) -> torch.Tensor:
   return (~env.termination_manager.terminated).float()
 
 
-def upright(env: ManagerBasedRlEnv, std: float = 0.35, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG) -> torch.Tensor:
+def upright(
+  env: ManagerBasedRlEnv,
+  std: float = 0.35,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
   tilt_sq = torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
   return torch.exp(-tilt_sq / (std * std))
@@ -40,6 +44,14 @@ def angular_rate_penalty(
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
   return torch.sum(torch.square(asset.data.root_link_ang_vel_b[:, :2]), dim=1)
+
+
+def planar_speed_penalty(
+  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
+) -> torch.Tensor:
+  """Penalize horizontal drift while still allowing wheel motion for recovery."""
+  asset: Entity = env.scene[asset_cfg.name]
+  return torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=1)
 
 
 def effort_penalty(

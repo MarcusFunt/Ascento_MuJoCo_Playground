@@ -18,9 +18,11 @@ and tests.
 
 The initial direct-effort actuator uses six normalized actions in `[-1, 1]`,
 40 Nm peak simulation authority, a linear torque-speed envelope, controller
-speed protection, and finite torque response. The 15 Nm leg and 5 Nm wheel
-continuous ratings are documentation only until a thermal/duration model is
-justified. No communication delay, sensor noise, or thermal model is enabled.
+speed protection, and finite torque response. Training clips the policy action
+to `[-1, 1]` before the environment maps it to a physical `[-40, 40] Nm`
+effort target. The 15 Nm leg and 5 Nm wheel continuous ratings are documentation
+only until a thermal/duration model is justified. No communication delay, sensor
+noise, or thermal model is enabled.
 
 ## Maintenance / first-time install
 
@@ -98,13 +100,15 @@ RSL-RL versions, then runs 100 finite Warp steps. Start balance training with
 the standard mjlab entry point after Gate D review:
 
 ```bash
-uv run --extra cu128 train Ascento-Balance-Flat --num-envs 512
+uv run --extra cu128 train Ascento-Balance-Flat --env.scene.num-envs 512
 uv run --extra cu128 play Ascento-Balance-Flat --agent zero
 ```
 
 Gate D is mjlab-native: the validated plant must learn robust, visually
-plausible balance with sensible control. Old-stack policy behavior is a
-diagnostic reference only, never the acceptance target.
+plausible balance with sensible control. The balance objective mildly penalizes
+horizontal root speed so recovery motion remains available without rewarding
+persistent drift. Old-stack policy behavior is a diagnostic reference only,
+never the acceptance target.
 
 ## Tasks and sequencing
 

@@ -1,7 +1,7 @@
 import pytest
 import torch
 from mjlab.envs import ManagerBasedRlEnv
-from mjlab.tasks.registry import load_env_cfg
+from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
 import ascento_mjlab.tasks  # noqa: F401
 
@@ -21,6 +21,30 @@ def test_balance_env_is_six_effort_flat_ground():
   assert torch.isfinite(reward).all()
   assert not terminated.any()
   assert terminated.shape == truncated.shape == (cfg.scene.num_envs,)
+  env.close()
+
+
+def test_balance_action_contract_reaches_40_nm_and_penalizes_drift():
+  cfg = load_env_cfg("Ascento-Balance-Flat")
+  cfg.scene.num_envs = 1
+
+  action_cfg = cfg.actions["effort"]
+  assert action_cfg.scale == 40.0
+  assert action_cfg.clip == {".*": (-40.0, 40.0)}
+  assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.2)
+
+  env = ManagerBasedRlEnv(cfg, device="cpu")
+  env.action_manager.process_action(torch.ones((1, 6)))
+  action_term = env.action_manager.get_term("effort")
+  assert torch.allclose(action_term._processed_actions, torch.full((1, 6), 40.0))
+  env.close()
+
+
+def test_balance_rl_config_enforces_normalized_actions_and_instrumented_ppo():
+  cfg = load_rl_cfg("Ascento-Balance-Flat")
+
+  assert cfg.clip_actions == 1.0
+  assert cfg.algorithm.class_name == "ascento_mjlab.ppo:InstrumentedPPO"
 
 
 @pytest.mark.parametrize(
