@@ -4,31 +4,34 @@ on:
   pull_request:
     paths:
       - 'dashboard/**'
-      - 'scripts/run_dashboard.sh'
+      - 'scripts/**'
+      - 'docker/**'
       - 'src/ascento_mjlab/tools/**'
       - 'tests_mjlab/**'
       - 'tests_dashboard/**'
       - 'pyproject.toml'
       - 'uv.lock'
+      - '.gitignore'
+      - '.dockerignore'
       - '.github/workflows/dashboard-ci.yml'
   push:
     paths:
       - 'dashboard/**'
-      - 'scripts/run_dashboard.sh'
+      - 'scripts/**'
+      - 'docker/**'
       - 'src/ascento_mjlab/tools/**'
       - 'tests_mjlab/**'
       - 'tests_dashboard/**'
       - 'pyproject.toml'
       - 'uv.lock'
+      - '.gitignore'
+      - '.dockerignore'
       - '.github/workflows/dashboard-ci.yml'
 
 jobs:
   backend:
     runs-on: ubuntu-latest
     env:
-      # mjlab defaults to EGL on Linux, but GitHub-hosted runners do not
-      # provide a usable EGL runtime. These tests do not render, so disable
-      # MuJoCo's GL backend explicitly, matching mjlab's own CI smoke tests.
       MUJOCO_GL: disable
     steps:
       - uses: actions/checkout@v4
@@ -48,8 +51,25 @@ jobs:
         with:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v6
-      - run: bash -n scripts/run_dashboard.sh
+      - run: bash -n scripts/run_dashboard.sh scripts/maintain.sh
+      - run: bash scripts/maintain.sh --help
       - run: uv run --frozen --extra cpu --extra dashboard python -m pytest -q tests_dashboard
+
+  maintenance-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p .maintenance
+          cat > .maintenance/compose.env <<'EOF'
+          ASCENTO_COMPUTE_EXTRA=cpu
+          ASCENTO_REPOSITORY_COMMIT=testcommit
+          ASCENTO_REPOSITORY_BRANCH=main
+          ASCENTO_DASHBOARD_PORT=8000
+          EOF
+      - run: docker compose --env-file .maintenance/compose.env -f docker/compose.yaml config >/dev/null
+      - run: docker compose --env-file .maintenance/compose.env -f docker/compose.yaml -f docker/compose.gpu.yaml config >/dev/null
+      - run: docker build --check -f docker/Dockerfile .
 
   frontend:
     runs-on: ubuntu-latest
@@ -61,5 +81,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install
+      - run: npm ci
       - run: npm run build
