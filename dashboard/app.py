@@ -4,60 +4,133 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from dashboard.monitor import (
-    list_run_summaries,
-    load_training_records,
-    resolve_run,
-    summarize_run,
-    tail_lines,
-    training_log_path,
+from dashboard.config import load_config, validate_startup
+from dashboard.health import (
+    list_dashboard_summaries,
+    load_dashboard_records,
+    resolve_dashboard_run,
+    summarize_dashboard_run,
 )
+from dashboard.monitor import tail_lines, training_log_path
 
-ROOT = Path(__file__).resolve().parents[1]
-ARTIFACT_ROOT = Path(
-    os.environ.get("ASCENTO_ARTIFACT_ROOT", ROOT / "training" / "artifacts")
-).expanduser().resolve()
-FRONTEND_DIST = Path(
-    os.environ.get("ASCENTO_DASHBOARD_DIST", Path(__file__).parent / "frontend" / "dist")
-).expanduser().resolve()
+CONFIG = load_config()
+STARTUP_WARNINGS = validate_startup(CONFIG)
+ARTIFACT_ROOT = CONFIG.artifact_root
+FRONTEND_DIST = CONFIG.frontend_dist
 
-app = FastAPI(title="Ascento Training Monitor", version="1.0")
+app = FastAPI(title="Ascento Training Monitor", version="1.2")
 
 
 def _run(run_id: str):
     try:
-        return resolve_run(ARTIFACT_ROOT, run_id)
+        return resolve_dashboard_run(ARTIFACT_ROOT, run_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="training run not found") from error
+    except OSError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to scan artifact root {ARTIFACT_ROOT}: {error}",
+        ) from error
+
+
+def _artifact_health() -> list[str]:
+    problems: list[str] = []
+    if not ARTIFACT_ROOT.exists():
+        problems.append(f"artifact root does not exist: {ARTIFACT_ROOT}")
+    elif not ARTIFACT_ROOT.is_dir():
+        problems.append(f"artifact root is not a directory: {ARTIFACT_ROOT}")
+    else:
+        if not os.access(ARTIFACT_ROOT, os.R_OK):
+            problems.append(f"artifact root is not readable: {ARTIFACT_ROOT}")
+        if not os.access(ARTIFACT_ROOT, os.X_OK):
+            problems.append(f"artifact root is not searchable: {ARTIFACT_ROOT}")
+    return problems
 
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "artifact_root": str(ARTIFACT_ROOT)}
+    problems = _artifact_health()
+    try:
+        run_count = len(list_dashboard_summaries(
+            ARTIFACT_ROOT,
+            stale_after_seconds=CONFIG.stale_after_seconds,
+        ))
+    except OSError as error:
+        problems.append(f"artifact scan failed: {error}")
+        run_count = None
+    return {
+        "ok": not problems,
+        "status": "ok" if not problems else "error",
+        "checked_at": time.time(),
+        "artifact_root": str(ARTIFACT_ROOT),
+        "run_count": run_count,
+        "problems": problems,
+        "warnings": STARTUP_WARNINGS,
+        "config": CONFIG.public_dict(),
+    }
+
+
+@app.get("/api/config")
+def configuration():
+    return {
+        **CONFIG.public_dict(),
+        "startup_warnings": STARTUP_WARNINGS,
+    }
 
 
 @app.get("/api/runs")
 def runs():
-    return {"runs": list_run_summaries(ARTIFACT_ROOT)}
+    try:
+        summaries = list_dashboard_summaries(
+            ARTIFACT_ROOT,
+            stale_after_seconds=CONFIG.stale_after_seconds,
+        )
+    except OSError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to scan artifact root {ARTIFACT_ROOT}: {error}",
+        ) from error
+    return {"runs": summaries}
 
 
 @app.get("/api/runs/{run_id}")
 def run_status(run_id: str):
     ref = _run(run_id)
-    return summarize_run(ref.path, ARTIFACT_ROOT)
+    return summarize_dashboard_run(
+        ref.path,
+        ARTIFACT_ROOT,
+        stale_after_seconds=CONFIG.stale_after_seconds,
+        detailed=True,
+    )
+
+
+@app.get("/api/runs/{run_id}/summary.json")
+def run_summary(run_id: str):
+    ref = _run(run_id)
+    summary = summarize_dashboard_run(
+        ref.path,
+        ARTIFACT_ROOT,
+        stale_after_seconds=CONFIG.stale_after_seconds,
+        detailed=True,
+    )
+    return JSONResponse(
+        content=summary,
+        headers={"Content-Disposition": 'attachment; filename="run-summary.json"'},
+    )
 
 
 @app.get("/api/runs/{run_id}/telemetry")
 def telemetry(run_id: str, limit: int = 2000):
     ref = _run(run_id)
     limit = max(1, min(limit, 20_000))
-    return {"records": load_training_records(ref.path, limit=limit)}
+    return {"records": load_dashboard_records(ref.path, limit=limit)}
 
 
 @app.get("/api/runs/{run_id}/logs")
@@ -99,7 +172,10 @@ async def stream_logs(run_id: str, request: Request):
             except FileNotFoundError:
                 pass
             except OSError as error:
-                yield f"event: monitor_error\ndata: {json.dumps({'message': str(error)})}\n\n"
+                yield (
+                    "event: monitor_error\n"
+                    f"data: {json.dumps({'message': str(error)})}\n\n"
+                )
             yield ": keepalive\n\n"
             await asyncio.sleep(1.0)
 
@@ -120,6 +196,8 @@ def index():
             "message": "Dashboard frontend is not built yet.",
             "build": "cd dashboard/frontend && npm install && npm run build",
             "api": "/api/runs",
+            "health": "/api/health",
+            "config": "/api/config",
         }
     )
 
