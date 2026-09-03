@@ -5,6 +5,7 @@ from dashboard.versioning import (
     current_repository_version,
     run_repository_provenance,
 )
+from scripts.stamp_run_provenance import stamp_missing_runs
 
 
 def _set_current(monkeypatch, commit="newcommit", branch="main"):
@@ -59,3 +60,24 @@ def test_exact_launcher_metadata_wins_over_maintenance_sidecar(monkeypatch, tmp_
     assert provenance["commit"] == "exact"
     assert provenance["source"] == "run_status"
     assert provenance["inferred"] is False
+
+
+def test_maintenance_stamps_only_legacy_runs_without_git_metadata(tmp_path):
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "telemetry.jsonl").write_text('{"completed_steps": 1}\n', encoding="utf-8")
+
+    exact = tmp_path / "exact"
+    exact.mkdir()
+    (exact / "telemetry.jsonl").write_text('{"completed_steps": 1}\n', encoding="utf-8")
+    (exact / "run_status.json").write_text(
+        json.dumps({"git_commit": "exactcommit", "git_branch": "feature"}),
+        encoding="utf-8",
+    )
+
+    assert stamp_missing_runs(tmp_path, "oldcheckout", "main") == 1
+    inferred = json.loads((legacy / "repository_provenance.json").read_text(encoding="utf-8"))
+    assert inferred["commit"] == "oldcheckout"
+    assert inferred["branch"] == "main"
+    assert inferred["inferred"] is True
+    assert not (exact / "repository_provenance.json").exists()
