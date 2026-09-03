@@ -19,6 +19,11 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    env:
+      # mjlab defaults to EGL on Linux, but GitHub-hosted runners do not
+      # provide a usable EGL runtime. These tests do not render, so disable
+      # MuJoCo's GL backend explicitly, matching mjlab's own CI smoke tests.
+      MUJOCO_GL: disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
