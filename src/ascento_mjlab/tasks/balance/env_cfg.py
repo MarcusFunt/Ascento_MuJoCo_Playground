@@ -82,7 +82,12 @@ def _observations(play: bool) -> dict[str, ObservationGroupCfg]:
       clip=(0.0, 2000.0),
       scale=0.01,
     ),
-    "effort": ObservationTermCfg(func=ascento_mdp.observations.actuator_effort, params={"asset_cfg": ROBOT_CFG}, clip=(-40.0, 40.0), scale=0.025),
+    "effort": ObservationTermCfg(
+      func=ascento_mdp.observations.actuator_effort,
+      params={"asset_cfg": ROBOT_CFG},
+      clip=(-40.0, 40.0),
+      scale=0.025,
+    ),
     "actions": ObservationTermCfg(func=mdp.last_action),
   }
   critic_terms = {
@@ -103,7 +108,10 @@ def _actions() -> dict[str, ActionTermCfg]:
       entity_name="robot",
       actuator_names=JOINT_NAMES,
       scale=40.0,
-      clip={".*": (-1.0, 1.0)},
+      # JointEffortActionCfg clips *after* scale/offset.  The physical target
+      # therefore needs a +/-40 Nm clamp; using +/-1 here silently reduces the
+      # robot to +/-1 Nm despite the 40 Nm action scale.
+      clip={".*": (-40.0, 40.0)},
       preserve_order=True,
     )
   }
@@ -129,30 +137,80 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
         func=ascento_mdp.events.reset_root_state_uniform,
         mode="reset",
         params={
-          "pose_range": {"x": (-0.02, 0.02), "y": (-0.02, 0.02), "z": (0.0, 0.0), "roll": (-0.08, 0.08), "pitch": (-0.08, 0.08), "yaw": (-3.14159, 3.14159)},
-          "velocity_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05), "roll": (-0.1, 0.1), "pitch": (-0.1, 0.1), "yaw": (-0.1, 0.1)},
+          "pose_range": {
+            "x": (-0.02, 0.02),
+            "y": (-0.02, 0.02),
+            "z": (0.0, 0.0),
+            "roll": (-0.08, 0.08),
+            "pitch": (-0.08, 0.08),
+            "yaw": (-3.14159, 3.14159),
+          },
+          "velocity_range": {
+            "x": (-0.05, 0.05),
+            "y": (-0.05, 0.05),
+            "z": (-0.05, 0.05),
+            "roll": (-0.1, 0.1),
+            "pitch": (-0.1, 0.1),
+            "yaw": (-0.1, 0.1),
+          },
           "asset_cfg": ROBOT_CFG,
         },
       ),
     },
     rewards={
       "alive": RewardTermCfg(func=ascento_mdp.rewards.alive, weight=1.0),
-      "upright": RewardTermCfg(func=ascento_mdp.rewards.upright, weight=2.0, params={"std": 0.35, "asset_cfg": ROBOT_CFG}),
-      "height": RewardTermCfg(func=ascento_mdp.rewards.height_tracking, weight=1.0, params={"target": 0.75, "std": 0.08, "asset_cfg": ROBOT_CFG}),
-      "angular_rate": RewardTermCfg(func=ascento_mdp.rewards.angular_rate_penalty, weight=-0.04, params={"asset_cfg": ROBOT_CFG}),
-      "effort": RewardTermCfg(func=ascento_mdp.rewards.effort_penalty, weight=-0.0005, params={"asset_cfg": ROBOT_CFG}),
+      "upright": RewardTermCfg(
+        func=ascento_mdp.rewards.upright,
+        weight=2.0,
+        params={"std": 0.35, "asset_cfg": ROBOT_CFG},
+      ),
+      "height": RewardTermCfg(
+        func=ascento_mdp.rewards.height_tracking,
+        weight=1.0,
+        params={"target": 0.75, "std": 0.08, "asset_cfg": ROBOT_CFG},
+      ),
+      "angular_rate": RewardTermCfg(
+        func=ascento_mdp.rewards.angular_rate_penalty,
+        weight=-0.04,
+        params={"asset_cfg": ROBOT_CFG},
+      ),
+      # Balance should be stationary on average.  This is deliberately mild:
+      # wheel translation remains available for recovery, but persistent drift
+      # is no longer reward-equivalent to balancing in place.
+      "planar_speed": RewardTermCfg(
+        func=ascento_mdp.rewards.planar_speed_penalty,
+        weight=-0.2,
+        params={"asset_cfg": ROBOT_CFG},
+      ),
+      "effort": RewardTermCfg(
+        func=ascento_mdp.rewards.effort_penalty,
+        weight=-0.0005,
+        params={"asset_cfg": ROBOT_CFG},
+      ),
       "action_rate": RewardTermCfg(func=ascento_mdp.rewards.action_rate_penalty, weight=-0.02),
     },
     terminations={
-      "fallen": TerminationTermCfg(func=ascento_mdp.terminations.fallen, params={"asset_cfg": ROBOT_CFG}),
-      "excessive_velocity": TerminationTermCfg(func=ascento_mdp.terminations.excessive_velocity, params={"asset_cfg": ROBOT_CFG}),
-      "nonfinite": TerminationTermCfg(func=ascento_mdp.terminations.nonfinite, params={"asset_cfg": ROBOT_CFG}),
+      "fallen": TerminationTermCfg(
+        func=ascento_mdp.terminations.fallen, params={"asset_cfg": ROBOT_CFG}
+      ),
+      "excessive_velocity": TerminationTermCfg(
+        func=ascento_mdp.terminations.excessive_velocity, params={"asset_cfg": ROBOT_CFG}
+      ),
+      "nonfinite": TerminationTermCfg(
+        func=ascento_mdp.terminations.nonfinite, params={"asset_cfg": ROBOT_CFG}
+      ),
       "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
     },
     metrics={
-      "tilt_radians": MetricsTermCfg(func=ascento_mdp.metrics.tilt_radians, params={"asset_cfg": ROBOT_CFG}),
-      "applied_effort": MetricsTermCfg(func=ascento_mdp.metrics.applied_effort, params={"asset_cfg": ROBOT_CFG}),
-      "root_speed": MetricsTermCfg(func=ascento_mdp.metrics.root_speed, params={"asset_cfg": ROBOT_CFG}),
+      "tilt_radians": MetricsTermCfg(
+        func=ascento_mdp.metrics.tilt_radians, params={"asset_cfg": ROBOT_CFG}
+      ),
+      "applied_effort": MetricsTermCfg(
+        func=ascento_mdp.metrics.applied_effort, params={"asset_cfg": ROBOT_CFG}
+      ),
+      "root_speed": MetricsTermCfg(
+        func=ascento_mdp.metrics.root_speed, params={"asset_cfg": ROBOT_CFG}
+      ),
     },
     episode_length_s=20.0 if not play else 10000.0,
     auto_reset=True,
