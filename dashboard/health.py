@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,17 @@ def _json(path: Path) -> dict[str, Any] | None:
 
 def _finite(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+
+
+def _timestamp(value: Any) -> float | None:
+    if _finite(value):
+        return float(value)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 def canonical_metrics(metrics: dict[str, Any]) -> dict[str, float | int | None]:
@@ -409,6 +421,11 @@ def summarize_dashboard_run(
     wall = latest.get("wall_time") if latest else None
     freshness = max(0.0, now - float(wall)) if _finite(wall) else max(0.0, now - modified_at)
     state = status.get("state") or base.get("state") or "unknown"
+    if latest is not None:
+        started = _timestamp(status.get("started_at"))
+        event_time = _timestamp(latest.get("wall_time"))
+        if started is not None and event_time is not None:
+            latest["elapsed_seconds"] = max(0.0, event_time - started)
     process = process_status(status.get("pid"))
     stale = state in {"starting", "running"} and freshness > stale_after_seconds
     if state == "running" and process["alive"] is False:
