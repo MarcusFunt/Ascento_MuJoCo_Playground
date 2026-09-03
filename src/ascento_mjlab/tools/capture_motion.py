@@ -6,6 +6,7 @@ import argparse
 import hashlib
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any, Callable
 
 import numpy as np
 import torch
@@ -16,6 +17,45 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.wrappers import VideoRecorder
 
 import ascento_mjlab.tasks  # noqa: F401
+
+
+def _jump_state_array(state: dict[str, torch.Tensor]) -> np.ndarray:
+  """Copy the four jump-state scalars to host memory as one float32 vector."""
+  values = torch.stack(
+    [
+      state["airborne"][0],
+      state["takeoff"][0],
+      state["landing"][0],
+      state["air_time"][0],
+    ]
+  )
+  return values.detach().to(device="cpu", dtype=torch.float32).numpy().copy()
+
+
+def _configure_capture_cfg(cfg: Any, *, take: int) -> Any:
+  """Configure a task for one continuous, non-auto-reset capture take."""
+  cfg.scene.num_envs = 1
+  cfg.seed = take
+  # A capture is one continuous trajectory. Auto-reset would make record_post_step()
+  # observe the reset pose after a terminal step and splice it into the same take.
+  cfg.auto_reset = False
+  cfg.recorders = {"motion": RecorderTermCfg(func=MotionRecorder, params={})}
+  return cfg
+
+
+def _run_capture_steps(
+  env: Any,
+  policy: Callable[[Any], torch.Tensor],
+  *,
+  steps: int,
+) -> tuple[int, bool]:
+  """Run until the requested length or the first terminal/truncated step."""
+  obs, _ = env.reset()
+  for step in range(1, steps + 1):
+    obs, _, dones, _ = env.step(policy(obs))
+    if bool(torch.any(dones).item()):
+      return step, True
+  return steps, False
 
 
 class MotionRecorder(RecorderTerm):
@@ -48,11 +88,7 @@ class MotionRecorder(RecorderTerm):
     if len(contacts) == 2:
       frame["contacts"] = np.asarray(contacts, dtype=np.float32)
     if hasattr(env, "ascento_jump_state"):
-      state = env.ascento_jump_state
-      frame["jump_state"] = np.asarray(
-        [state["airborne"][0], state["takeoff"][0], state["landing"][0], state["air_time"][0]],
-        dtype=np.float32,
-      )
+      frame["jump_state"] = _jump_state_array(env.ascento_jump_state)
     for command_name in ("motion", "twist"):
       try:
         command = env.command_manager.get_command(command_name)
@@ -93,10 +129,7 @@ def main() -> None:
     checkpoint_hash = hashlib.sha256(args.checkpoint.read_bytes()).hexdigest()
 
   for take in range(args.takes):
-    cfg = load_env_cfg(args.task, play=True)
-    cfg.scene.num_envs = 1
-    cfg.seed = take
-    cfg.recorders = {"motion": RecorderTermCfg(func=MotionRecorder, params={})}
+    cfg = _configure_capture_cfg(load_env_cfg(args.task, play=True), take=take)
     base_env = ManagerBasedRlEnv(
       cfg,
       device=args.device,
@@ -116,9 +149,11 @@ def main() -> None:
     )
     env = RslRlVecEnvWrapper(raw_env, clip_actions=load_rl_cfg(args.task).clip_actions)
     if args.checkpoint is None:
+
       def policy(obs):
         del obs
         return torch.zeros((1, 6), device=args.device)
+
     else:
       agent_cfg = load_rl_cfg(args.task)
       runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner
@@ -130,19 +165,19 @@ def main() -> None:
         map_location=args.device,
       )
       policy = runner.get_inference_policy(device=args.device)
-    obs, _ = env.reset()
-    for _ in range(args.steps):
-      obs, _, _, _ = env.step(policy(obs))
-    recorder = raw_env.recorder_manager.get_term("motion")
+    captured_steps, ended_on_done = _run_capture_steps(env, policy, steps=args.steps)
+    recorder = base_env.recorder_manager.get_term("motion")
     recorder.export(
       args.output_dir / f"take_{take:03d}.npz",
       metadata={
         "task": args.task,
         "seed": str(take),
-        "fps": str(round(1.0 / raw_env.step_dt)),
+        "fps": str(round(1.0 / base_env.step_dt)),
         "checkpoint": str(args.checkpoint) if args.checkpoint is not None else "",
         "model_sha256": checkpoint_hash,
         "physics_profile": "animation_high_authority",
+        "captured_steps": str(captured_steps),
+        "ended_on_done": str(ended_on_done).lower(),
       },
     )
     env.close()
