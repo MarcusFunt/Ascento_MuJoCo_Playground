@@ -5,7 +5,6 @@ import asyncio
 import json
 import os
 import time
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -13,19 +12,21 @@ from fastapi.staticfiles import StaticFiles
 
 from dashboard.config import load_config, validate_startup
 from dashboard.health import (
+    discover_dashboard_runs,
     list_dashboard_summaries,
     load_dashboard_records,
     resolve_dashboard_run,
     summarize_dashboard_run,
 )
 from dashboard.monitor import tail_lines, training_log_path
+from dashboard.versioning import annotate_run_summary, current_repository_version
 
 CONFIG = load_config()
 STARTUP_WARNINGS = validate_startup(CONFIG)
 ARTIFACT_ROOT = CONFIG.artifact_root
 FRONTEND_DIST = CONFIG.frontend_dist
 
-app = FastAPI(title="Ascento Training Monitor", version="1.2")
+app = FastAPI(title="Ascento Training Monitor", version="1.3")
 
 
 def _run(run_id: str):
@@ -54,14 +55,24 @@ def _artifact_health() -> list[str]:
     return problems
 
 
+def _annotated_summaries() -> list[dict]:
+    summaries = list_dashboard_summaries(
+        ARTIFACT_ROOT,
+        stale_after_seconds=CONFIG.stale_after_seconds,
+    )
+    refs = {ref.id: ref for ref in discover_dashboard_runs(ARTIFACT_ROOT)}
+    for summary in summaries:
+        ref = refs.get(summary.get("id"))
+        if ref is not None:
+            annotate_run_summary(summary, ref.path, ARTIFACT_ROOT)
+    return summaries
+
+
 @app.get("/api/health")
 def health():
     problems = _artifact_health()
     try:
-        run_count = len(list_dashboard_summaries(
-            ARTIFACT_ROOT,
-            stale_after_seconds=CONFIG.stale_after_seconds,
-        ))
+        run_count = len(_annotated_summaries())
     except OSError as error:
         problems.append(f"artifact scan failed: {error}")
         run_count = None
@@ -74,6 +85,7 @@ def health():
         "problems": problems,
         "warnings": STARTUP_WARNINGS,
         "config": CONFIG.public_dict(),
+        "repository_version": current_repository_version(),
     }
 
 
@@ -82,16 +94,14 @@ def configuration():
     return {
         **CONFIG.public_dict(),
         "startup_warnings": STARTUP_WARNINGS,
+        "repository_version": current_repository_version(),
     }
 
 
 @app.get("/api/runs")
 def runs():
     try:
-        summaries = list_dashboard_summaries(
-            ARTIFACT_ROOT,
-            stale_after_seconds=CONFIG.stale_after_seconds,
-        )
+        summaries = _annotated_summaries()
     except OSError as error:
         raise HTTPException(
             status_code=500,
@@ -103,12 +113,13 @@ def runs():
 @app.get("/api/runs/{run_id}")
 def run_status(run_id: str):
     ref = _run(run_id)
-    return summarize_dashboard_run(
+    summary = summarize_dashboard_run(
         ref.path,
         ARTIFACT_ROOT,
         stale_after_seconds=CONFIG.stale_after_seconds,
         detailed=True,
     )
+    return annotate_run_summary(summary, ref.path, ARTIFACT_ROOT)
 
 
 @app.get("/api/runs/{run_id}/summary.json")
@@ -120,6 +131,7 @@ def run_summary(run_id: str):
         stale_after_seconds=CONFIG.stale_after_seconds,
         detailed=True,
     )
+    annotate_run_summary(summary, ref.path, ARTIFACT_ROOT)
     return JSONResponse(
         content=summary,
         headers={"Content-Disposition": 'attachment; filename="run-summary.json"'},
