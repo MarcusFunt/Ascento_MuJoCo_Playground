@@ -88,6 +88,7 @@ class AscentoTorqueActuator(Actuator[AscentoTorqueActuatorCfg]):
   ) -> None:
     super().__init__(cfg, entity, target_ids, target_names)
     self._filtered: torch.Tensor | None = None
+    self._physics_dt: float | None = None
 
   def edit_spec(self, spec: mujoco.MjSpec, target_names: list[str]) -> None:
     for target_name in target_names:
@@ -107,6 +108,10 @@ class AscentoTorqueActuator(Actuator[AscentoTorqueActuatorCfg]):
     data,
     device: str,
   ) -> None:
+    # SimulationCfg is applied to the compiled model before Entity.initialize
+    # is called. Reading the model keeps this actuator tied to the active
+    # simulation, including task-specific timestep overrides.
+    self._physics_dt = float(mj_model.opt.timestep)
     super().initialize(mj_model, model, data, device)
     self._filtered = torch.zeros(
       (data.nworld, len(self.target_ids)), dtype=torch.float32, device=device
@@ -118,8 +123,10 @@ class AscentoTorqueActuator(Actuator[AscentoTorqueActuatorCfg]):
 
     # compute() runs once per physics substep in mjlab.  Use the exact
     # discretization of a first-order torque loop, with the project timestep
-    # supplied by the entity's simulation configuration.
-    dt = 0.002
+    # supplied by the active simulation configuration.
+    if self._physics_dt is None:
+      raise RuntimeError("Actuator must be initialized before compute()")
+    dt = self._physics_dt
     alpha = 1.0 if self.cfg.response_time == 0.0 else 1.0 - torch.exp(
       torch.tensor(-dt / self.cfg.response_time, device=requested.device)
     )

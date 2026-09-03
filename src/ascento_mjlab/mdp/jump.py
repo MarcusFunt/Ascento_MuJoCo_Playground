@@ -31,9 +31,15 @@ def initialize_jump_state(env, env_ids: torch.Tensor | None = None) -> None:
   state["takeoff_height"][ids] = 0.0
 
 
-def update_jump_state(env, env_ids: torch.Tensor | None, dt: float) -> None:
+def update_jump_state(
+  env, env_ids: torch.Tensor | None, dt: float | None = None
+) -> None:
   """Detect both-wheel takeoff and first subsequent contact."""
   del env_ids
+  # This event runs once per environment step, so use the active environment
+  # timing (physics timestep multiplied by decimation). The optional argument
+  # keeps the state transition directly testable with a supplied duration.
+  dt = env.step_dt if dt is None else dt
   left = env.scene["left_wheel_contact"].data.found > 0
   right = env.scene["right_wheel_contact"].data.found > 0
   left = left.flatten(start_dim=1).any(dim=1)

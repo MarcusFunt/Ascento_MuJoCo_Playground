@@ -43,7 +43,6 @@ def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
   cfg.events["update_jump_state"] = EventTermCfg(
     func=ascento_mdp.jump.update_jump_state,
     mode="step",
-    params={"dt": 0.01},
   )
   cfg.rewards["takeoff"] = RewardTermCfg(func=ascento_mdp.rewards.jump_takeoff, weight=2.0)
   cfg.rewards["landing"] = RewardTermCfg(func=ascento_mdp.rewards.jump_landing, weight=3.0)

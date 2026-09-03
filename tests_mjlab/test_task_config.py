@@ -42,3 +42,22 @@ def test_all_flat_task_configs_construct_and_step(task_id):
   assert torch.isfinite(reward).all()
   assert terminated.shape == truncated.shape == (1,)
   env.close()
+
+
+def test_jump_state_event_uses_environment_step_timing():
+  cfg = load_env_cfg("Ascento-Jump-Flat")
+  event_cfg = cfg.events["update_jump_state"]
+
+  assert event_cfg.params == {}
+  assert cfg.sim.mujoco.timestep * cfg.decimation == pytest.approx(0.01)
+
+
+def test_custom_sim_timestep_reaches_actuator():
+  cfg = load_env_cfg("Ascento-Balance-Flat")
+  cfg.scene.num_envs = 1
+  cfg.sim.mujoco.timestep = 0.007
+
+  env = ManagerBasedRlEnv(cfg, device="cpu")
+
+  assert {act._physics_dt for act in env.scene["robot"].actuators} == {0.007}
+  env.close()
