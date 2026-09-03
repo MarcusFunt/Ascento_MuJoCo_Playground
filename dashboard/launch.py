@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -41,9 +42,19 @@ def _git_value(*args: str) -> str | None:
     return value or None
 
 
+def _repository_env(name: str) -> str | None:
+    value = os.environ.get(name)
+    if not value or value.strip().lower() in {"unknown", "none", "null"}:
+        return None
+    return value.strip()
+
+
 def git_metadata() -> dict[str, Any]:
-    commit = _git_value("rev-parse", "HEAD")
-    branch = _git_value("branch", "--show-current")
+    # A source checkout has .git and should report its exact live state. The
+    # maintained Docker image intentionally excludes .git, so it receives the
+    # immutable build commit/branch through environment variables instead.
+    commit = _git_value("rev-parse", "HEAD") or _repository_env("ASCENTO_REPOSITORY_COMMIT")
+    branch = _git_value("branch", "--show-current") or _repository_env("ASCENTO_REPOSITORY_BRANCH")
     dirty = None
     try:
         result = subprocess.run(

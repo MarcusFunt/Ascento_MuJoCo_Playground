@@ -1,8 +1,10 @@
 .git
 .venv
+.maintenance
 __pycache__
 *.pyc
 logs
 checkpoints
 captures
 dashboard/frontend/node_modules
+dashboard/frontend/dist

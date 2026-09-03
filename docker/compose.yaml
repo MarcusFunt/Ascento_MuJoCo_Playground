@@ -1,14 +1,41 @@
 services:
   ascento-mjlab:
+    image: ascento-mjlab:local
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    gpus: all
+      args:
+        COMPUTE_EXTRA: ${ASCENTO_COMPUTE_EXTRA:-cpu}
+        REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
+        REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
     volumes:
       - ../logs:/workspace/logs
       - ../checkpoints:/workspace/checkpoints
       - ../captures:/workspace/captures
     environment:
-      MUJOCO_GL: egl
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+      MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
+      ASCENTO_REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
+      ASCENTO_REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
+
+  dashboard:
+    image: ascento-mjlab:local
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        COMPUTE_EXTRA: ${ASCENTO_COMPUTE_EXTRA:-cpu}
+        REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
+        REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
+    command: ["python", "-m", "uvicorn", "dashboard.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
+    volumes:
+      - ../logs:/workspace/logs:ro
+      - ../checkpoints:/workspace/checkpoints:ro
+      - ../captures:/workspace/captures:ro
+    environment:
+      MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
+      ASCENTO_ARTIFACT_ROOT: /workspace/logs/rsl_rl
+      ASCENTO_REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
+      ASCENTO_REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
+    restart: unless-stopped
