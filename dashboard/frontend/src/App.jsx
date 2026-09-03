@@ -44,6 +44,11 @@ function fmtDate(value) {
   return date.toLocaleString()
 }
 
+function shortCommit(value) {
+  if (!value) return 'unknown'
+  return String(value).slice(0, 10)
+}
+
 function StateBadge({ state }) {
   return <span className={`state-badge state-${state || 'unknown'}`}>{state || 'unknown'}</span>
 }
@@ -99,6 +104,14 @@ function MetadataRow({ label, children, mono = false }) {
       <dd className={mono ? 'mono' : ''}>{children ?? '—'}</dd>
     </div>
   )
+}
+
+function runOptionLabel(run) {
+  const version = run.repository_version || {}
+  if (version.is_outdated) return `OUTDATED · ${run.name}`
+  if (version.status === 'different') return `DIFFERENT VERSION · ${run.name}`
+  if (version.status === 'newer') return `NEWER VERSION · ${run.name}`
+  return run.name
 }
 
 function App() {
@@ -239,6 +252,7 @@ function App() {
   const totalIterations = progress.total_iterations ?? progress.total_steps
   const displayState = detail?.stale ? 'stale' : detail?.state
   const runInfo = detail?.run_info || {}
+  const repoVersion = detail?.repository_version || {}
   const processAlive = detail?.process?.alive
   const gpus = detail?.system?.gpus || []
 
@@ -249,6 +263,7 @@ function App() {
       state: detail.state,
       stale: detail.stale,
       freshness_seconds: detail.freshness_seconds,
+      repository_version: repoVersion,
       run_info: runInfo,
       training_health: detail.training_health,
     }
@@ -273,7 +288,7 @@ function App() {
           <select value={selectedId || ''} onChange={(event) => setSelectedId(event.target.value)}>
             {runs.length === 0 && <option value="">No runs found</option>}
             {runs.map((run) => (
-              <option key={run.id} value={run.id}>{run.name}</option>
+              <option key={run.id} value={run.id}>{runOptionLabel(run)}</option>
             ))}
           </select>
         </div>
@@ -284,6 +299,20 @@ function App() {
         <div className="api-error">
           <strong>Dashboard health check failed.</strong>
           <ul>{health.problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>
+        </div>
+      )}
+      {repoVersion.is_outdated && (
+        <div className="stale-warning">
+          <strong>Outdated run:</strong> this run was produced by repository {shortCommit(repoVersion.run_commit)}
+          {repoVersion.run_branch ? ` (${repoVersion.run_branch})` : ''}, while the dashboard is running
+          {' '}{shortCommit(repoVersion.current_commit)}{repoVersion.current_branch ? ` (${repoVersion.current_branch})` : ''}.
+          {repoVersion.run_inferred ? ' The old commit was inferred from the checkout present immediately before a maintenance update.' : ''}
+        </div>
+      )}
+      {repoVersion.status === 'different' && (
+        <div className="stale-warning">
+          <strong>Different repository version:</strong> this run came from {shortCommit(repoVersion.run_commit)}
+          {repoVersion.run_branch ? ` (${repoVersion.run_branch})` : ''}, not the current checkout.
         </div>
       )}
       {detail?.stale && (
@@ -419,8 +448,10 @@ function App() {
               </div>
             </div>
             <dl className="metadata-grid">
-              <MetadataRow label="Git commit" mono>{runInfo.git_commit}</MetadataRow>
-              <MetadataRow label="Git branch">{runInfo.git_branch}</MetadataRow>
+              <MetadataRow label="Repository status">{repoVersion.status}</MetadataRow>
+              <MetadataRow label="Run repository commit" mono>{repoVersion.run_commit || runInfo.git_commit}</MetadataRow>
+              <MetadataRow label="Current repository commit" mono>{repoVersion.current_commit}</MetadataRow>
+              <MetadataRow label="Git branch">{runInfo.git_branch || repoVersion.run_branch}</MetadataRow>
               <MetadataRow label="Task">{runInfo.task}</MetadataRow>
               <MetadataRow label="Stage">{runInfo.stage || detail.stage}</MetadataRow>
               <MetadataRow label="Seed">{runInfo.seed}</MetadataRow>
@@ -461,6 +492,8 @@ function App() {
               <MetadataRow label="Stale threshold">{health?.config?.stale_after_seconds ? `${health.config.stale_after_seconds}s` : '—'}</MetadataRow>
               <MetadataRow label="Python" mono>{health?.config?.python_executable}</MetadataRow>
               <MetadataRow label="Detected runs">{health?.run_count}</MetadataRow>
+              <MetadataRow label="Current repo commit" mono>{health?.repository_version?.commit}</MetadataRow>
+              <MetadataRow label="Current repo branch">{health?.repository_version?.branch}</MetadataRow>
             </dl>
             {health?.warnings?.length > 0 && (
               <ul className="warning-list">{health.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
