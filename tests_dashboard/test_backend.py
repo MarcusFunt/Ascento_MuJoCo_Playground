@@ -2,8 +2,8 @@ import importlib
 import json
 
 
-def _load_app(monkeypatch, tmp_path):
-    monkeypatch.setenv("ASCENTO_ARTIFACT_ROOT", str(tmp_path))
+def _load_app(monkeypatch, artifact_root):
+    monkeypatch.setenv("ASCENTO_ARTIFACT_ROOT", str(artifact_root))
     import dashboard.app as dashboard_app
 
     return importlib.reload(dashboard_app)
@@ -23,6 +23,21 @@ def test_dashboard_backend_registers_health_and_config_routes(monkeypatch, tmp_p
     assert health["artifact_root"] == str(tmp_path.resolve())
     assert health["config"]["artifact_root"] == str(tmp_path.resolve())
     assert module.configuration()["stale_after_seconds"] > 0
+
+
+def test_dashboard_starts_before_read_only_artifact_root_exists(monkeypatch, tmp_path):
+    artifact_root = tmp_path / "logs" / "rsl_rl"
+    assert artifact_root.exists() is False
+
+    module = _load_app(monkeypatch, artifact_root)
+    health = module.health()
+
+    assert artifact_root.exists() is False
+    assert health["ok"] is True
+    assert health["run_count"] == 0
+    assert health["problems"] == []
+    assert any("does not exist yet" in warning for warning in health["warnings"])
+    assert module.runs() == {"runs": []}
 
 
 def test_run_summary_download_is_json_safe(monkeypatch, tmp_path):
