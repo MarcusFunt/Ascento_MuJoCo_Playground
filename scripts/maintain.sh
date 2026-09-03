@@ -5,10 +5,16 @@ REPO_URL="https://github.com/MarcusFunt/Ascento_MuJoCo_Playground.git"
 BRANCH="${ASCENTO_BRANCH:-main}"
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
 DEFAULT_INSTALL_DIR="$HOME/Ascento_MuJoCo_Playground"
+
+# Prefer the checkout containing this script. When the script is piped from
+# GitHub, also recognize an Ascento checkout in the current working directory.
 if [[ -n "$SCRIPT_PATH" && -f "$SCRIPT_PATH" ]]; then
   SCRIPT_REPO="$(cd "$(dirname "$SCRIPT_PATH")/.." 2>/dev/null && pwd || true)"
   [[ -d "${SCRIPT_REPO:-}/.git" ]] && DEFAULT_INSTALL_DIR="$SCRIPT_REPO"
+elif [[ -f "$PWD/.git/config" ]] && grep -q 'Ascento_MuJoCo_Playground' "$PWD/.git/config"; then
+  DEFAULT_INSTALL_DIR="$PWD"
 fi
+
 INSTALL_DIR="${ASCENTO_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 COMPUTE="${ASCENTO_COMPUTE:-auto}"
 INSTALL_SYSTEM=1
@@ -56,6 +62,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 [[ "$(uname -s)" == "Linux" ]] || die "The maintained runtime is Linux/WSL2. Run this script inside Linux or WSL2."
+case "$(uname -m)" in x86_64|amd64) ;; *) die "The current lock/runtime targets Linux x86_64; found $(uname -m)." ;; esac
 
 SUDO=()
 if [[ ${EUID:-$(id -u)} -ne 0 ]] && have sudo; then SUDO=(sudo); fi
@@ -76,6 +83,24 @@ ensure_base_tools() {
   if ((${#missing[@]})); then
     log "Installing base tools: ${missing[*]}"
     apt_install ca-certificates "${missing[@]}"
+  fi
+}
+
+ensure_native_runtime_libraries() {
+  (( INSTALL_SYSTEM )) || return 0
+  apt_available || return 0
+  have dpkg-query || return 0
+  local wanted=(libegl1 libgl1 libglvnd0 libglfw3 libosmesa6)
+  local missing=()
+  local package
+  for package in "${wanted[@]}"; do
+    if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'ok installed'; then
+      missing+=("$package")
+    fi
+  done
+  if ((${#missing[@]})); then
+    log "Installing native MuJoCo/OpenGL runtime libraries: ${missing[*]}"
+    apt_install "${missing[@]}"
   fi
 }
 
@@ -170,27 +195,33 @@ choose_compute() {
   log "Selected compute backend: $COMPUTE"
 }
 
-OLD_COMMIT=""
-OLD_BRANCH=""
+OLD_COMMIT="${ASCENTO_PREUPDATE_COMMIT:-}"
+OLD_BRANCH="${ASCENTO_PREUPDATE_BRANCH:-}"
 prepare_checkout() {
   INSTALL_DIR="$(realpath -m "$INSTALL_DIR")"
   if [[ -d "$INSTALL_DIR/.git" ]]; then
     log "Updating existing checkout: $INSTALL_DIR"
-    OLD_COMMIT="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
-    OLD_BRANCH="$(git -C "$INSTALL_DIR" branch --show-current || true)"
+    local checkout_commit checkout_branch
+    checkout_commit="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
+    checkout_branch="$(git -C "$INSTALL_DIR" branch --show-current || true)"
+    [[ -n "$OLD_COMMIT" ]] || OLD_COMMIT="$checkout_commit"
+    [[ -n "$OLD_BRANCH" ]] || OLD_BRANCH="$checkout_branch"
+
     local dirty
     dirty="$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=no)"
     if [[ -n "$dirty" && "$FORCE" -ne 1 ]]; then
       die "Tracked files have local modifications. Commit/stash them or rerun with --force. Runs are never removed."
     fi
     git -C "$INSTALL_DIR" fetch --prune origin
-    local local_only=0
-    if git -C "$INSTALL_DIR" rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
-      local_only="$(git -C "$INSTALL_DIR" rev-list --count "origin/$BRANCH..HEAD" 2>/dev/null || echo 0)"
-    fi
+    git -C "$INSTALL_DIR" rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1 \
+      || die "Remote branch origin/$BRANCH does not exist."
+
+    local local_only
+    local_only="$(git -C "$INSTALL_DIR" rev-list --count "origin/$BRANCH..HEAD" 2>/dev/null || echo 0)"
     if [[ "$local_only" != "0" && "$FORCE" -ne 1 ]]; then
       die "The checkout has local-only commits. Merge/push them first or rerun with --force."
     fi
+    if (( FORCE )); then git -C "$INSTALL_DIR" reset --hard HEAD; fi
     git -C "$INSTALL_DIR" checkout -B "$BRANCH" "origin/$BRANCH"
   else
     if [[ -e "$INSTALL_DIR" && -n "$(ls -A "$INSTALL_DIR" 2>/dev/null || true)" ]]; then
@@ -202,6 +233,26 @@ prepare_checkout() {
   fi
   git -C "$INSTALL_DIR" submodule sync --recursive
   git -C "$INSTALL_DIR" submodule update --init --recursive --force
+}
+
+reexec_updated_maintainer() {
+  [[ "${ASCENTO_MAINTENANCE_REEXEC:-0}" != "1" ]] || return 0
+  [[ -n "$OLD_COMMIT" ]] || return 0
+  local new_commit
+  new_commit="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
+  [[ "$new_commit" != "$OLD_COMMIT" ]] || return 0
+  [[ -f "$INSTALL_DIR/scripts/maintain.sh" ]] || return 0
+
+  log "Repository changed; re-executing the updated maintenance script"
+  export ASCENTO_MAINTENANCE_REEXEC=1
+  export ASCENTO_PREUPDATE_COMMIT="$OLD_COMMIT"
+  export ASCENTO_PREUPDATE_BRANCH="$OLD_BRANCH"
+  local args=(--install-dir "$INSTALL_DIR" --branch "$BRANCH" --compute "$COMPUTE")
+  (( INSTALL_SYSTEM )) || args+=(--skip-system-install)
+  (( BUILD_DOCKER )) || args+=(--skip-docker-build)
+  (( START_DASHBOARD )) || args+=(--no-start-dashboard)
+  (( FORCE )) && args+=(--force)
+  exec bash "$INSTALL_DIR/scripts/maintain.sh" "${args[@]}"
 }
 
 sync_python_dependencies() {
@@ -294,11 +345,13 @@ verify_installation() {
 }
 
 ensure_base_tools
+ensure_native_runtime_libraries
 choose_compute
 if (( BUILD_DOCKER )); then ensure_docker; fi
 ensure_uv
 if (( BUILD_DOCKER )); then ensure_nvidia_container_toolkit; fi
 prepare_checkout
+reexec_updated_maintainer
 sync_python_dependencies
 stamp_legacy_runs
 build_frontend
