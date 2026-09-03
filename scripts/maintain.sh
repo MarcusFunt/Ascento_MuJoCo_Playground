@@ -3,7 +3,13 @@ set -Eeuo pipefail
 
 REPO_URL="https://github.com/MarcusFunt/Ascento_MuJoCo_Playground.git"
 BRANCH="${ASCENTO_BRANCH:-main}"
-INSTALL_DIR="${ASCENTO_INSTALL_DIR:-$HOME/Ascento_MuJoCo_Playground}"
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+DEFAULT_INSTALL_DIR="$HOME/Ascento_MuJoCo_Playground"
+if [[ -n "$SCRIPT_PATH" && -f "$SCRIPT_PATH" ]]; then
+  SCRIPT_REPO="$(cd "$(dirname "$SCRIPT_PATH")/.." 2>/dev/null && pwd || true)"
+  [[ -d "${SCRIPT_REPO:-}/.git" ]] && DEFAULT_INSTALL_DIR="$SCRIPT_REPO"
+fi
+INSTALL_DIR="${ASCENTO_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 COMPUTE="${ASCENTO_COMPUTE:-auto}"
 INSTALL_SYSTEM=1
 BUILD_DOCKER=1
@@ -18,7 +24,7 @@ Bootstrap or update Ascento_MuJoCo_Playground to an exact repository state.
 Existing logs/checkpoints/captures are preserved.
 
 Options:
-  --install-dir PATH       checkout location (default: ~/Ascento_MuJoCo_Playground)
+  --install-dir PATH       checkout location (default: current checkout or ~/Ascento_MuJoCo_Playground)
   --branch NAME            branch to install/update (default: main)
   --compute auto|cu128|cpu compute backend (default: auto)
   --skip-system-install    do not install missing OS/Docker/NVIDIA tooling
@@ -31,9 +37,9 @@ EOF
 
 while (($#)); do
   case "$1" in
-    --install-dir) INSTALL_DIR="$2"; shift 2 ;;
-    --branch) BRANCH="$2"; shift 2 ;;
-    --compute) COMPUTE="$2"; shift 2 ;;
+    --install-dir) [[ $# -ge 2 ]] || { echo "--install-dir needs a value" >&2; exit 2; }; INSTALL_DIR="$2"; shift 2 ;;
+    --branch) [[ $# -ge 2 ]] || { echo "--branch needs a value" >&2; exit 2; }; BRANCH="$2"; shift 2 ;;
+    --compute) [[ $# -ge 2 ]] || { echo "--compute needs a value" >&2; exit 2; }; COMPUTE="$2"; shift 2 ;;
     --skip-system-install) INSTALL_SYSTEM=0; shift ;;
     --skip-docker-build) BUILD_DOCKER=0; shift ;;
     --no-start-dashboard) START_DASHBOARD=0; shift ;;
@@ -49,14 +55,10 @@ log() { printf '\n==> %s\n' "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-if [[ "$(uname -s)" != "Linux" ]]; then
-  die "The maintained runtime is Linux/WSL2. Run this script inside Linux or WSL2."
-fi
+[[ "$(uname -s)" == "Linux" ]] || die "The maintained runtime is Linux/WSL2. Run this script inside Linux or WSL2."
 
 SUDO=()
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  if have sudo; then SUDO=(sudo); else SUDO=(); fi
-fi
+if [[ ${EUID:-$(id -u)} -ne 0 ]] && have sudo; then SUDO=(sudo); fi
 
 apt_available() { have apt-get && [[ -r /etc/os-release ]]; }
 apt_install() {
@@ -103,7 +105,9 @@ install_docker_engine() {
     'Signed-By: /etc/apt/keyrings/docker.asc' \
     | "${SUDO[@]}" tee /etc/apt/sources.list.d/docker.sources >/dev/null
   "${SUDO[@]}" apt-get update
-  "${SUDO[@]}" apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  if ! "${SUDO[@]}" apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+    die "Docker package installation failed. Remove conflicting distro Docker packages, then rerun. Existing /var/lib/docker data should not be deleted."
+  fi
   if have systemctl; then "${SUDO[@]}" systemctl enable --now docker || true; fi
   if [[ -n "${USER:-}" ]] && have usermod; then "${SUDO[@]}" usermod -aG docker "$USER" || true; fi
 }
@@ -119,9 +123,7 @@ docker_exec() {
 }
 
 ensure_docker() {
-  if ! have docker || ! docker compose version >/dev/null 2>&1; then
-    install_docker_engine
-  fi
+  if ! have docker || ! docker compose version >/dev/null 2>&1; then install_docker_engine; fi
   docker_exec info >/dev/null 2>&1 || die "Docker daemon is not reachable."
   docker_exec compose version >/dev/null 2>&1 || die "Docker Compose plugin is unavailable."
 }
@@ -142,13 +144,11 @@ ensure_uv() {
 ensure_nvidia_container_toolkit() {
   [[ "$COMPUTE" == "cu128" ]] || return 0
   have nvidia-smi || die "CUDA backend selected but nvidia-smi is unavailable."
-  if grep -qi microsoft /proc/version 2>/dev/null && docker info >/dev/null 2>&1; then
+  if grep -qi microsoft /proc/version 2>/dev/null && docker_exec info >/dev/null 2>&1; then
     log "WSL2 detected; using the Docker/WSL GPU integration already present on the host"
     return 0
   fi
-  if have nvidia-ctk && docker_exec info --format '{{json .Runtimes}}' 2>/dev/null | grep -qi nvidia; then
-    return 0
-  fi
+  if have nvidia-ctk && docker_exec info --format '{{json .Runtimes}}' 2>/dev/null | grep -qi nvidia; then return 0; fi
   (( INSTALL_SYSTEM )) || die "NVIDIA Container Toolkit is required for CUDA Docker use."
   log "Installing/configuring NVIDIA Container Toolkit"
   apt_install ca-certificates curl gnupg2
@@ -191,7 +191,6 @@ prepare_checkout() {
     if [[ "$local_only" != "0" && "$FORCE" -ne 1 ]]; then
       die "The checkout has local-only commits. Merge/push them first or rerun with --force."
     fi
-    [[ "$FORCE" -eq 0 ]] || git -C "$INSTALL_DIR" reset --hard HEAD
     git -C "$INSTALL_DIR" checkout -B "$BRANCH" "origin/$BRANCH"
   else
     if [[ -e "$INSTALL_DIR" && -n "$(ls -A "$INSTALL_DIR" 2>/dev/null || true)" ]]; then
@@ -231,16 +230,20 @@ stamp_legacy_runs() {
   local root="$INSTALL_DIR/logs/rsl_rl"
   [[ -d "$root" ]] || return 0
   log "Backfilling repository provenance for legacy runs without commit metadata"
-  "$INSTALL_DIR/.venv/bin/python" "$INSTALL_DIR/scripts/stamp_run_provenance.py" \
-    --root "$root" --commit "$OLD_COMMIT" ${OLD_BRANCH:+--branch "$OLD_BRANCH"}
+  local args=(--root "$root" --commit "$OLD_COMMIT")
+  [[ -n "$OLD_BRANCH" ]] && args+=(--branch "$OLD_BRANCH")
+  "$INSTALL_DIR/.venv/bin/python" "$INSTALL_DIR/scripts/stamp_run_provenance.py" "${args[@]}"
 }
 
 build_frontend() {
   log "Reconciling frontend dependencies and building dashboard"
   local frontend="$INSTALL_DIR/dashboard/frontend"
-  if have node && have npm && [[ "$(node -p 'Number(process.versions.node.split(`.`)[0])')" -ge 20 ]]; then
+  local node_major=0
+  if have node && have npm; then node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; fi
+  if [[ "$node_major" =~ ^[0-9]+$ ]] && (( node_major >= 20 )); then
     (cd "$frontend" && npm ci && npm run build)
   else
+    ensure_docker
     docker_exec run --rm --user "$(id -u):$(id -g)" \
       -v "$frontend:/work" -w /work node:20-bookworm-slim \
       sh -lc 'npm ci && npm run build'
@@ -277,9 +280,7 @@ build_containers() {
   [[ "$COMPUTE" == "cu128" ]] && files+=(-f "$INSTALL_DIR/docker/compose.gpu.yaml")
   docker_exec compose --env-file "$envfile" "${files[@]}" down --remove-orphans || true
   docker_exec compose --env-file "$envfile" "${files[@]}" build --pull --no-cache
-  if (( START_DASHBOARD )); then
-    docker_exec compose --env-file "$envfile" "${files[@]}" up -d dashboard
-  fi
+  if (( START_DASHBOARD )); then docker_exec compose --env-file "$envfile" "${files[@]}" up -d dashboard; fi
 }
 
 verify_installation() {
@@ -300,7 +301,6 @@ if (( BUILD_DOCKER )); then ensure_nvidia_container_toolkit; fi
 prepare_checkout
 sync_python_dependencies
 stamp_legacy_runs
-if (( BUILD_DOCKER )); then ensure_docker; fi
 build_frontend
 write_maintenance_state
 build_containers
@@ -310,6 +310,4 @@ log "Maintenance complete"
 echo "Checkout: $INSTALL_DIR"
 echo "Repository: $(git -C "$INSTALL_DIR" rev-parse --short HEAD) ($BRANCH)"
 echo "Compute backend: $COMPUTE"
-if (( BUILD_DOCKER && START_DASHBOARD )); then
-  echo "Dashboard: http://127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}"
-fi
+if (( BUILD_DOCKER && START_DASHBOARD )); then echo "Dashboard: http://127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}"; fi
