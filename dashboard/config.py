@@ -67,7 +67,12 @@ def load_config() -> DashboardConfig:
 
 
 def validate_startup(config: DashboardConfig, *, create_artifact_root: bool = True) -> list[str]:
-    """Validate paths early and return non-fatal startup warnings."""
+    """Validate paths early and return non-fatal startup warnings.
+
+    The dashboard server is a read-only monitor and should pass
+    ``create_artifact_root=False``. Writers such as the launcher may retain the
+    default and create the configured artifact root before starting a run.
+    """
     warnings: list[str] = []
 
     if config.artifact_root.exists() and not config.artifact_root.is_dir():
@@ -85,6 +90,11 @@ def validate_startup(config: DashboardConfig, *, create_artifact_root: bool = Tr
                 f"{config.artifact_root}: {error}. "
                 "Set ASCENTO_ARTIFACT_ROOT to a writable directory."
             ) from error
+    elif not config.artifact_root.exists():
+        warnings.append(
+            "Dashboard artifact root does not exist yet: "
+            f"{config.artifact_root}. No runs will be shown until training creates it."
+        )
 
     if config.artifact_root.exists():
         if not os.access(config.artifact_root, os.R_OK):
