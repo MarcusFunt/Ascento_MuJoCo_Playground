@@ -3,8 +3,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+# This script is executed directly by scripts/maintain.sh. In that mode Python
+# puts ``scripts/`` (not the repository root) on sys.path, while ``dashboard``
+# is a top-level repository package rather than part of the installed src
+# package. Add the checkout root explicitly so a fresh/updated installation can
+# import the dashboard helpers without relying on the caller's working directory
+# or PYTHONPATH.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from dashboard.health import discover_dashboard_runs
 from dashboard.versioning import run_repository_provenance
