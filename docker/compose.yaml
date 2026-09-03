@@ -1,0 +1,14 @@
+services:
+  ascento-mjlab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    gpus: all
+    volumes:
+      - ../logs:/workspace/logs
+      - ../checkpoints:/workspace/checkpoints
+      - ../captures:/workspace/captures
+    environment:
+      MUJOCO_GL: egl
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics

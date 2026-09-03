@@ -1,12 +1,12 @@
-"""Launch training with durable console logging and run lifecycle metadata."""
+"""Launch an mjlab/RSL-RL run with durable console logging."""
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import subprocess
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 
 def write_status(path: Path, **values) -> None:
@@ -24,10 +24,11 @@ def write_status(path: Path, **values) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run training.train while capturing console output for the web dashboard."
+        description="Run mjlab training while capturing console output for the dashboard."
     )
-    parser.add_argument("--artifact-root", type=Path, default=Path("training/artifacts"))
+    parser.add_argument("--artifact-root", type=Path, default=Path("logs/rsl_rl"))
     parser.add_argument("--name", help="run directory name; defaults to timestamp_stage")
+    parser.add_argument("--task", default="Ascento-Balance-Flat")
     parser.add_argument("training_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
@@ -37,11 +38,7 @@ def main() -> int:
     if "--output" in training_args:
         parser.error("do not pass --output; dashboard.launch assigns an isolated run directory")
 
-    stage = "balance"
-    if "--stage" in training_args:
-        index = training_args.index("--stage")
-        if index + 1 < len(training_args):
-            stage = training_args[index + 1]
+    stage = args.task.removeprefix("Ascento-").removesuffix("-Flat").lower()
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = args.name or f"{stamp}_{stage}"
@@ -55,11 +52,10 @@ def main() -> int:
     command = [
         sys.executable,
         "-u",
-        "-m",
-        "training.train",
+        "-m", "mjlab.scripts.train",
+        args.task,
         *training_args,
-        "--output",
-        str(run_dir),
+        "--log-root", str(run_dir),
     ]
     started = datetime.now(timezone.utc).isoformat()
     write_status(

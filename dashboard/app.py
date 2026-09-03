@@ -5,8 +5,6 @@ import asyncio
 import json
 import os
 from pathlib import Path
-import subprocess
-import sys
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -14,11 +12,11 @@ from fastapi.staticfiles import StaticFiles
 
 from dashboard.monitor import (
     list_run_summaries,
-    load_jsonl,
-    numeric_checkpoints,
+    load_training_records,
     resolve_run,
     summarize_run,
     tail_lines,
+    training_log_path,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +28,6 @@ FRONTEND_DIST = Path(
 ).expanduser().resolve()
 
 app = FastAPI(title="Ascento Training Monitor", version="1.0")
-_render_processes: dict[str, subprocess.Popen] = {}
 
 
 def _run(run_id: str):
@@ -60,20 +57,21 @@ def run_status(run_id: str):
 def telemetry(run_id: str, limit: int = 2000):
     ref = _run(run_id)
     limit = max(1, min(limit, 20_000))
-    return {"records": load_jsonl(ref.path / "telemetry.jsonl", limit=limit)}
+    return {"records": load_training_records(ref.path, limit=limit)}
 
 
 @app.get("/api/runs/{run_id}/logs")
 def logs(run_id: str, tail: int = 500):
     ref = _run(run_id)
     tail = max(1, min(tail, 5000))
-    return {"lines": [line.rstrip("\n") for line in tail_lines(ref.path / "training.log", tail)]}
+    log_path = training_log_path(ref.path, ARTIFACT_ROOT)
+    return {"lines": [line.rstrip("\n") for line in tail_lines(log_path, tail)]}
 
 
 @app.get("/api/runs/{run_id}/logs/stream")
 async def stream_logs(run_id: str, request: Request):
     ref = _run(run_id)
-    log_path = ref.path / "training.log"
+    log_path = training_log_path(ref.path, ARTIFACT_ROOT)
 
     async def event_stream():
         try:
@@ -110,79 +108,6 @@ async def stream_logs(run_id: str, request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-@app.get("/api/runs/{run_id}/render/latest")
-def render_image(run_id: str):
-    ref = _run(run_id)
-    summary = summarize_run(ref.path, ARTIFACT_ROOT)
-    render = summary.get("latest_render")
-    if not render:
-        raise HTTPException(status_code=404, detail="no rendered preview exists")
-    path = (ref.path / render["relative_path"]).resolve()
-    try:
-        path.relative_to(ref.path.resolve())
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail="invalid render path") from error
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="render file disappeared")
-    return FileResponse(path, media_type="image/png", filename=path.name)
-
-
-@app.post("/api/runs/{run_id}/render-latest", status_code=202)
-def render_latest(run_id: str):
-    ref = _run(run_id)
-    summary = summarize_run(ref.path, ARTIFACT_ROOT)
-    if summary["state"] in {"running", "starting"}:
-        raise HTTPException(
-            status_code=409,
-            detail="rendering is disabled while training is running",
-        )
-    checkpoints = numeric_checkpoints(ref.path / "checkpoint")
-    if not checkpoints:
-        raise HTTPException(status_code=409, detail="this run has no numeric checkpoints")
-
-    existing = _render_processes.get(run_id)
-    if existing is not None and existing.poll() is None:
-        return {"state": "already_running", "pid": existing.pid}
-
-    output_dir = ref.path / "renders"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    command = [
-        sys.executable,
-        "-m",
-        "dashboard.render_latest",
-        "--stage",
-        summary["stage"],
-        "--checkpoint-dir",
-        str(ref.path / "checkpoint"),
-        "--output-dir",
-        str(output_dir),
-    ]
-    log_handle = (output_dir / "render.log").open("a", encoding="utf-8")
-    process = subprocess.Popen(
-        command,
-        cwd=ROOT,
-        env=dict(os.environ),
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    log_handle.close()
-    _render_processes[run_id] = process
-    return {"state": "started", "pid": process.pid, "checkpoint": checkpoints[-1].name}
-
-
-@app.get("/api/runs/{run_id}/render-status")
-def render_status(run_id: str):
-    _run(run_id)
-    process = _render_processes.get(run_id)
-    if process is None:
-        return {"state": "idle"}
-    code = process.poll()
-    if code is None:
-        return {"state": "running", "pid": process.pid}
-    return {"state": "finished" if code == 0 else "error", "exit_code": code}
 
 
 @app.get("/")

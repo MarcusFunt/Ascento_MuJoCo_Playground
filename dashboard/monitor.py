@@ -1,26 +1,30 @@
 """Filesystem-backed monitoring helpers for Ascento training runs."""
 from __future__ import annotations
 
+import json
+import re
+import threading
+import time
 from dataclasses import dataclass
 from hashlib import sha1
-import json
-import os
 from pathlib import Path
-import re
-import time
-from typing import Any, Iterable
-
+from typing import Any
 
 ERROR_PATTERN = re.compile(
     r"(traceback|\berror\b|exception|floatingpointerror|non-finite|cuda.*fail|out of memory|oom)",
     re.IGNORECASE,
 )
 RUN_MARKERS = (
-    "telemetry.jsonl",
-    "training.log",
-    "run_status.json",
-    "training_manifest.json",
+  "telemetry.jsonl",
+  "training.log",
+  "run_status.json",
+  "training_manifest.json",
 )
+_TENSORBOARD_CACHE: dict[Path, tuple[tuple[int, int], Any]] = {}
+_TENSORBOARD_RECORD_CACHE: dict[
+    Path, tuple[tuple[tuple[str, int, int], ...], int | None, list[dict[str, Any]]]
+] = {}
+_TENSORBOARD_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,114 @@ def load_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
     return records[-limit:] if limit is not None else records
 
 
+def _training_limit(run_dir: Path) -> int | None:
+  """Read the configured iteration count when an RSL-RL run recorded it."""
+  params_path = run_dir / "params" / "agent.yaml"
+  if not params_path.is_file():
+    return None
+  try:
+    contents = params_path.read_text(encoding="utf-8")
+  except OSError:
+    return None
+  match = re.search(r"^\s*max_iterations:\s*(\d+)\s*$", contents, re.MULTILINE)
+  return int(match.group(1)) if match else None
+
+
+def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
+    """Convert native RSL-RL TensorBoard scalars to the dashboard schema."""
+    event_files = sorted(run_dir.glob("events.out.tfevents.*"))
+    if not event_files:
+        return []
+    try:
+        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+    except ImportError:
+        return []
+
+    signatures = []
+    for event_file in event_files:
+        try:
+            stat = event_file.stat()
+        except OSError:
+            continue
+        signatures.append((str(event_file), stat.st_mtime_ns, stat.st_size))
+    signature_key = tuple(signatures)
+    total = _training_limit(run_dir)
+
+    with _TENSORBOARD_LOCK:
+        cached_records = _TENSORBOARD_RECORD_CACHE.get(run_dir)
+        if cached_records and cached_records[:2] == (signature_key, total):
+            records = cached_records[2]
+            return records[-limit:] if limit is not None else records
+
+        by_step: dict[int, dict[str, Any]] = {}
+        active_files = set(event_files)
+        for cached_file in set(_TENSORBOARD_CACHE) - active_files:
+            del _TENSORBOARD_CACHE[cached_file]
+        for event_file in event_files:
+            try:
+                stat = event_file.stat()
+                signature = (stat.st_mtime_ns, stat.st_size)
+                cached = _TENSORBOARD_CACHE.get(event_file)
+                if cached is None:
+                    accumulator = EventAccumulator(
+                        str(event_file), size_guidance={"scalars": 20_000}
+                    )
+                    accumulator.Reload()
+                    _TENSORBOARD_CACHE[event_file] = (signature, accumulator)
+                else:
+                    cached_signature, accumulator = cached
+                    if cached_signature != signature:
+                        accumulator.Reload()
+                        _TENSORBOARD_CACHE[event_file] = (signature, accumulator)
+            except (KeyError, OSError, RuntimeError, ValueError):
+                continue
+            for tag in accumulator.Tags().get("scalars", []):
+                try:
+                    events = accumulator.Scalars(tag)
+                except (KeyError, RuntimeError):
+                    continue
+                for event in events:
+                    record = by_step.setdefault(
+                        int(event.step),
+                        {"completed_steps": int(event.step), "metrics": {}},
+                    )
+                    record["metrics"][tag] = float(event.value)
+                    record["wall_time"] = float(event.wall_time)
+
+        records = [by_step[step] for step in sorted(by_step)]
+    if total is not None:
+        for record in records:
+            completed = record["completed_steps"]
+            record["total_steps"] = total
+            record["percent_complete"] = min(100.0, 100.0 * completed / total)
+            fps = record["metrics"].get("Perf/total_fps")
+            if fps is not None and fps > 0:
+                record["steps_per_second"] = fps
+                record["eta_seconds"] = max(0.0, (total - completed) / fps)
+    with _TENSORBOARD_LOCK:
+        _TENSORBOARD_RECORD_CACHE[run_dir] = (signature_key, total, records)
+    return records[-limit:] if limit is not None else records
+
+
+def load_training_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
+    """Read legacy JSON telemetry or native RSL-RL TensorBoard telemetry."""
+    records = load_jsonl(run_dir / "telemetry.jsonl", limit=limit)
+    return records if records else load_tensorboard_records(run_dir, limit=limit)
+
+
+def training_log_path(run_dir: Path, root: Path | None = None) -> Path:
+    """Find the run log, including launcher logs stored above the run directory."""
+    directories = [run_dir, *run_dir.parents]
+    for directory in directories:
+        if root is not None and not _inside(directory, root):
+            break
+        for filename in ("training.log", "train.log"):
+            path = directory / filename
+            if path.is_file():
+                return path
+    return run_dir / "training.log"
+
+
 def tail_lines(path: Path, count: int = 400) -> list[str]:
     if count <= 0 or not path.is_file():
         return []
@@ -96,6 +208,9 @@ def discover_runs(root: Path) -> list[RunRef]:
     for marker in RUN_MARKERS:
         for path in root.rglob(marker):
             candidates.add(path.parent.resolve())
+    for pattern in ("events.out.tfevents.*", "model_*.pt"):
+        for path in root.rglob(pattern):
+            candidates.add(path.parent.resolve())
     refs = []
     for path in candidates:
         if not _inside(path, root):
@@ -120,6 +235,12 @@ def run_modified_time(run_dir: Path) -> float:
             mtimes.append(path.stat().st_mtime)
         except OSError:
             pass
+    for pattern in ("events.out.tfevents.*", "model_*.pt"):
+        for path in run_dir.glob(pattern):
+            try:
+                mtimes.append(path.stat().st_mtime)
+            except OSError:
+                pass
     return max(mtimes, default=run_dir.stat().st_mtime if run_dir.exists() else 0.0)
 
 
@@ -139,6 +260,9 @@ def _stage_name(
             return stage
     if status and status.get("stage"):
         return str(status["stage"])
+    experiment = run_dir.parent.name
+    if experiment.startswith("ascento_"):
+        return experiment.removeprefix("ascento_")
     return run_dir.name
 
 
@@ -170,11 +294,12 @@ def latest_render(run_dir: Path) -> dict[str, Any] | None:
 
 def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[str, Any]:
     now = time.time() if now is None else now
-    telemetry_records = load_jsonl(run_dir / "telemetry.jsonl", limit=1)
+    telemetry_records = load_training_records(run_dir, limit=1)
     telemetry = telemetry_records[-1] if telemetry_records else None
     manifest = load_json(run_dir / "training_manifest.json")
     status = load_json(run_dir / "run_status.json") or {}
-    errors = error_excerpt(run_dir / "training.log")
+    log_path = training_log_path(run_dir, root)
+    errors = error_excerpt(log_path)
 
     state = status.get("state")
     if not state:
@@ -182,8 +307,10 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
             state = "finished"
         elif errors and now - run_modified_time(run_dir) > 30:
             state = "error"
-        elif telemetry:
-            state = "running" if now - run_modified_time(run_dir) < 600 else "unknown"
+        elif telemetry and now - run_modified_time(run_dir) < 30:
+            state = "running"
+        elif telemetry or (run_dir / "params" / "agent.yaml").is_file():
+            state = "finished"
         else:
             state = "unknown"
 
@@ -198,8 +325,8 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
         "telemetry": telemetry,
         "errors": errors,
         "latest_render": latest_render(run_dir),
-        "has_log": (run_dir / "training.log").is_file(),
-        "has_checkpoint": (run_dir / "checkpoint").is_dir(),
+        "has_log": log_path.is_file(),
+        "has_checkpoint": (run_dir / "checkpoint").is_dir() or bool(list(run_dir.glob("model_*.pt"))),
     }
 
 

@@ -16,9 +16,11 @@ MUJOCO_LOG.TXT
 
 # Dashboard frontend build/install output
 dashboard/frontend/node_modules/
-dashboard/frontend/dist/
 
 # Generated training and evaluation output
+logs/
+checkpoints/
+captures/
 docker-data/
 training/artifacts*/
 training/runs/

@@ -69,7 +69,6 @@ function App() {
   const [telemetry, setTelemetry] = useState([])
   const [logs, setLogs] = useState([])
   const [apiError, setApiError] = useState('')
-  const [renderState, setRenderState] = useState('idle')
   const [autoScroll, setAutoScroll] = useState(true)
   const terminalRef = useRef(null)
 
@@ -96,14 +95,12 @@ function App() {
   async function refreshSelected(id) {
     if (!id) return
     try {
-      const [run, points, render] = await Promise.all([
+      const [run, points] = await Promise.all([
         fetchJson(`/api/runs/${id}`),
         fetchJson(`/api/runs/${id}/telemetry?limit=3000`),
-        fetchJson(`/api/runs/${id}/render-status`),
       ])
       setDetail(run)
       setTelemetry(points.records || [])
-      setRenderState(render.state || 'idle')
       setApiError('')
     } catch (error) {
       setApiError(error.message)
@@ -168,27 +165,11 @@ function App() {
   const progress = detail?.telemetry || {}
   const percent = Number(progress.percent_complete || 0)
   const stage = progress.stage || detail?.status?.stage || detail?.stage
-  const trainingActive = detail?.state === 'running' || detail?.state === 'starting'
-  const renderDisabled = !detail?.has_checkpoint || trainingActive || renderState === 'running' || renderState === 'starting'
-
-  async function requestRender() {
-    if (!selectedId) return
-    setRenderState('starting')
-    try {
-      await fetchJson(`/api/runs/${selectedId}/render-latest`, { method: 'POST' })
-      setRenderState('running')
-      window.setTimeout(() => refreshSelected(selectedId), 1500)
-    } catch (error) {
-      setApiError(error.message)
-      setRenderState('error')
-    }
-  }
-
   return (
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <div className="eyebrow">ASCENTO / MJX</div>
+          <div className="eyebrow">ASCENTO / MJLAB</div>
           <h1>Training Monitor</h1>
         </div>
         <div className="topbar-actions">
@@ -228,27 +209,9 @@ function App() {
             </div>
 
             <aside className="side-column">
-              <section className="panel render-panel">
-                <div className="panel-title-row">
-                  <div className="panel-title">Latest rollout</div>
-                  <button
-                    onClick={requestRender}
-                    disabled={renderDisabled}
-                    title={trainingActive ? 'Rendering is disabled while training is running to protect GPU throughput.' : undefined}
-                  >
-                    {renderState === 'running' || renderState === 'starting' ? 'Rendering…' : 'Render latest'}
-                  </button>
-                </div>
-                {detail.latest_render ? (
-                  <>
-                    <img src={`/api/runs/${detail.id}/render/latest?t=${detail.modified_at}`} alt="Latest deterministic MuJoCo rollout preview" />
-                    <div className="render-meta">
-                      {['step', 'return', 'survival_steps', 'min_height', 'max_abs_qvel', 'action_saturation_fraction'].map((key) => (
-                        detail.latest_render[key] !== undefined && <div key={key}><span>{key}</span><strong>{fmtNumber(detail.latest_render[key], 3)}</strong></div>
-                      ))}
-                    </div>
-                  </>
-                ) : <div className="empty-panel">No preview rendered yet.</div>}
+              <section className="panel">
+                <div className="panel-title">Motion capture</div>
+                <div className="empty-panel">Use <code>capture-motion</code> for RecorderManager exports.</div>
               </section>
 
               <section className={`panel error-panel ${detail.errors?.length ? 'has-errors' : ''}`}>

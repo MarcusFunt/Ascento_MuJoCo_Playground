@@ -1,28 +1,26 @@
 # Ascento Training Dashboard
 
-A small local web dashboard for monitoring Brax/MJX training over Tailscale.
-It reads the artifacts the trainer already writes and does not own or supervise
-the PPO process itself.
+A small local web dashboard for monitoring mjlab/RSL-RL training over Tailscale.
+It reads run artifacts and does not own or supervise the PPO process itself.
 
 ## What it shows
 
 - current stage, progress, steps/s, elapsed time and ETA from `telemetry.jsonl`;
-- automatically selected PPO/evaluation metric charts;
+- TensorBoard/RSL-RL metric artifacts and console output;
 - live captured console output using Server-Sent Events;
 - recent traceback/error excerpts;
-- the newest deterministic MuJoCo checkpoint preview and rollout statistics;
+- available RSL-RL checkpoints and motion-capture export location;
 - previous runs discovered under the artifact root.
 
-The web UI does not expose an arbitrary shell. Its only write action is a fixed
-"Render latest" endpoint that invokes the repository's deterministic checkpoint
-renderer for the selected run.
+Motion export is intentionally a separate `capture-motion` command so capture
+does not compete with training or become a second rollout framework.
 
 ## Install
 
-From the repository root, with the existing Python environment activated:
+From the repository root, after installing the project with uv:
 
 ```bash
-pip install -r requirements-dashboard.txt
+uv sync --extra cu128
 cd dashboard/frontend
 npm install
 npm run build
@@ -35,7 +33,7 @@ For frontend development, run `npm run dev` in `dashboard/frontend`; Vite proxie
 ## Start the dashboard
 
 ```bash
-./scripts/run_dashboard.sh
+python -m uvicorn dashboard.app:app --host 127.0.0.1 --port 8000
 ```
 
 The production server intentionally binds only to `127.0.0.1:8000`. To make it
@@ -51,44 +49,25 @@ Do not use Tailscale Funnel for this private monitor.
 Set a different artifact location when needed:
 
 ```bash
-ASCENTO_ARTIFACT_ROOT=/path/to/runs ./scripts/run_dashboard.sh
+ASCENTO_ARTIFACT_ROOT=/path/to/logs python -m uvicorn dashboard.app:app --host 127.0.0.1 --port 8000
 ```
 
 ## Start a monitored training run
 
-The normal trainer already writes `telemetry.jsonl` and checkpoints. To also
-capture console output and reliable process state, launch it through:
+The standard mjlab trainer writes RSL-RL checkpoints and TensorBoard events. To
+capture console output for the dashboard, launch it through:
 
 ```bash
-ASCENTO_JAX_PLATFORM=cuda python -m dashboard.launch -- \
-  --stage balance \
-  --timesteps 50000000 \
-  --num-envs 1024
+python -m dashboard.launch --task Ascento-Balance-Flat \
+  -- --env.scene.num-envs 512 --agent.max-iterations 10000
 ```
 
-This creates a unique directory such as:
+The artifacts live under the configured RSL-RL log root. The dashboard treats
+these artifacts as read-only and leaves checkpoint playback/capture to the
+normal mjlab tools.
 
-```text
-training/artifacts/20260902_110500_balance/
-├── checkpoint/
-├── telemetry.jsonl
-├── training.log
-├── run_status.json
-├── policy_params.pkl
-└── training_manifest.json
+For motion exports, use `capture-motion` after training, for example:
+
+```bash
+capture-motion Ascento-Jump-Flat --checkpoint /path/to/model_10000.pt --takes 20
 ```
-
-Any additional arguments after `--` are forwarded to `training.train`, except
-`--output`, which is managed by the launcher so runs cannot accidentally mix
-telemetry from different sessions.
-
-## Rendering checkpoints
-
-The dashboard can render the newest numeric checkpoint on demand. This runs a
-short deterministic MuJoCo rollout in a separate process and stores its PNG and
-`progress_renders.jsonl` under `<run>/renders/`.
-
-Rendering uses the same JAX backend environment as the dashboard process. On a
-GPU training machine it can therefore temporarily compete with PPO for GPU
-resources; use it as an occasional inspection tool rather than a live video
-stream.
