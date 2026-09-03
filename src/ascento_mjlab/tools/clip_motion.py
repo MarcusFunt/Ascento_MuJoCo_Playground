@@ -26,20 +26,28 @@ def _frame_count(capture: dict[str, np.ndarray]) -> int:
 
 
 def _event_indices(capture: dict[str, np.ndarray]) -> dict[str, list[int]]:
-  """Return all detected event frame indices from contacts or jump state."""
+  """Return all detected event frame indices from jump state or contact fallback."""
   count = _frame_count(capture)
   events: dict[str, list[int]] = {"start": [0], "end": [count - 1]}
   jump_state = capture.get("jump_state")
   if jump_state is not None and jump_state.ndim == 2 and jump_state.shape[1] >= 3:
-    events["takeoff"] = np.flatnonzero(jump_state[:, 1] > 0.5).tolist()
-    events["landing"] = np.flatnonzero(jump_state[:, 2] > 0.5).tolist()
+    takeoff = np.flatnonzero(jump_state[:, 1] > 0.5).tolist()
+    landing = np.flatnonzero(jump_state[:, 2] > 0.5).tolist()
+    if takeoff:
+      events["takeoff"] = takeoff
+    if landing:
+      events["landing"] = landing
   contacts = capture.get("contacts")
   if contacts is not None and contacts.ndim == 2 and contacts.shape[1] >= 2:
     supported = np.all(contacts[:, :2] > 0.5, axis=1)
-    takeoff = np.flatnonzero(supported[:-1] & ~supported[1:]) + 1
-    landing = np.flatnonzero(~supported[:-1] & supported[1:]) + 1
-    events.setdefault("takeoff", takeoff.tolist())
-    events.setdefault("landing", landing.tolist())
+    takeoff = (np.flatnonzero(supported[:-1] & ~supported[1:]) + 1).tolist()
+    landing = (np.flatnonzero(~supported[:-1] & supported[1:]) + 1).tolist()
+    # Jump-state event pulses are authoritative when present. Contacts fill only
+    # missing event types so an empty jump_state channel cannot suppress fallback.
+    if takeoff and not events.get("takeoff"):
+      events["takeoff"] = takeoff
+    if landing and not events.get("landing"):
+      events["landing"] = landing
   return {name: indices for name, indices in events.items() if indices}
 
 
@@ -96,7 +104,10 @@ def _resample_capture(capture: dict[str, np.ndarray], fps: float) -> dict[str, n
       result[key] = value.copy()
       continue
     if key in discrete:
-      indices = np.searchsorted(source_time, target_time, side="left").clip(max=len(source_time) - 1)
+      # Zero-order hold: keep the most recent source sample until its successor's
+      # timestamp. side="right" preserves transitions at the original sample time.
+      indices = np.searchsorted(source_time, target_time, side="right") - 1
+      indices = indices.clip(min=0, max=len(source_time) - 1)
       result[key] = value[indices]
       continue
     flat = value.reshape(len(value), -1).astype(np.float64)
@@ -132,8 +143,12 @@ def process_capture(
     center = matches[0]["frame"]
     # Account for decimal timestamp representation at exact frame boundaries.
     epsilon = 1.0e-9
-    start = int(np.searchsorted(source_time, source_time[center] - pre_roll - epsilon, side="left"))
-    end = int(np.searchsorted(source_time, source_time[center] + post_roll + epsilon, side="right") - 1)
+    start = int(
+      np.searchsorted(source_time, source_time[center] - pre_roll - epsilon, side="left")
+    )
+    end = int(
+      np.searchsorted(source_time, source_time[center] + post_roll + epsilon, side="right") - 1
+    )
     end = min(end, len(source_time) - 1)
   result = _slice_capture(capture, start, end)
   if fps is not None:
@@ -157,7 +172,11 @@ def process_capture(
         "source_frame_count": _frame_count(capture),
         "source_duration_s": float(capture["time"][-1] - capture["time"][0]),
         "clip_duration_s": float(result["time"][-1]),
-        "clip_fps": float(1.0 / np.median(np.diff(result["time"]))) if len(result["time"]) > 1 else None,
+        "clip_fps": (
+          float(1.0 / np.median(np.diff(result["time"])))
+          if len(result["time"]) > 1
+          else None
+        ),
         "trim_event": event,
       },
       sort_keys=True,

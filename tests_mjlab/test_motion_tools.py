@@ -32,6 +32,21 @@ def test_detect_events_uses_two_wheel_contact_transitions():
   ]
 
 
+def test_detect_events_falls_back_when_jump_state_has_no_event_pulses():
+  capture = {
+    "time": np.asarray([0.0, 0.1, 0.2]),
+    "contacts": np.asarray([[1, 1], [0, 0], [1, 1]], dtype=np.float32),
+    "jump_state": np.zeros((3, 4), dtype=np.float32),
+  }
+  events = detect_events(capture)
+  assert [(event["name"], event["frame"]) for event in events] == [
+    ("start", 0),
+    ("end", 2),
+    ("takeoff", 1),
+    ("landing", 2),
+  ]
+
+
 def test_process_capture_trims_resamples_and_separates_motion():
   result = process_capture(_capture(), event="takeoff", pre_roll=0.1, post_roll=0.3, fps=20.0)
   assert len(result["time"]) == 9
@@ -40,6 +55,27 @@ def test_process_capture_trims_resamples_and_separates_motion():
   assert result["joint_pos_local"].shape == result["joint_pos"].shape
   markers = json.loads(str(result["clip_events_json"].item()))
   assert any(marker["name"] == "takeoff" for marker in markers)
+
+
+def test_discrete_resampling_uses_previous_sample_zero_order_hold():
+  capture = {
+    "time": np.asarray([0.0, 0.1]),
+    "contacts": np.asarray([[1, 1], [0, 0]], dtype=np.float32),
+    "jump_state": np.asarray([[0, 0, 0, 0], [1, 1, 0, 0.1]], dtype=np.float32),
+  }
+  result = process_capture(capture, fps=20.0)
+  np.testing.assert_allclose(result["time"], np.asarray([0.0, 0.05, 0.1]))
+  np.testing.assert_array_equal(
+    result["contacts"],
+    np.asarray([[1, 1], [1, 1], [0, 0]], dtype=np.float32),
+  )
+  np.testing.assert_array_equal(
+    result["jump_state"],
+    np.asarray(
+      [[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 0, 0.1]],
+      dtype=np.float32,
+    ),
+  )
 
 
 def test_motion_quality_reports_smoothness_separately_from_success():
