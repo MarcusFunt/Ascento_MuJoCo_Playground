@@ -13,9 +13,11 @@ __pycache__/
 .idea/
 .DS_Store
 MUJOCO_LOG.TXT
+.maintenance/
 
 # Dashboard frontend build/install output
 dashboard/frontend/node_modules/
+dashboard/frontend/dist/
 
 # Generated training and evaluation output
 logs/
