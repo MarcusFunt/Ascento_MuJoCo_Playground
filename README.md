@@ -28,13 +28,13 @@ Use Linux/WSL2, Python 3.11–3.13, an NVIDIA driver compatible with the pinned
 CUDA wheel, and `uv`:
 
 ```bash
-uv sync --extra cu128
+uv sync --extra cu128 --extra dashboard
 ```
 
 For CPU-only development:
 
 ```bash
-uv sync --extra cpu
+uv sync --extra cpu --extra dashboard
 ```
 
 The lockfile pins mjlab 1.6.0, MuJoCo 3.11, MuJoCo Warp, Warp, Torch, and
@@ -92,8 +92,23 @@ uv run --extra cu128 python -m ascento_mjlab.tools.capture_motion \
 ```
 
 Omit `--checkpoint` for a zero-action plant capture. Each take includes time,
-root transforms, joint state, applied effort, action, task, seed, and capture
-FPS.
+root transforms, local joint state, contact state, jump state when available,
+applied effort, action, task, seed, checkpoint hash, physics profile, and
+capture FPS. Trim and resample a take for animation use:
+
+```bash
+uv run clip-motion captures/jump/take_000.npz \
+  --event takeoff --pre-roll 0.5 --post-roll 1.0 --fps 24 \
+  --output captures/jump/jump_short.npz
+```
+
+Rank a batch of captures by smoothness and contact quality. This quality score
+is separate from task-success acceptance and is intended to select candidates
+for visual review:
+
+```bash
+uv run rank-motion captures/jump --top 5 --output captures/jump/ranking.json
+```
 
 ## Docker
 
@@ -122,7 +137,7 @@ specific important plant regression.
 - `src/ascento_mjlab/actuator.py`: peak/speed/response actuator extension.
 - `src/ascento_mjlab/mdp/`: Ascento observations, rewards, resets, semantics, metrics.
 - `src/ascento_mjlab/tasks/`: balance, velocity, recovery, and flat-jump configs.
-- `src/ascento_mjlab/tools/`: smoke, model inspection, plant comparison, capture.
+- `src/ascento_mjlab/tools/`: smoke, model inspection, plant comparison, capture, clip processing, and motion-quality ranking.
 - `tests_mjlab/`: migration unit and integration tests.
 
 The old JAX/MJX/Brax implementation remains available only in Git history and

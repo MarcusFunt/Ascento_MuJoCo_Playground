@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from dataclasses import asdict
 from pathlib import Path
 
@@ -27,17 +28,40 @@ class MotionRecorder(RecorderTerm):
   def record_post_step(self) -> None:
     env = self._env
     robot = env.scene["robot"]
-    self.frames.append(
-      {
-        "time": env.common_step_counter * env.step_dt,
-        "root_pos": robot.data.root_link_pos_w[0].detach().cpu().numpy().copy(),
-        "root_quat": robot.data.root_link_quat_w[0].detach().cpu().numpy().copy(),
-        "joint_pos": robot.data.joint_pos[0].detach().cpu().numpy().copy(),
-        "joint_vel": robot.data.joint_vel[0].detach().cpu().numpy().copy(),
-        "effort": robot.data.actuator_force[0].detach().cpu().numpy().copy(),
-        "action": env.action_manager.action[0].detach().cpu().numpy().copy(),
-      }
-    )
+    frame = {
+      "time": env.common_step_counter * env.step_dt,
+      "root_pos": robot.data.root_link_pos_w[0].detach().cpu().numpy().copy(),
+      "root_quat": robot.data.root_link_quat_w[0].detach().cpu().numpy().copy(),
+      "joint_pos": robot.data.joint_pos[0].detach().cpu().numpy().copy(),
+      "joint_vel": robot.data.joint_vel[0].detach().cpu().numpy().copy(),
+      "effort": robot.data.actuator_force[0].detach().cpu().numpy().copy(),
+      "action": env.action_manager.action[0].detach().cpu().numpy().copy(),
+    }
+    contacts = []
+    for sensor_name in ("left_wheel_contact", "right_wheel_contact"):
+      try:
+        sensor = env.scene[sensor_name]
+      except KeyError:
+        sensor = None
+      if sensor is not None and sensor.data.found is not None:
+        contacts.append(float(sensor.data.found[0].flatten().any()))
+    if len(contacts) == 2:
+      frame["contacts"] = np.asarray(contacts, dtype=np.float32)
+    if hasattr(env, "ascento_jump_state"):
+      state = env.ascento_jump_state
+      frame["jump_state"] = np.asarray(
+        [state["airborne"][0], state["takeoff"][0], state["landing"][0], state["air_time"][0]],
+        dtype=np.float32,
+      )
+    for command_name in ("motion", "twist"):
+      try:
+        command = env.command_manager.get_command(command_name)
+      except (AttributeError, KeyError):
+        command = None
+      if command is not None:
+        frame["command"] = command[0].detach().cpu().numpy().copy()
+        break
+    self.frames.append(frame)
 
   def export(self, path: Path, *, metadata: dict[str, str]) -> None:
     if not self.frames:
@@ -63,6 +87,10 @@ def main() -> None:
     parser.error("--takes and --steps must be positive")
   if args.checkpoint is not None and not args.checkpoint.is_file():
     parser.error(f"checkpoint does not exist: {args.checkpoint}")
+
+  checkpoint_hash = ""
+  if args.checkpoint is not None:
+    checkpoint_hash = hashlib.sha256(args.checkpoint.read_bytes()).hexdigest()
 
   for take in range(args.takes):
     cfg = load_env_cfg(args.task, play=True)
@@ -108,7 +136,14 @@ def main() -> None:
     recorder = raw_env.recorder_manager.get_term("motion")
     recorder.export(
       args.output_dir / f"take_{take:03d}.npz",
-      metadata={"task": args.task, "seed": str(take), "fps": str(round(1.0 / raw_env.step_dt))},
+      metadata={
+        "task": args.task,
+        "seed": str(take),
+        "fps": str(round(1.0 / raw_env.step_dt)),
+        "checkpoint": str(args.checkpoint) if args.checkpoint is not None else "",
+        "model_sha256": checkpoint_hash,
+        "physics_profile": "animation_high_authority",
+      },
     )
     env.close()
 

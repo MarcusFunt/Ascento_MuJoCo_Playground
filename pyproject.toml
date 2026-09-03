@@ -15,7 +15,11 @@ dependencies = [
 [project.optional-dependencies]
 cu128 = ["torch>=2.7.0"]
 cpu = ["torch>=2.7.0"]
-dashboard = ["fastapi>=0.115.0", "uvicorn[standard]>=0.34.0"]
+dashboard = ["fastapi==0.141.1", "uvicorn[standard]==0.52.4"]
+
+[project.scripts]
+clip-motion = "ascento_mjlab.tools.clip_motion:main"
+rank-motion = "ascento_mjlab.tools.motion_quality:main"
 
 [dependency-groups]
 dev = [
