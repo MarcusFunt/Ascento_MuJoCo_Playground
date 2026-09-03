@@ -5,12 +5,13 @@ training artifacts and launcher metadata; it does not own the PPO algorithm itse
 
 ## What it shows
 
-- current iteration, wall-clock freshness, throughput, elapsed time and ETA;
+- current iteration, wall-clock freshness, environment-step throughput, elapsed time and ETA;
+- explicit iteration counts plus collected environment-transition totals when run config is available;
 - reward and episode-length trends;
 - PPO/surrogate loss, value loss, entropy, KL, clip fraction and invalid-update telemetry when reported by the trainer;
 - NaN/Inf detection across numeric telemetry;
 - stale-run detection when a run is still marked running but telemetry stops;
-- GPU utilization, memory, temperature, process PID/aliveness and per-process GPU memory when `nvidia-smi` is available;
+- GPU utilization, memory and temperature, plus process-specific telemetry only when the dashboard shares the trainer's PID namespace;
 - recent traceback/error excerpts and live console output;
 - Git commit/branch, task/stage, seed, command line, timestep/device, checkpoint path, configuration files, start/end time and exit code;
 - a copyable run-information block and downloadable `run-summary.json`;
@@ -85,6 +86,13 @@ The API exposes:
 - `/api/runs/<id>/telemetry` — normalized training telemetry;
 - `/api/runs/<id>/logs` and `/logs/stream` — captured console output.
 
+Native RSL-RL TensorBoard event steps are PPO iterations, not environment
+transitions. The normalized telemetry therefore uses `iteration`,
+`completed_iterations`, and `total_iterations` for progress. When
+`num_steps_per_env` and `scene.num_envs` are available, it also reports
+`environment_steps` and `total_environment_steps`. `Perf/total_fps` is exposed
+as environment-step throughput rather than iteration throughput.
+
 `ASCENTO_STALE_AFTER_SECONDS` controls the stale-run threshold and defaults to
 90 seconds.
 
@@ -99,9 +107,10 @@ uv run --frozen --extra cu128 python -m dashboard.launch \
 ```
 
 `dashboard.launch` captures durable run metadata before starting the trainer,
-including the current Git commit/branch, the exact command, task/stage, seed,
-device and simulation timestep when supplied on the command line. It updates the
-same status record with PID, finish time, exit code and latest checkpoint.
+including the current Git commit/branch and exact command. It also updates the
+status record from the trainer's runtime output with the actual seed/device and
+records the launcher's PID namespace so a dashboard in another container does
+not misidentify an unrelated same-numbered PID as the trainer.
 
 To override the shared root for both the launcher and server:
 
