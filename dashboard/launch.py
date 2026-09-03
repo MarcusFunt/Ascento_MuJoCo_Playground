@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -11,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from dashboard.config import REPO_ROOT, load_config
+
+TRAINING_RUNTIME_RE = re.compile(
+    r"Training with:\s*device=([^,\s]+),\s*seed=([^,\s]+),\s*rank=(\d+)"
+)
+GPU_WORLD_RE = re.compile(r"Launching training with\s+(\d+)\s+GPUs?", re.IGNORECASE)
 
 
 def write_status(path: Path, **values: Any) -> None:
@@ -47,6 +53,13 @@ def _repository_env(name: str) -> str | None:
     if not value or value.strip().lower() in {"unknown", "none", "null"}:
         return None
     return value.strip()
+
+
+def _pid_namespace() -> str | None:
+    try:
+        return os.readlink("/proc/self/ns/pid")
+    except OSError:
+        return None
 
 
 def git_metadata() -> dict[str, Any]:
@@ -93,6 +106,19 @@ def _number(value: str | None) -> int | float | str | None:
             return float(value)
         except ValueError:
             return value
+
+
+def _runtime_status_from_line(line: str) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    runtime = TRAINING_RUNTIME_RE.search(line)
+    if runtime:
+        values["device"] = runtime.group(1)
+        values["seed"] = _number(runtime.group(2))
+        values["rank"] = int(runtime.group(3))
+    world = GPU_WORLD_RE.search(line)
+    if world:
+        values["gpu_world_size"] = int(world.group(1))
+    return values
 
 
 def _latest_checkpoint(run_dir: Path) -> str | None:
@@ -178,6 +204,7 @@ def main() -> int:
     sim_timestep = _number(
         _training_arg(
             training_args,
+            "--env.sim.mujoco.timestep",
             "--env.sim.dt",
             "--sim.dt",
             "--simulation.dt",
@@ -188,7 +215,7 @@ def main() -> int:
 
     write_status(
         status_path,
-        schema_version=2,
+        schema_version=3,
         state="starting",
         task=args.task,
         stage=stage,
@@ -204,6 +231,7 @@ def main() -> int:
         git=git,
         git_commit=git.get("commit"),
         git_branch=git.get("branch"),
+        pid_namespace=_pid_namespace(),
         exit_code=None,
     )
 
@@ -240,6 +268,9 @@ def main() -> int:
                     sys.stdout.write(line)
                     sys.stdout.flush()
                     log.write(line)
+                    runtime_values = _runtime_status_from_line(line)
+                    if runtime_values:
+                        write_status(status_path, **runtime_values)
                 exit_code = process.wait()
             except KeyboardInterrupt:
                 process.terminate()
