@@ -25,7 +25,7 @@ WORKDIR /workspace
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY tests_mjlab ./tests_mjlab
-RUN uv sync --frozen --extra cu128 --no-dev
+RUN uv sync --frozen --extra cu128 --extra dashboard --no-dev
 
 COPY docker/smoke.sh /usr/local/bin/ascento-smoke
 RUN chmod +x /usr/local/bin/ascento-smoke && mkdir -p /workspace/logs /workspace/checkpoints /workspace/captures

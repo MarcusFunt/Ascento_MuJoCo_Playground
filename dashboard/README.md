@@ -5,7 +5,7 @@ It reads run artifacts and does not own or supervise the PPO process itself.
 
 ## What it shows
 
-- current stage, progress, steps/s, elapsed time and ETA from `telemetry.jsonl`;
+- current stage, progress, steps/s, elapsed time and ETA from RSL-RL TensorBoard events;
 - TensorBoard/RSL-RL metric artifacts and console output;
 - live captured console output using Server-Sent Events;
 - recent traceback/error excerpts;
@@ -20,7 +20,7 @@ does not compete with training or become a second rollout framework.
 From the repository root, after installing the project with uv:
 
 ```bash
-uv sync --extra cu128
+uv sync --extra cu128 --extra dashboard
 cd dashboard/frontend
 npm install
 npm run build
