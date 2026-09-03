@@ -4,7 +4,7 @@ import pytest
 
 import dashboard.launch as launch
 from dashboard.config import load_config, validate_startup
-from dashboard.launch import _training_arg, build_parser
+from dashboard.launch import _runtime_status_from_line, _training_arg, build_parser
 
 
 def test_launcher_uses_same_default_artifact_root_as_dashboard(monkeypatch, tmp_path):
@@ -20,7 +20,7 @@ def test_launcher_argument_metadata_parser_supports_both_cli_forms():
         "--seed=7",
         "--device",
         "cuda:0",
-        "--env.sim.dt",
+        "--env.sim.mujoco.timestep",
         "0.002",
         "--agent.seed",
         "11",
@@ -28,7 +28,16 @@ def test_launcher_argument_metadata_parser_supports_both_cli_forms():
 
     assert _training_arg(args, "--seed", "--agent.seed") == "11"
     assert _training_arg(args, "--device") == "cuda:0"
-    assert _training_arg(args, "--env.sim.dt") == "0.002"
+    assert _training_arg(args, "--env.sim.mujoco.timestep") == "0.002"
+
+
+def test_launcher_extracts_runtime_device_seed_and_world_size():
+    assert _runtime_status_from_line(
+        "[INFO] Training with: device=cuda:0, seed=42, rank=0"
+    ) == {"device": "cuda:0", "seed": 42, "rank": 0}
+    assert _runtime_status_from_line("[INFO] Launching training with 2 GPUs") == {
+        "gpu_world_size": 2
+    }
 
 
 def test_launcher_uses_injected_repository_version_without_git(monkeypatch):
