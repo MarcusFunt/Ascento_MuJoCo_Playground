@@ -100,6 +100,7 @@ def run_repository_provenance(run_dir: Path, root: Path) -> dict[str, Any]:
     return {"commit": None, "branch": None, "source": "unknown", "inferred": False}
 
 
+@lru_cache(maxsize=512)
 def _is_ancestor(older: str, newer: str) -> bool | None:
     try:
         result = subprocess.run(
