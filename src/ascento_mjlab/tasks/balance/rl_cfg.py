@@ -19,6 +19,7 @@ AscentoBalanceRlCfg = RslRlOnPolicyRunnerCfg(
     lam=0.95,
     entropy_coef=0.005,
     max_grad_norm=1.0,
+    class_name="ascento_mjlab.ppo:InstrumentedPPO",
   ),
   logger="tensorboard",
   experiment_name="ascento_balance",
@@ -27,4 +28,5 @@ AscentoBalanceRlCfg = RslRlOnPolicyRunnerCfg(
   num_steps_per_env=24,
   save_interval=250,
   max_iterations=10_000,
+  clip_actions=1.0,
 )
