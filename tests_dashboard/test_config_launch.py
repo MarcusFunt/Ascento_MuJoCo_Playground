@@ -54,3 +54,19 @@ def test_startup_validation_reports_bad_artifact_root(tmp_path):
 
     with pytest.raises(RuntimeError, match="artifact root is not a directory"):
         validate_startup(config)
+
+
+def test_read_only_monitor_validation_does_not_create_missing_artifact_root(tmp_path):
+    missing_root = tmp_path / "logs" / "rsl_rl"
+    base = load_config()
+    config = type(base)(
+        repo_root=base.repo_root,
+        artifact_root=missing_root,
+        frontend_dist=base.frontend_dist,
+        stale_after_seconds=base.stale_after_seconds,
+    )
+
+    warnings = validate_startup(config, create_artifact_root=False)
+
+    assert missing_root.exists() is False
+    assert any("does not exist yet" in warning for warning in warnings)

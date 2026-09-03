@@ -22,7 +22,9 @@ from dashboard.monitor import tail_lines, training_log_path
 from dashboard.versioning import annotate_run_summary, current_repository_version
 
 CONFIG = load_config()
-STARTUP_WARNINGS = validate_startup(CONFIG)
+# The server only monitors artifacts. Docker intentionally mounts logs/checkpoints/
+# captures read-only, so startup validation must never try to create directories.
+STARTUP_WARNINGS = validate_startup(CONFIG, create_artifact_root=False)
 ARTIFACT_ROOT = CONFIG.artifact_root
 FRONTEND_DIST = CONFIG.frontend_dist
 
@@ -43,11 +45,12 @@ def _run(run_id: str):
 
 def _artifact_health() -> list[str]:
     problems: list[str] = []
-    if not ARTIFACT_ROOT.exists():
-        problems.append(f"artifact root does not exist: {ARTIFACT_ROOT}")
-    elif not ARTIFACT_ROOT.is_dir():
+    # A missing root is normal on a fresh install before the first training run.
+    # discover_runs() treats it as an empty run set, so it is a warning rather
+    # than a health failure.
+    if ARTIFACT_ROOT.exists() and not ARTIFACT_ROOT.is_dir():
         problems.append(f"artifact root is not a directory: {ARTIFACT_ROOT}")
-    else:
+    elif ARTIFACT_ROOT.exists():
         if not os.access(ARTIFACT_ROOT, os.R_OK):
             problems.append(f"artifact root is not readable: {ARTIFACT_ROOT}")
         if not os.access(ARTIFACT_ROOT, os.X_OK):
