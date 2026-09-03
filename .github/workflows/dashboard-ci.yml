@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v6
-      - run: uv run --frozen --extra cpu pytest -q tests_mjlab
+      - run: uv run --frozen --extra cpu python -m pytest -q tests_mjlab
 
   dashboard-backend:
     runs-on: ubuntu-latest
@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v6
-      - run: uv run --frozen --extra cpu --extra dashboard pytest -q tests_dashboard
+      - run: uv run --frozen --extra cpu --extra dashboard python -m pytest -q tests_dashboard
 
   frontend:
     runs-on: ubuntu-latest
