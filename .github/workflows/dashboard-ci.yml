@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'dashboard/**'
+      - 'scripts/run_dashboard.sh'
       - 'src/ascento_mjlab/tools/**'
       - 'tests_mjlab/**'
       - 'tests_dashboard/**'
@@ -13,6 +14,7 @@ on:
   push:
     paths:
       - 'dashboard/**'
+      - 'scripts/run_dashboard.sh'
       - 'src/ascento_mjlab/tools/**'
       - 'tests_mjlab/**'
       - 'tests_dashboard/**'
@@ -46,6 +48,7 @@ jobs:
         with:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v6
+      - run: bash -n scripts/run_dashboard.sh
       - run: uv run --frozen --extra cpu --extra dashboard python -m pytest -q tests_dashboard
 
   frontend:

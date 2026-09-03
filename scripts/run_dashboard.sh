@@ -4,13 +4,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="${ASCENTO_DASHBOARD_DIST:-$ROOT/dashboard/frontend/dist}"
 
+if ! command -v uv >/dev/null 2>&1; then
+  echo "Dashboard startup failed: uv is not installed or not on PATH." >&2
+  echo "Install uv, then run: uv sync --frozen --extra dashboard" >&2
+  exit 1
+fi
+
 if [[ ! -f "$DIST/index.html" ]]; then
-  echo "Dashboard frontend is not built." >&2
+  echo "Dashboard frontend is not built: $DIST/index.html is missing." >&2
   echo "Run: cd dashboard/frontend && npm install && npm run build" >&2
   exit 1
 fi
 
 cd "$ROOT"
-exec python -m uvicorn dashboard.app:app \
+exec uv run --frozen --extra dashboard python -m uvicorn dashboard.app:app \
   --host "${ASCENTO_DASHBOARD_HOST:-127.0.0.1}" \
   --port "${ASCENTO_DASHBOARD_PORT:-8000}"
