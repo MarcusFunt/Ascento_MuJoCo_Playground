@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+import dashboard.launch as launch
 from dashboard.config import load_config, validate_startup
 from dashboard.launch import _training_arg, build_parser
 
@@ -28,6 +29,16 @@ def test_launcher_argument_metadata_parser_supports_both_cli_forms():
     assert _training_arg(args, "--seed", "--agent.seed") == "11"
     assert _training_arg(args, "--device") == "cuda:0"
     assert _training_arg(args, "--env.sim.dt") == "0.002"
+
+
+def test_launcher_uses_injected_repository_version_without_git(monkeypatch):
+    monkeypatch.setattr(launch, "_git_value", lambda *args: None)
+    monkeypatch.setenv("ASCENTO_REPOSITORY_COMMIT", "container-commit")
+    monkeypatch.setenv("ASCENTO_REPOSITORY_BRANCH", "main")
+
+    metadata = launch.git_metadata()
+    assert metadata["commit"] == "container-commit"
+    assert metadata["branch"] == "main"
 
 
 def test_startup_validation_reports_bad_artifact_root(tmp_path):
