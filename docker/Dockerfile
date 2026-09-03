@@ -44,20 +44,7 @@ COPY --from=dashboard-frontend /frontend/dist ./dashboard/frontend/dist
 # Install every optional extra that is compatible with the selected compute
 # backend, plus every dependency group. cpu/cu128 are mutually exclusive.
 RUN set -eu; \
-    EXTRAS="$(python - "$COMPUTE_EXTRA" <<'PY'
-import sys, tomllib
-with open('pyproject.toml', 'rb') as handle:
-    data = tomllib.load(handle)
-compute = sys.argv[1]
-extras = []
-for name in (data.get('project', {}).get('optional-dependencies', {}) or {}):
-    if name in {'cpu', 'cu128'}:
-        continue
-    extras.extend(['--extra', name])
-extras.extend(['--extra', compute])
-print(' '.join(extras))
-PY
-)"; \
+    EXTRAS="$(python -c 'import sys,tomllib; data=tomllib.load(open("pyproject.toml","rb")); names=[name for name in (data.get("project",{}).get("optional-dependencies",{}) or {}) if name not in {"cpu","cu128"}]; names.append(sys.argv[1]); print(" ".join("--extra "+name for name in names))' "$COMPUTE_EXTRA")"; \
     uv sync --frozen --all-groups $EXTRAS
 
 COPY docker/smoke.sh /usr/local/bin/ascento-smoke
