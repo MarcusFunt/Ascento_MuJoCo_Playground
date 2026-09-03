@@ -22,7 +22,51 @@ speed protection, and finite torque response. The 15 Nm leg and 5 Nm wheel
 continuous ratings are documentation only until a thermal/duration model is
 justified. No communication delay, sensor noise, or thermal model is enabled.
 
-## Setup
+## Maintenance / first-time install
+
+For a normal Linux/WSL2 machine, the preferred setup and update path is the
+maintenance script:
+
+```bash
+bash scripts/maintain.sh
+```
+
+When run from an existing checkout it updates that checkout. The same script can
+also be downloaded and run on a machine that has never cloned the repository;
+it defaults to `~/Ascento_MuJoCo_Playground`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MarcusFunt/Ascento_MuJoCo_Playground/main/scripts/maintain.sh | bash
+```
+
+The maintainer:
+
+- installs missing base tooling, Docker Engine/Compose, uv, and NVIDIA Container
+  Toolkit where appropriate on supported Debian/Ubuntu systems;
+- automatically chooses CUDA when a usable NVIDIA GPU is present, otherwise CPU;
+- updates the checkout to the requested remote branch without deleting
+  `logs/`, `checkpoints/`, or `captures/`;
+- runs exact `uv sync`, including every dependency group and every optional
+  dependency compatible with the selected compute backend;
+- uses `npm ci` for an exact frontend dependency reconciliation and rebuilds the
+  dashboard;
+- rebuilds the Docker image from scratch so removed image dependencies cannot
+  remain in the active image;
+- starts the dashboard container on `127.0.0.1:8000` by default;
+- preserves existing runs and records pre-update Git provenance for legacy runs
+  that did not already record their repository commit.
+
+`cpu` and `cu128` are declared as conflicting extras, so only one can be
+installed at a time. All other compatible optional extras are installed.
+`uv sync` is exact by default, so Python packages that disappear from the
+lockfile/project are removed. `npm ci` likewise replaces `node_modules` with the
+contents of the current lockfile.
+
+The script refuses to overwrite tracked local changes or local-only commits
+unless `--force` is explicitly supplied. See `bash scripts/maintain.sh --help`
+for CPU/GPU, install-directory, and Docker options.
+
+## Manual setup
 
 Use Linux/WSL2, Python 3.11–3.13, an NVIDIA driver compatible with the pinned
 CUDA wheel, and `uv`:
@@ -112,16 +156,29 @@ uv run rank-motion captures/jump --top 5 --output captures/jump/ranking.json
 
 ## Docker
 
-The final image uses the lockfile and NVIDIA Container Toolkit runtime:
+The maintained image includes the Python project, all compatible optional
+extras/dependency groups, dashboard backend, and a freshly built frontend.
+The base compose file is CPU-safe; add the GPU overlay for CUDA:
 
 ```bash
+# CPU
 docker compose -f docker/compose.yaml build
-docker compose -f docker/compose.yaml run --rm ascento-mjlab
+
+# NVIDIA GPU
+docker compose -f docker/compose.yaml -f docker/compose.gpu.yaml build
 ```
 
-Logs, checkpoints, and captures are mounted from the repository. The image
-defaults to the version/GPU/finite-rollout smoke gate and supports headless
-offscreen rendering through `MUJOCO_GL=egl`.
+The maintenance script normally handles the build arguments and starts the
+`dashboard` service automatically. Training logs, checkpoints, and captures are
+bind-mounted from the repository, so container rebuilds do not delete runs.
+The dashboard mount is read-only and defaults to the shared `logs/rsl_rl`
+artifact root.
+
+The dashboard compares each run's recorded Git commit with the repository
+version serving the UI. Runs from older commits are labelled `OUTDATED` in the
+run selector and show an explicit warning plus both commits in Run Information.
+Legacy runs without Git metadata receive an inferred provenance sidecar during
+the first maintenance update; the UI makes that inference visible.
 
 ## Plant comparison policy
 
