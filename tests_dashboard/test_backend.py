@@ -1,13 +1,56 @@
 import importlib
+import json
 
 
-def test_dashboard_backend_imports_and_registers_health_route(monkeypatch, tmp_path):
-  monkeypatch.setenv("ASCENTO_ARTIFACT_ROOT", str(tmp_path))
-  module = importlib.import_module("dashboard.app")
+def _load_app(monkeypatch, tmp_path):
+    monkeypatch.setenv("ASCENTO_ARTIFACT_ROOT", str(tmp_path))
+    import dashboard.app as dashboard_app
 
-  assert module.app.title == "Ascento Training Monitor"
-  assert any(route.path == "/api/health" for route in module.app.routes)
-  assert module.health() == {
-    "ok": True,
-    "artifact_root": str(tmp_path.resolve()),
-  }
+    return importlib.reload(dashboard_app)
+
+
+def test_dashboard_backend_registers_health_and_config_routes(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+
+    assert module.app.title == "Ascento Training Monitor"
+    paths = {route.path for route in module.app.routes}
+    assert "/api/health" in paths
+    assert "/api/config" in paths
+    assert "/api/runs/{run_id}/summary.json" in paths
+
+    health = module.health()
+    assert health["ok"] is True
+    assert health["artifact_root"] == str(tmp_path.resolve())
+    assert health["config"]["artifact_root"] == str(tmp_path.resolve())
+    assert module.configuration()["stale_after_seconds"] > 0
+
+
+def test_run_summary_download_is_json_safe(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run_status.json").write_text(
+        json.dumps(
+            {
+                "state": "finished",
+                "task": "Ascento-Balance-Flat",
+                "stage": "balance",
+                "exit_code": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "telemetry.jsonl").write_text(
+        '{"completed_steps": 4, "total_steps": 10, "wall_time": 1, '
+        '"metrics": {"Train/mean_reward": NaN}}\n',
+        encoding="utf-8",
+    )
+
+    run_id = module.runs()["runs"][0]["id"]
+    response = module.run_summary(run_id)
+    payload = json.loads(response.body)
+
+    assert response.headers["content-disposition"] == 'attachment; filename="run-summary.json"'
+    assert payload["run_info"]["task"] == "Ascento-Balance-Flat"
+    assert payload["training_health"]["non_finite_updates"] == 1
+    assert payload["telemetry"]["metrics"]["Train/mean_reward"] is None
