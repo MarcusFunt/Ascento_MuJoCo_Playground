@@ -1,5 +1,6 @@
 """Recovery specialist configuration."""
 
+from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 
 from ascento_mjlab import mdp as ascento_mdp
@@ -12,11 +13,20 @@ def ascento_recovery_env_cfg(play: bool = False, num_envs: int = 512):
     {"roll": (-0.35, 0.35), "pitch": (-0.45, 0.45)}
   )
   cfg.events["reset_supported_pose"].params["velocity_range"].update(
-    {"x": (-0.8, 0.8), "y": (-0.4, 0.4), "roll": (-1.5, 1.5), "pitch": (-2.0, 2.0), "yaw": (-0.5, 0.5)}
+    {
+      "x": (-0.8, 0.8),
+      "y": (-0.4, 0.4),
+      "roll": (-1.5, 1.5),
+      "pitch": (-2.0, 2.0),
+      "yaw": (-0.5, 0.5),
+    }
   )
   cfg.rewards["recovery_progress"] = RewardTermCfg(
     func=ascento_mdp.recovery.recovery_progress,
     weight=2.0,
+  )
+  cfg.metrics["recovery_success"] = MetricsTermCfg(
+    func=ascento_mdp.recovery.RecoverySuccess,
   )
   cfg.episode_length_s = 5.0 if not play else 10000.0
   return cfg
