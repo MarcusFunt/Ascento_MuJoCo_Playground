@@ -23,6 +23,7 @@ dashboard/frontend/dist/
 logs/
 checkpoints/
 captures/
+evaluations/
 docker-data/
 training/artifacts*/
 training/runs/

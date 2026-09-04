@@ -12,6 +12,7 @@ services:
       - ../logs:/workspace/logs
       - ../checkpoints:/workspace/checkpoints
       - ../captures:/workspace/captures
+      - ../evaluations:/workspace/evaluations
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
       ASCENTO_REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
@@ -33,6 +34,7 @@ services:
       - ../logs:/workspace/logs:ro
       - ../checkpoints:/workspace/checkpoints:ro
       - ../captures:/workspace/captures:ro
+      - ../evaluations:/workspace/evaluations:ro
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
       ASCENTO_ARTIFACT_ROOT: /workspace/logs/rsl_rl

@@ -20,6 +20,10 @@ dashboard = ["fastapi==0.141.1", "uvicorn[standard]==0.52.4"]
 [project.scripts]
 clip-motion = "ascento_mjlab.tools.clip_motion:main"
 rank-motion = "ascento_mjlab.tools.motion_quality:main"
+ascento-evaluate = "ascento_mjlab.evaluation.cli:main"
+ascento-evaluate-checkpoints = "ascento_mjlab.evaluation.checkpoints:main"
+ascento-compare-evaluations = "ascento_mjlab.evaluation.compare:main"
+ascento-replay-eval = "ascento_mjlab.evaluation.replay:main"
 
 [dependency-groups]
 dev = [
