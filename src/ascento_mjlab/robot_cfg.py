@@ -1,6 +1,6 @@
 """Ascento Guard-2 robot entity configuration.
 
-The MJCF is deliberately limited to the robot.  The floor, lighting, cameras,
+The MJCF is deliberately limited to the robot. The floor, lighting, cameras,
 and environment spacing belong to the mjlab scene configuration.
 """
 
@@ -13,11 +13,9 @@ from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.viewer import ViewerConfig
 
-from .actuator import (
-  LEG_ACTUATOR,
-  WHEEL_ACTUATOR,
-  AscentoTorqueActuatorCfg,
-)
+from .actuator import LEG_ACTUATOR, WHEEL_ACTUATOR
+from .actuator_impl import AscentoTorqueActuatorCfg
+from .physics import PHYSICS_PROFILE
 
 ROBOT_XML = Path(__file__).parent / "assets" / "ascento_guard2" / "robot.xml"
 JOINT_NAMES = (
@@ -31,9 +29,9 @@ JOINT_NAMES = (
 LEG_JOINT_NAMES = ("left_hip", "left_knee", "right_hip", "right_knee")
 WHEEL_JOINT_NAMES = ("left_wheel_joint", "right_wheel_joint")
 
-# The source model is a two-link serial leg with 0.25 m wheels.  -pi is the
-# straight-down nominal pose and 0.75 m leaves the wheels supported without
-# penetrating the plane.
+# The source model is a two-link serial leg with 0.25 m wheels. -pi is the
+# straight-down nominal pose and the canonical root height leaves the wheels
+# supported without penetrating the plane.
 DEFAULT_POSE = {
   "left_hip": -3.141592653589793,
   "left_knee": -3.141592653589793,
@@ -42,7 +40,8 @@ DEFAULT_POSE = {
   "right_knee": -3.141592653589793,
   "right_wheel_joint": 0.0,
 }
-DEFAULT_ROOT_HEIGHT = 0.75
+DEFAULT_ROOT_HEIGHT = PHYSICS_PROFILE.default_root_height_m
+
 
 def get_spec() -> mujoco.MjSpec:
   """Load a fresh robot spec for each entity variant."""
@@ -89,7 +88,7 @@ VIEWER_CONFIG = ViewerConfig(
 
 SIM_CFG = SimulationCfg(
   mujoco=MujocoCfg(
-    timestep=0.002,
+    timestep=PHYSICS_PROFILE.sim_dt_s,
     iterations=10,
     ls_iterations=20,
   ),
