@@ -18,6 +18,7 @@ from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.terrains import TerrainEntityCfg
 
 from ascento_mjlab import mdp as ascento_mdp
+from ascento_mjlab.physics import PHYSICS_PROFILE
 from ascento_mjlab.robot_cfg import (
   DEFAULT_ASCENTO_CFG,
   JOINT_NAMES,
@@ -47,7 +48,7 @@ def _scene(num_envs: int) -> SceneCfg:
         fields=("found", "force"),
         reduce="netforce",
         track_air_time=True,
-        history_length=5,
+        history_length=PHYSICS_PROFILE.decimation,
       ),
       ContactSensorCfg(
         name="right_wheel_contact",
@@ -56,83 +57,99 @@ def _scene(num_envs: int) -> SceneCfg:
         fields=("found", "force"),
         reduce="netforce",
         track_air_time=True,
-        history_length=5,
+        history_length=PHYSICS_PROFILE.decimation,
       ),
     ),
   )
 
 
 def _observations(play: bool) -> dict[str, ObservationGroupCfg]:
+  effort_limit = PHYSICS_PROFILE.peak_effort_nm
   actor_terms = {
     "gravity": ObservationTermCfg(func=mdp.projected_gravity, params={"asset_cfg": ROBOT_CFG}),
     "base_lin_vel": ObservationTermCfg(func=mdp.base_lin_vel, params={"asset_cfg": ROBOT_CFG}),
     "base_ang_vel": ObservationTermCfg(func=mdp.base_ang_vel, params={"asset_cfg": ROBOT_CFG}),
     "height": ObservationTermCfg(
-      func=ascento_mdp.observations.base_height, params={"asset_cfg": ROBOT_CFG}, scale=1.0
+      func=ascento_mdp.observations.base_height,
+      params={"asset_cfg": ROBOT_CFG},
+      scale=1.0,
     ),
     "joint_pos": ObservationTermCfg(func=mdp.joint_pos_rel, params={"asset_cfg": ROBOT_CFG}),
     "joint_vel": ObservationTermCfg(func=mdp.joint_vel_rel, params={"asset_cfg": ROBOT_CFG}),
     "contacts": ObservationTermCfg(
       func=ascento_mdp.observations.wheel_contacts,
-      params={"left_sensor_name": "left_wheel_contact", "right_sensor_name": "right_wheel_contact"},
+      params={
+        "left_sensor_name": "left_wheel_contact",
+        "right_sensor_name": "right_wheel_contact",
+      },
     ),
     "contact_forces": ObservationTermCfg(
       func=ascento_mdp.observations.wheel_contact_forces,
-      params={"left_sensor_name": "left_wheel_contact", "right_sensor_name": "right_wheel_contact"},
+      params={
+        "left_sensor_name": "left_wheel_contact",
+        "right_sensor_name": "right_wheel_contact",
+      },
       clip=(0.0, 2000.0),
       scale=0.01,
     ),
     "effort": ObservationTermCfg(
       func=ascento_mdp.observations.actuator_effort,
       params={"asset_cfg": ROBOT_CFG},
-      clip=(-40.0, 40.0),
-      scale=0.025,
+      clip=(-effort_limit, effort_limit),
+      scale=1.0 / effort_limit,
     ),
     "actions": ObservationTermCfg(func=mdp.last_action),
   }
   critic_terms = {
     **actor_terms,
     "root_pos": ObservationTermCfg(func=lambda env: env.scene["robot"].data.root_link_pos_w),
-    "root_lin_vel_w": ObservationTermCfg(func=lambda env: env.scene["robot"].data.root_link_lin_vel_w),
-    "root_ang_vel_w": ObservationTermCfg(func=lambda env: env.scene["robot"].data.root_link_ang_vel_w),
+    "root_lin_vel_w": ObservationTermCfg(
+      func=lambda env: env.scene["robot"].data.root_link_lin_vel_w
+    ),
+    "root_ang_vel_w": ObservationTermCfg(
+      func=lambda env: env.scene["robot"].data.root_link_ang_vel_w
+    ),
   }
   return {
-    "actor": ObservationGroupCfg(terms=actor_terms, concatenate_terms=True, enable_corruption=False),
-    "critic": ObservationGroupCfg(terms=critic_terms, concatenate_terms=True, enable_corruption=False),
+    "actor": ObservationGroupCfg(
+      terms=actor_terms, concatenate_terms=True, enable_corruption=False
+    ),
+    "critic": ObservationGroupCfg(
+      terms=critic_terms, concatenate_terms=True, enable_corruption=False
+    ),
   }
 
 
 def _actions() -> dict[str, ActionTermCfg]:
+  effort_limit = PHYSICS_PROFILE.peak_effort_nm
   return {
     "effort": JointEffortActionCfg(
       entity_name="robot",
       actuator_names=JOINT_NAMES,
-      scale=40.0,
-      # JointEffortActionCfg clips *after* scale/offset.  The physical target
-      # therefore needs a +/-40 Nm clamp; using +/-1 here silently reduces the
-      # robot to +/-1 Nm despite the 40 Nm action scale.
-      clip={".*": (-40.0, 40.0)},
+      scale=effort_limit,
+      # JointEffortActionCfg clips after scale/offset. The physical target
+      # therefore needs the physical Nm clamp, not the normalized policy clamp.
+      clip={".*": (-effort_limit, effort_limit)},
       preserve_order=True,
     )
   }
 
 
-def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerBasedRlEnvCfg:
-  """Build the validated flat-ground balance configuration.
-
-  ``num_envs`` defaults to a conservative RTX 3060 starting point.  The
-  environment itself has no terrain generator; terrain is intentionally kept
-  behind the successful flat-ground jump gate.
-  """
+def ascento_balance_env_cfg(
+  play: bool = False, num_envs: int = 512
+) -> ManagerBasedRlEnvCfg:
+  """Build the validated flat-ground balance configuration."""
   cfg = ManagerBasedRlEnvCfg(
-    decimation=5,
+    decimation=PHYSICS_PROFILE.decimation,
     scene=_scene(1 if play else num_envs),
     sim=deepcopy(SIM_CFG),
     viewer=deepcopy(VIEWER_CONFIG),
     observations=_observations(play),
     actions=_actions(),
     events={
-      "reset_scene_to_default": EventTermCfg(func=mdp.reset_scene_to_default, mode="reset"),
+      "reset_scene_to_default": EventTermCfg(
+        func=mdp.reset_scene_to_default, mode="reset"
+      ),
       "reset_supported_pose": EventTermCfg(
         func=ascento_mdp.events.reset_root_state_uniform,
         mode="reset",
@@ -167,16 +184,17 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
       "height": RewardTermCfg(
         func=ascento_mdp.rewards.height_tracking,
         weight=1.0,
-        params={"target": 0.75, "std": 0.08, "asset_cfg": ROBOT_CFG},
+        params={
+          "target": PHYSICS_PROFILE.default_root_height_m,
+          "std": 0.08,
+          "asset_cfg": ROBOT_CFG,
+        },
       ),
       "angular_rate": RewardTermCfg(
         func=ascento_mdp.rewards.angular_rate_penalty,
         weight=-0.04,
         params={"asset_cfg": ROBOT_CFG},
       ),
-      # Balance should be stationary on average.  This is deliberately mild:
-      # wheel translation remains available for recovery, but persistent drift
-      # is no longer reward-equivalent to balancing in place.
       "planar_speed": RewardTermCfg(
         func=ascento_mdp.rewards.planar_speed_penalty,
         weight=-0.2,
@@ -187,14 +205,17 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
         weight=-0.0005,
         params={"asset_cfg": ROBOT_CFG},
       ),
-      "action_rate": RewardTermCfg(func=ascento_mdp.rewards.action_rate_penalty, weight=-0.02),
+      "action_rate": RewardTermCfg(
+        func=ascento_mdp.rewards.action_rate_penalty, weight=-0.02
+      ),
     },
     terminations={
       "fallen": TerminationTermCfg(
         func=ascento_mdp.terminations.fallen, params={"asset_cfg": ROBOT_CFG}
       ),
       "excessive_velocity": TerminationTermCfg(
-        func=ascento_mdp.terminations.excessive_velocity, params={"asset_cfg": ROBOT_CFG}
+        func=ascento_mdp.terminations.excessive_velocity,
+        params={"asset_cfg": ROBOT_CFG},
       ),
       "nonfinite": TerminationTermCfg(
         func=ascento_mdp.terminations.nonfinite, params={"asset_cfg": ROBOT_CFG}
