@@ -33,13 +33,18 @@ def task_capabilities(task: str) -> set[str]:
   if "Balance" in task:
     capabilities.add("balance")
   if "Velocity" in task:
-    capabilities.update({"velocity", "command:twist", "velocity_tracking"})
+    capabilities.update(
+      {
+        "velocity",
+        "command:twist",
+        "command:height",
+        "velocity_tracking",
+        "height_tracking",
+      }
+    )
   if "Recovery" in task:
     capabilities.update({"recovery", "recovery_success"})
   if "Jump" in task:
-    # Current flat-jump state supports event diagnostics, but deliberately does
-    # not claim target-distance or true pre-impact metrics until those signals
-    # are implemented canonically.
     capabilities.update({"jump_events", "command:motion"})
   return capabilities
 
@@ -128,6 +133,36 @@ def _exact_reset(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec]) -> 
   return positions[:, :2].clone()
 
 
+def _refresh_exact_observation_history(base_env: ManagerBasedRlEnv) -> None:
+  """Seed stateful observation buffers from the exact scenario state only.
+
+  ``env.reset()`` must run first to reset managers, but it also writes a
+  stochastic training reset into history/delay buffers. After `_exact_reset`
+  overwrites that state, clear those buffers and seed them with the resolved
+  deterministic frame so history-dependent policies do not see a hidden random
+  pre-scenario observation.
+  """
+  env_ids = torch.arange(base_env.num_envs, device=base_env.device, dtype=torch.long)
+  base_env.observation_manager.reset(env_ids)
+  base_env.obs_buf = base_env.observation_manager.compute(
+    update_history=True, env_ids=env_ids
+  )
+
+
+def _reset_finished_slots(base_env: ManagerBasedRlEnv, policy, finish: torch.Tensor) -> None:
+  """Clear mjlab manual-reset state for completed vector slots.
+
+  mjlab 1.6 requires every done slot to be explicitly reset before the next
+  vector ``step()`` when ``auto_reset=False``. Horizon-complete slots are reset
+  too so all inactive slots have the same benign lifecycle.
+  """
+  if not bool(finish.any().item()):
+    return
+  env_ids = finish.nonzero(as_tuple=False).squeeze(-1)
+  base_env.reset(env_ids=env_ids)
+  policy.reset(env_ids)
+
+
 def _command_values_for_step(
   scenarios: list[ScenarioSpec], step: int
 ) -> dict[str, list[tuple[int, tuple[float, ...]]]]:
@@ -203,7 +238,11 @@ def _disturbance_wrench(
   }
   for env_id, scenario in enumerate(scenarios):
     for disturbance in scenario.disturbances:
-      if not (disturbance.start_step <= step < disturbance.start_step + disturbance.duration_steps):
+      if not (
+        disturbance.start_step
+        <= step
+        < disturbance.start_step + disturbance.duration_steps
+      ):
         continue
       duration_s = disturbance.duration_steps * step_dt
       magnitude = (
@@ -270,6 +309,7 @@ def _run_batch(
 
   env.reset()
   initial_xy = _exact_reset(base_env, scenarios)
+  _refresh_exact_observation_history(base_env)
   policy.reset()
   count = len(scenarios)
   dev = base_env.device
@@ -305,14 +345,13 @@ def _run_batch(
   airborne_count = torch.zeros(count, device=dev)
   path_length = torch.zeros(count, device=dev)
   sum_velocity_tracking_sq = torch.zeros(count, device=dev)
+  sum_height_tracking_sq = torch.zeros(count, device=dev)
   recovery_stable_count = torch.zeros(count, dtype=torch.long, device=dev)
   recovery_success = torch.zeros(count, dtype=torch.bool, device=dev)
   recovery_from_start_s = torch.full((count,), float("nan"), device=dev)
   prev_xy = initial_xy.clone()
   final_xy_snapshot = initial_xy.clone()
 
-  # Disturbance recovery envelope. This is deliberately stricter than the
-  # training reward and requires a continuous 0.5 s stable window.
   stable_count = torch.zeros(count, dtype=torch.long, device=dev)
   recovered = torch.zeros(count, dtype=torch.bool, device=dev)
   recovery_time = torch.full((count,), float("nan"), device=dev)
@@ -344,11 +383,14 @@ def _run_batch(
         if is_velocity_task
         else None
       )
+      height_target = (
+        _command_target(scenarios, step, name="height", dim=1, device=dev)
+        if is_velocity_task
+        else None
+      )
       forces, torques, wrench_active = _disturbance_wrench(
         scenarios, step, mass=mass, step_dt=step_dt, device=dev
       )
-      # Always write the root-body wrench so impulses are cleared exactly on
-      # schedule instead of relying on a later reset.
       if bool((wrench_active | last_wrench_active).any().item()):
         base_env.scene["robot"].write_external_wrench_to_sim(
           forces,
@@ -364,12 +406,10 @@ def _run_batch(
         raise RuntimeError("Policy emitted NaN/Inf action during evaluation")
 
       clip_limit = float(agent_cfg.clip_actions)
-      clipped = torch.clamp(raw_action, -clip_limit, clip_limit)
       clipped_fraction = (torch.abs(raw_action) > clip_limit).float().mean(dim=-1)
       action_clip_count += clipped_fraction * active.float()
       action_count += active.float()
 
-      # Keep inactive slots benign while the rest of the vector batch finishes.
       action = torch.where(active[:, None], raw_action, torch.zeros_like(raw_action))
       _, _, dones, _ = env.step(action)
 
@@ -398,8 +438,11 @@ def _run_batch(
       segment = torch.linalg.vector_norm(xy - prev_xy, dim=1)
       prev_xy = xy.clone()
 
-      left = base_env.scene["left_wheel_contact"].data.found.flatten(start_dim=1).any(dim=1)
-      right = base_env.scene["right_wheel_contact"].data.found.flatten(start_dim=1).any(dim=1)
+      left_data = base_env.scene["left_wheel_contact"].data.found
+      right_data = base_env.scene["right_wheel_contact"].data.found
+      assert left_data is not None and right_data is not None
+      left = left_data.flatten(start_dim=1).any(dim=1)
+      right = right_data.flatten(start_dim=1).any(dim=1)
       both_supported = left & right
       airborne = ~left & ~right
 
@@ -439,19 +482,15 @@ def _run_batch(
         sum_velocity_tracking_sq += (
           torch.mean(torch.square(actual_twist - twist_target), dim=1) * weight
         )
+      if height_target is not None:
+        sum_height_tracking_sq += torch.square(height - height_target[:, 0]) * weight
       episode_steps += active.long()
 
       if is_recovery_task:
-        from ascento_mjlab.mdp.recovery import RecoveryEnvelope
+        from ascento_mjlab.mdp.recovery import RecoveryEnvelope, recovery_condition
 
         envelope = RecoveryEnvelope()
-        recovery_stable = (
-          (height >= envelope.min_height)
-          & (tilt <= envelope.max_tilt_radians)
-          & (linear_speed <= envelope.max_linear_speed)
-          & (angular_speed <= envelope.max_angular_speed)
-          & both_supported
-        )
+        recovery_stable = recovery_condition(base_env, envelope)
         recovery_stable_count = torch.where(
           active & recovery_stable,
           recovery_stable_count + 1,
@@ -466,7 +505,6 @@ def _run_batch(
           recovery_from_start_s[newly_recovered_from_start] = first_stable_step * step_dt
           recovery_success |= newly_recovered_from_start
 
-      # Recovery begins only after the last configured disturbance has ended.
       after_disturbance = active & (disturbance_end >= 0) & (step >= disturbance_end)
       stable_now = (
         (tilt <= 0.08)
@@ -480,10 +518,8 @@ def _run_batch(
         stable_count + 1,
         torch.where(after_disturbance, torch.zeros_like(stable_count), stable_count),
       )
-      newly_recovered = (
-        after_disturbance
-        & ~recovered
-        & (stable_count >= stable_steps_required)
+      newly_recovered = after_disturbance & ~recovered & (
+        stable_count >= stable_steps_required
       )
       if bool(newly_recovered.any().item()):
         first_stable_step = step - stable_steps_required + 1
@@ -505,8 +541,7 @@ def _run_batch(
 
       if bool(finish.any().item()):
         final_xy_snapshot[finish] = xy[finish]
-        failed_ids = failed.nonzero(as_tuple=False).squeeze(-1
-        )
+        failed_ids = failed.nonzero(as_tuple=False).squeeze(-1)
         if len(failed_ids) > 0:
           for env_id, reason in _termination_reasons(base_env, failed_ids).items():
             termination_reason[env_id] = reason
@@ -522,9 +557,8 @@ def _run_batch(
             termination_reason[env_id] = timeout_names[0] if timeout_names else "horizon"
         finished_success |= succeeded
         active &= ~finish
-        policy.reset(finish.nonzero(as_tuple=False).squeeze(-1))
+        _reset_finished_slots(base_env, policy, finish)
 
-    # Any still-active environment is an evaluator failure, not a policy fail.
     if bool(active.any().item()):
       raise RuntimeError("Evaluation loop ended with unfinished scenarios")
 
@@ -557,6 +591,7 @@ def _run_batch(
     }
     if is_velocity_task:
       arrays["velocity_tracking_rmse"] = torch.sqrt(sum_velocity_tracking_sq / denom)
+      arrays["height_tracking_rmse"] = torch.sqrt(sum_height_tracking_sq / denom)
     if is_recovery_task:
       arrays["recovery_success"] = recovery_success.float()
       arrays["recovery_from_start_s"] = recovery_from_start_s
@@ -623,9 +658,6 @@ def run_scenarios(
 
   results: list[EpisodeResult] = []
   batch_metadata: list[dict[str, Any]] = []
-  # Keep batches family-homogeneous. Besides making statistical provenance
-  # clearer, this prevents short-horizon finished slots from being simulated
-  # for tens of seconds while a longer family in the same vector batch runs.
   family_order = list(dict.fromkeys(scenario.family for scenario in scenarios))
   for family in family_order:
     family_scenarios = [scenario for scenario in scenarios if scenario.family == family]
