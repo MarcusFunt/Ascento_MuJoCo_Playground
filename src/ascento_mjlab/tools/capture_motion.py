@@ -17,10 +17,11 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.wrappers import VideoRecorder
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.physics import PHYSICS_PROFILE
 
 
 def _jump_state_array(state: dict[str, torch.Tensor]) -> np.ndarray:
-  """Copy the four jump-state scalars to host memory as one float32 vector."""
+  """Copy the four public jump-state scalars to host memory as float32."""
   values = torch.stack(
     [
       state["airborne"][0],
@@ -36,8 +37,6 @@ def _configure_capture_cfg(cfg: Any, *, take: int) -> Any:
   """Configure a task for one continuous, non-auto-reset capture take."""
   cfg.scene.num_envs = 1
   cfg.seed = take
-  # A capture is one continuous trajectory. Auto-reset would make record_post_step()
-  # observe the reset pose after a terminal step and splice it into the same take.
   cfg.auto_reset = False
   cfg.recorders = {"motion": RecorderTermCfg(func=MotionRecorder, params={})}
   return cfg
@@ -89,6 +88,14 @@ class MotionRecorder(RecorderTerm):
       frame["contacts"] = np.asarray(contacts, dtype=np.float32)
     if hasattr(env, "ascento_jump_state"):
       frame["jump_state"] = _jump_state_array(env.ascento_jump_state)
+      if "landing_preimpact_vz" in env.ascento_jump_state:
+        frame["landing_preimpact_vz"] = (
+          env.ascento_jump_state["landing_preimpact_vz"][0]
+          .detach()
+          .cpu()
+          .numpy()
+          .copy()
+        )
     for command_name in ("motion", "twist"):
       try:
         command = env.command_manager.get_command(command_name)
@@ -97,6 +104,12 @@ class MotionRecorder(RecorderTerm):
       if command is not None:
         frame["command"] = command[0].detach().cpu().numpy().copy()
         break
+    try:
+      height_command = env.command_manager.get_command("height")
+    except (AttributeError, KeyError):
+      height_command = None
+    if height_command is not None:
+      frame["height_command"] = height_command[0].detach().cpu().numpy().copy()
     self.frames.append(frame)
 
   def export(self, path: Path, *, metadata: dict[str, str]) -> None:
@@ -112,12 +125,18 @@ class MotionRecorder(RecorderTerm):
 def main() -> None:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--task", default="Ascento-Balance-Flat")
-  parser.add_argument("--checkpoint", type=Path, default=None, help="RSL-RL checkpoint to play")
+  parser.add_argument(
+    "--checkpoint", type=Path, default=None, help="RSL-RL checkpoint to play"
+  )
   parser.add_argument("--takes", type=int, default=1)
   parser.add_argument("--steps", type=int, default=1000)
   parser.add_argument("--output-dir", type=Path, default=Path("captures"))
-  parser.add_argument("--video-dir", type=Path, default=None, help="Optional MP4 output directory")
-  parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
+  parser.add_argument(
+    "--video-dir", type=Path, default=None, help="Optional MP4 output directory"
+  )
+  parser.add_argument(
+    "--device", default="cuda:0" if torch.cuda.is_available() else "cpu"
+  )
   args = parser.parse_args()
   if args.takes < 1 or args.steps < 1:
     parser.error("--takes and --steps must be positive")
@@ -173,9 +192,11 @@ def main() -> None:
         "task": args.task,
         "seed": str(take),
         "fps": str(round(1.0 / base_env.step_dt)),
+        "physics_timestep_s": str(float(base_env.cfg.sim.mujoco.timestep)),
+        "policy_timestep_s": str(float(base_env.step_dt)),
         "checkpoint": str(args.checkpoint) if args.checkpoint is not None else "",
         "model_sha256": checkpoint_hash,
-        "physics_profile": "animation_high_authority",
+        "physics_profile": PHYSICS_PROFILE.name,
         "captured_steps": str(captured_steps),
         "ended_on_done": str(ended_on_done).lower(),
       },
