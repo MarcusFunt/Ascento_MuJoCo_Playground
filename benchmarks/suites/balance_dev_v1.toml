@@ -1,0 +1,138 @@
+schema_version = 1
+suite_id = "balance_dev_v1"
+task = "Ascento-Balance-Flat"
+root_seed = 732451
+policy_mode = "deterministic"
+required_capabilities = ["balance", "exact_reset", "force_disturbance", "deterministic_policy"]
+
+[[families]]
+id = "nominal"
+kind = "uniform_reset"
+count = 256
+horizon_s = 20.0
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "expanded"
+kind = "uniform_reset"
+count = 256
+horizon_s = 20.0
+[families.reset]
+roll = [-0.15, 0.15]
+pitch = [-0.15, 0.15]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.25, 0.25]
+vy = [-0.10, 0.10]
+vz = [-0.05, 0.05]
+wx = [-0.50, 0.50]
+wy = [-0.50, 0.50]
+wz = [-0.25, 0.25]
+
+[[families]]
+id = "corners"
+kind = "corners"
+count = 64
+horizon_s = 20.0
+yaw_strata = [0.0, 1.5707963267948966, 3.141592653589793, -1.5707963267948966]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "disturbance"
+kind = "disturbance"
+count = 256
+horizon_s = 20.0
+[families.reset]
+roll = [-0.04, 0.04]
+pitch = [-0.04, 0.04]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.02, 0.02]
+vy = [-0.02, 0.02]
+wx = [-0.05, 0.05]
+wy = [-0.05, 0.05]
+wz = [-0.05, 0.05]
+[families.disturbance]
+start_s = 5.0
+duration_s = 0.10
+directions = ["+x", "-x", "+y", "-y"]
+equivalent_delta_v = [0.15, 0.30, 0.45]
+
+[[families]]
+id = "endurance"
+kind = "endurance"
+count = 64
+horizon_s = 60.0
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[gates]]
+id = "nominal_survival"
+family = "nominal"
+metric = "success"
+statistic = "success_rate"
+op = ">="
+threshold = 0.98
+
+[[gates]]
+id = "expanded_survival"
+family = "expanded"
+metric = "success"
+statistic = "success_rate"
+op = ">="
+threshold = 0.95
+
+[[gates]]
+id = "disturbance_recovery"
+family = "disturbance"
+metric = "recovered"
+statistic = "success_rate"
+op = ">="
+threshold = 0.90
+
+[[gates]]
+id = "endurance_survival"
+family = "endurance"
+metric = "success"
+statistic = "success_rate"
+op = ">="
+threshold = 0.95
+
+[[gates]]
+id = "corner_conformance"
+family = "corners"
+metric = "success"
+statistic = "success_rate"
+op = ">="
+threshold = 0.98
+
+[[gates]]
+id = "finite_nominal"
+family = "nominal"
+metric = "nonfinite"
+statistic = "sum"
+op = "=="
+threshold = 0.0

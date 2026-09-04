@@ -6,5 +6,6 @@ __pycache__
 logs
 checkpoints
 captures
+evaluations
 dashboard/frontend/node_modules
 dashboard/frontend/dist

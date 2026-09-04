@@ -1,0 +1,25 @@
+schema_version = 1
+suite_id = "jump_gate_v1"
+task = "Ascento-Jump-Flat"
+root_seed = 902117
+policy_mode = "deterministic"
+# These capabilities intentionally fail closed on current main. The jump gate
+# must not become authoritative until heading-relative distance, true first-
+# contact impact, and limiting-wheel clearance are canonical signals.
+required_capabilities = [
+  "jump_events",
+  "command:motion",
+  "jump_distance_tracking",
+  "landing_preimpact",
+  "limiting_wheel_clearance",
+]
+
+[[families]]
+id = "flat_jump"
+kind = "uniform_reset"
+count = 1024
+horizon_s = 8.0
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]

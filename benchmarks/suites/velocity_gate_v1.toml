@@ -1,0 +1,78 @@
+schema_version = 1
+suite_id = "velocity_gate_v1"
+task = "Ascento-Velocity-Flat"
+root_seed = 194427
+policy_mode = "deterministic"
+required_capabilities = ["velocity", "velocity_tracking", "command:twist", "exact_reset", "deterministic_policy"]
+
+[[families]]
+id = "step_tracking"
+kind = "command_timeline"
+count = 512
+horizon_s = 20.0
+commands = [
+  { time_s = 0.0, name = "twist", values = [0.0, 0.0, 0.0] },
+  { time_s = 3.0, name = "twist", values = [0.25, 0.0, 0.0] },
+  { time_s = 7.0, name = "twist", values = [0.0, 0.0, 0.0] },
+  { time_s = 10.0, name = "twist", values = [-0.25, 0.0, 0.0] },
+  { time_s = 14.0, name = "twist", values = [0.0, 0.0, 0.3] },
+  { time_s = 18.0, name = "twist", values = [0.0, 0.0, 0.0] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "combined"
+kind = "command_timeline"
+count = 512
+horizon_s = 20.0
+commands = [
+  { time_s = 0.0, name = "twist", values = [0.0, 0.0, 0.0] },
+  { time_s = 3.0, name = "twist", values = [0.4, 0.0, 0.4] },
+  { time_s = 8.0, name = "twist", values = [-0.4, 0.0, -0.4] },
+  { time_s = 13.0, name = "twist", values = [0.4, 0.0, -0.4] },
+  { time_s = 18.0, name = "twist", values = [0.0, 0.0, 0.0] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+
+[[gates]]
+id = "step_survival_lcb"
+family = "step_tracking"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.98
+
+[[gates]]
+id = "combined_survival_lcb"
+family = "combined"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.98
+
+[[gates]]
+id = "step_tracking_rmse_p95"
+family = "step_tracking"
+metric = "velocity_tracking_rmse"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "combined_tracking_rmse_p95"
+family = "combined"
+metric = "velocity_tracking_rmse"
+statistic = "p95"
+op = "<="
+threshold = 0.25

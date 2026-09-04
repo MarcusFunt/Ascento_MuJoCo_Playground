@@ -1,0 +1,69 @@
+schema_version = 1
+suite_id = "recovery_gate_v1"
+task = "Ascento-Recovery-Flat"
+root_seed = 615203
+policy_mode = "deterministic"
+required_capabilities = ["recovery", "recovery_success", "exact_reset", "deterministic_policy"]
+
+[[families]]
+id = "recovery_random"
+kind = "uniform_reset"
+count = 2048
+horizon_s = 5.0
+[families.reset]
+roll = [-0.35, 0.35]
+pitch = [-0.45, 0.45]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.8, 0.8]
+vy = [-0.4, 0.4]
+vz = [-0.05, 0.05]
+wx = [-1.5, 1.5]
+wy = [-2.0, 2.0]
+wz = [-0.5, 0.5]
+
+[[families]]
+id = "recovery_corners"
+kind = "corners"
+count = 256
+horizon_s = 5.0
+yaw_strata = [0.0, 1.5707963267948966, 3.141592653589793, -1.5707963267948966]
+[families.reset]
+roll = [-0.35, 0.35]
+pitch = [-0.45, 0.45]
+vx = [-0.8, 0.8]
+vy = [-0.4, 0.4]
+wx = [-1.5, 1.5]
+wy = [-2.0, 2.0]
+wz = [-0.5, 0.5]
+
+[[gates]]
+id = "recovery_success_lcb"
+family = "recovery_random"
+metric = "recovery_success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.95
+
+[[gates]]
+id = "recovery_time_p95"
+family = "recovery_random"
+metric = "recovery_from_start_s"
+statistic = "p95"
+op = "<="
+threshold = 2.0
+
+[[gates]]
+id = "recovery_corner_success"
+family = "recovery_corners"
+metric = "recovery_success"
+statistic = "success_rate"
+op = ">="
+threshold = 0.95
+
+[[gates]]
+id = "no_nonfinite"
+family = "recovery_random"
+metric = "nonfinite"
+statistic = "sum"
+op = "=="
+threshold = 0.0
