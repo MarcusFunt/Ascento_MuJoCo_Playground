@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .physics import PHYSICS_PROFILE
+
 
 @dataclass(frozen=True)
 class ActuatorDocumentation:
@@ -25,8 +27,12 @@ class ActuatorDocumentation:
   response_time_s: float
 
 
-LEG_ACTUATOR = ActuatorDocumentation(40.0, 15.0, 12.0, 4.0, 0.004)
-WHEEL_ACTUATOR = ActuatorDocumentation(40.0, 5.0, 20.0, 10.0, 0.003)
+LEG_ACTUATOR = ActuatorDocumentation(
+  PHYSICS_PROFILE.peak_effort_nm, 15.0, 12.0, 4.0, 0.004
+)
+WHEEL_ACTUATOR = ActuatorDocumentation(
+  PHYSICS_PROFILE.peak_effort_nm, 5.0, 20.0, 10.0, 0.003
+)
 
 _LAZY_EXPORTS = {
   "AscentoTorqueActuator",
