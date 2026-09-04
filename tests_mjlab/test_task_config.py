@@ -61,9 +61,14 @@ def test_velocity_stage_has_no_reward_that_penalizes_its_commands():
   assert "height_command" in cfg.observations["actor"].terms
 
 
-def test_recovery_stage_exports_executable_success_metric():
+def test_recovery_stage_exports_executable_success_metric_and_training_pushes():
   cfg = load_env_cfg("Ascento-Recovery-Flat")
+  play_cfg = load_env_cfg("Ascento-Recovery-Flat", play=True)
+
   assert "recovery_success" in cfg.metrics
+  assert "recovery_push" in cfg.events
+  assert cfg.events["recovery_push"].mode == "interval"
+  assert "recovery_push" not in play_cfg.events
 
 
 @pytest.mark.parametrize(
