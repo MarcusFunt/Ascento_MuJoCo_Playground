@@ -3,7 +3,15 @@ suite_id = "velocity_gate_v1"
 task = "Ascento-Velocity-Flat"
 root_seed = 194427
 policy_mode = "deterministic"
-required_capabilities = ["velocity", "velocity_tracking", "command:twist", "exact_reset", "deterministic_policy"]
+required_capabilities = [
+  "velocity",
+  "velocity_tracking",
+  "height_tracking",
+  "command:twist",
+  "command:height",
+  "exact_reset",
+  "deterministic_policy",
+]
 
 [[families]]
 id = "step_tracking"
@@ -12,11 +20,15 @@ count = 512
 horizon_s = 20.0
 commands = [
   { time_s = 0.0, name = "twist", values = [0.0, 0.0, 0.0] },
+  { time_s = 0.0, name = "height", values = [0.75] },
   { time_s = 3.0, name = "twist", values = [0.25, 0.0, 0.0] },
+  { time_s = 5.0, name = "height", values = [0.70] },
   { time_s = 7.0, name = "twist", values = [0.0, 0.0, 0.0] },
   { time_s = 10.0, name = "twist", values = [-0.25, 0.0, 0.0] },
+  { time_s = 12.0, name = "height", values = [0.80] },
   { time_s = 14.0, name = "twist", values = [0.0, 0.0, 0.3] },
   { time_s = 18.0, name = "twist", values = [0.0, 0.0, 0.0] },
+  { time_s = 18.0, name = "height", values = [0.75] },
 ]
 [families.reset]
 roll = [-0.08, 0.08]
@@ -35,10 +47,15 @@ count = 512
 horizon_s = 20.0
 commands = [
   { time_s = 0.0, name = "twist", values = [0.0, 0.0, 0.0] },
+  { time_s = 0.0, name = "height", values = [0.75] },
   { time_s = 3.0, name = "twist", values = [0.4, 0.0, 0.4] },
+  { time_s = 3.0, name = "height", values = [0.70] },
   { time_s = 8.0, name = "twist", values = [-0.4, 0.0, -0.4] },
+  { time_s = 8.0, name = "height", values = [0.80] },
   { time_s = 13.0, name = "twist", values = [0.4, 0.0, -0.4] },
+  { time_s = 13.0, name = "height", values = [0.72] },
   { time_s = 18.0, name = "twist", values = [0.0, 0.0, 0.0] },
+  { time_s = 18.0, name = "height", values = [0.75] },
 ]
 [families.reset]
 roll = [-0.08, 0.08]
@@ -76,3 +93,19 @@ metric = "velocity_tracking_rmse"
 statistic = "p95"
 op = "<="
 threshold = 0.25
+
+[[gates]]
+id = "step_height_rmse_p95"
+family = "step_tracking"
+metric = "height_tracking_rmse"
+statistic = "p95"
+op = "<="
+threshold = 0.07
+
+[[gates]]
+id = "combined_height_rmse_p95"
+family = "combined"
+metric = "height_tracking_rmse"
+statistic = "p95"
+op = "<="
+threshold = 0.08

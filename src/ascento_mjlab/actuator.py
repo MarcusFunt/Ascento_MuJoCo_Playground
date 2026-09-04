@@ -1,24 +1,21 @@
-"""Ascento-specific direct-effort actuator model.
+"""Public Ascento actuator specification with lazy mjlab implementation loading.
 
-The model intentionally has no thermal or continuous-torque limiter.  The
-15 Nm leg and 5 Nm wheel values are documentation until duration-dependent
-thermal behavior is justified.  The initial simulation behavior is instead
-defined by peak torque, the linear torque-speed envelope, controller speed
-protection, and a finite torque-loop response.
+This module intentionally stays free of mjlab imports at import time. mjlab
+auto-discovers task entry points while it imports, and importing mjlab from this
+module before the actuator constants existed could re-enter Ascento task
+registration through ``robot_cfg`` and leave the registry empty.
+
+The actual actuator classes are loaded lazily from ``actuator_impl`` when a
+consumer asks for them. Existing imports from ``ascento_mjlab.actuator`` remain
+compatible while actuator-first imports are now safe.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any
 
-import mujoco
-import torch
-from mjlab.actuator import Actuator, ActuatorCfg, ActuatorCmd
-from mjlab.utils.spec import create_motor_actuator
-
-if TYPE_CHECKING:
-  from mjlab.entity import Entity
+from .physics import PHYSICS_PROFILE
 
 
 @dataclass(frozen=True)
@@ -30,119 +27,35 @@ class ActuatorDocumentation:
   response_time_s: float
 
 
-LEG_ACTUATOR = ActuatorDocumentation(40.0, 15.0, 12.0, 4.0, 0.004)
-WHEEL_ACTUATOR = ActuatorDocumentation(40.0, 5.0, 20.0, 10.0, 0.003)
+LEG_ACTUATOR = ActuatorDocumentation(
+  PHYSICS_PROFILE.peak_effort_nm, 15.0, 12.0, 4.0, 0.004
+)
+WHEEL_ACTUATOR = ActuatorDocumentation(
+  PHYSICS_PROFILE.peak_effort_nm, 5.0, 20.0, 10.0, 0.003
+)
+
+_LAZY_EXPORTS = {
+  "AscentoTorqueActuator",
+  "AscentoTorqueActuatorCfg",
+  "torque_speed_limit",
+}
 
 
-def torque_speed_limit(
-  peak_torque: float,
-  no_load_speed: float,
-  controller_speed_limit: float,
-  velocity: torch.Tensor,
-  requested: torch.Tensor,
-) -> torch.Tensor:
-  """Apply the transient torque-speed envelope and motoring speed guard."""
-  speed = torch.abs(velocity)
-  envelope = torch.clamp(1.0 - speed / no_load_speed, min=0.0)
-  output = torch.clamp(requested, -peak_torque * envelope, peak_torque * envelope)
-  over_speed = speed > controller_speed_limit
-  motoring = torch.sign(output) * velocity > 0.0
-  return torch.where(over_speed & motoring, torch.zeros_like(output), output)
+def __getattr__(name: str) -> Any:
+  if name not in _LAZY_EXPORTS:
+    raise AttributeError(name)
+  from . import actuator_impl
+
+  value = getattr(actuator_impl, name)
+  globals()[name] = value
+  return value
 
 
-@dataclass(kw_only=True)
-class AscentoTorqueActuatorCfg(ActuatorCfg):
-  """Direct-effort actuator with motion-relevant transient limits only."""
-
-  peak_torque: float
-  no_load_speed: float
-  controller_speed_limit: float
-  response_time: float
-
-  def __post_init__(self) -> None:
-    super().__post_init__()
-    if self.peak_torque <= 0.0:
-      raise ValueError("peak_torque must be positive")
-    if self.no_load_speed <= 0.0:
-      raise ValueError("no_load_speed must be positive")
-    if self.controller_speed_limit <= 0.0:
-      raise ValueError("controller_speed_limit must be positive")
-    if self.response_time < 0.0:
-      raise ValueError("response_time must be non-negative")
-
-  def build(
-    self, entity: Entity, target_ids: list[int], target_names: list[str]
-  ) -> AscentoTorqueActuator:
-    return AscentoTorqueActuator(self, entity, target_ids, target_names)
-
-
-class AscentoTorqueActuator(Actuator[AscentoTorqueActuatorCfg]):
-  """Stateful torque response with a one-sided high-speed motor guard."""
-
-  def __init__(
-    self,
-    cfg: AscentoTorqueActuatorCfg,
-    entity: Entity,
-    target_ids: list[int],
-    target_names: list[str],
-  ) -> None:
-    super().__init__(cfg, entity, target_ids, target_names)
-    self._filtered: torch.Tensor | None = None
-    self._physics_dt: float | None = None
-
-  def edit_spec(self, spec: mujoco.MjSpec, target_names: list[str]) -> None:
-    for target_name in target_names:
-      self._mjs_actuators.append(
-        create_motor_actuator(
-          spec,
-          target_name,
-          effort_limit=self.cfg.peak_torque,
-          transmission_type=self.cfg.transmission_type,
-        )
-      )
-
-  def initialize(
-    self,
-    mj_model: mujoco.MjModel,
-    model,
-    data,
-    device: str,
-  ) -> None:
-    # SimulationCfg is applied to the compiled model before Entity.initialize
-    # is called. Reading the model keeps this actuator tied to the active
-    # simulation, including task-specific timestep overrides.
-    self._physics_dt = float(mj_model.opt.timestep)
-    super().initialize(mj_model, model, data, device)
-    self._filtered = torch.zeros(
-      (data.nworld, len(self.target_ids)), dtype=torch.float32, device=device
-    )
-
-  def compute(self, cmd: ActuatorCmd) -> torch.Tensor:
-    assert self._filtered is not None
-    requested = torch.clamp(cmd.effort_target, -self.cfg.peak_torque, self.cfg.peak_torque)
-
-    # compute() runs once per physics substep in mjlab.  Use the exact
-    # discretization of a first-order torque loop, with the project timestep
-    # supplied by the active simulation configuration.
-    if self._physics_dt is None:
-      raise RuntimeError("Actuator must be initialized before compute()")
-    dt = self._physics_dt
-    alpha = 1.0 if self.cfg.response_time == 0.0 else 1.0 - torch.exp(
-      torch.tensor(-dt / self.cfg.response_time, device=requested.device)
-    )
-    self._filtered.add_(alpha * (requested - self._filtered))
-
-    # At the controller speed limit, remove only motoring torque. Braking
-    # torque remains available so the robot can decelerate rather than coast.
-    return torque_speed_limit(
-      self.cfg.peak_torque,
-      self.cfg.no_load_speed,
-      self.cfg.controller_speed_limit,
-      cmd.vel,
-      self._filtered,
-    )
-
-  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
-    super().reset(env_ids)
-    assert self._filtered is not None
-    self._filtered[env_ids if env_ids is not None else slice(None)] = 0.0
+__all__ = [
+  "ActuatorDocumentation",
+  "LEG_ACTUATOR",
+  "WHEEL_ACTUATOR",
+  "AscentoTorqueActuator",
+  "AscentoTorqueActuatorCfg",
+  "torque_speed_limit",
+]

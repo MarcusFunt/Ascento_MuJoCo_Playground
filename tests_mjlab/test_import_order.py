@@ -24,6 +24,12 @@ from mjlab.tasks.registry import list_tasks
 assert 'Ascento-Jump-Flat' in list_tasks()
 assert ascento_jump_env_cfg(num_envs=1).scene.num_envs == 1
 """,
+    """
+import ascento_mjlab.actuator
+from mjlab.tasks.registry import load_env_cfg, list_tasks
+assert 'Ascento-Balance-Flat' in list_tasks()
+assert load_env_cfg('Ascento-Balance-Flat').scene.num_envs == 512
+""",
   ],
 )
 def test_task_registration_is_independent_of_import_order(source):

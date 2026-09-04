@@ -1,6 +1,6 @@
 """Flat-ground jump specialist configuration placeholder.
 
-Terrain is intentionally disabled here.  This task is not expanded until
+Terrain is intentionally disabled here. This task is not expanded until
 takeoff, flight, landing, and post-landing recovery are sound on a plane.
 """
 
@@ -34,15 +34,23 @@ def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
   cfg.observations["actor"].terms["jump_state"] = ObservationTermCfg(
     func=ascento_mdp.observations.jump_state,
   )
-  cfg.observations["critic"].terms["motion_command"] = cfg.observations["actor"].terms["motion_command"]
-  cfg.observations["critic"].terms["jump_state"] = cfg.observations["actor"].terms["jump_state"]
+  cfg.observations["critic"].terms["motion_command"] = cfg.observations["actor"].terms[
+    "motion_command"
+  ]
+  cfg.observations["critic"].terms["jump_state"] = cfg.observations["actor"].terms[
+    "jump_state"
+  ]
   cfg.events["initialize_jump_state"] = EventTermCfg(
     func=ascento_mdp.jump.initialize_jump_state,
     mode="reset",
   )
-  cfg.events["update_jump_state"] = EventTermCfg(
-    func=ascento_mdp.jump.update_jump_state,
-    mode="step",
+
+  # Reward computation happens before mjlab's step events. Synchronize the
+  # contact-derived jump state here so takeoff/landing rewards correspond to
+  # the same transition that produced the returned contact observation.
+  cfg.rewards["jump_state_sync"] = RewardTermCfg(
+    func=ascento_mdp.jump.sync_jump_state_reward,
+    weight=1.0,
   )
   cfg.rewards["takeoff"] = RewardTermCfg(func=ascento_mdp.rewards.jump_takeoff, weight=2.0)
   cfg.rewards["landing"] = RewardTermCfg(func=ascento_mdp.rewards.jump_landing, weight=3.0)

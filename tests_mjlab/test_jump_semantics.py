@@ -4,13 +4,39 @@ import pytest
 import torch
 
 from ascento_mjlab.mdp.commands import AscentoMotionCommandCfg
-from ascento_mjlab.mdp.jump import JumpSemantics, update_jump_state
+from ascento_mjlab.mdp.jump import (
+  JumpSemantics,
+  initialize_jump_state,
+  update_jump_state,
+)
+
+
+def _jump_env(*, step_dt: float = 0.01):
+  left = torch.ones((1, 1), dtype=torch.bool)
+  right = torch.ones((1, 1), dtype=torch.bool)
+  robot_data = SimpleNamespace(
+    root_link_pos_w=torch.tensor([[0.0, 0.0, 0.75]]),
+    root_link_lin_vel_w=torch.zeros((1, 3)),
+  )
+  env = SimpleNamespace(
+    num_envs=1,
+    device="cpu",
+    step_dt=step_dt,
+    scene={
+      "left_wheel_contact": SimpleNamespace(data=SimpleNamespace(found=left)),
+      "right_wheel_contact": SimpleNamespace(data=SimpleNamespace(found=right)),
+      "robot": SimpleNamespace(data=robot_data),
+    },
+  )
+  initialize_jump_state(env)
+  return env, left, right, robot_data
 
 
 def test_jump_semantics_keeps_terrain_behind_flat_ground_gate():
   semantics = JumpSemantics()
   assert semantics.takeoff_requires_both_wheels_airborne
   assert semantics.landing_is_first_subsequent_wheel_contact
+  assert semantics.landing_impact_uses_precontact_vertical_speed
   assert semantics.terrain_enabled is False
 
 
@@ -33,27 +59,44 @@ def test_motion_command_one_shot_is_explicitly_documented():
 
 
 def test_jump_state_defaults_to_active_environment_step_dt():
-  found = torch.zeros((1, 1), dtype=torch.bool)
-  state = {
-    "supported": torch.ones(1, dtype=torch.bool),
-    "airborne": torch.zeros(1, dtype=torch.bool),
-    "takeoff": torch.zeros(1),
-    "landing": torch.zeros(1),
-    "air_time": torch.zeros(1),
-    "takeoff_height": torch.zeros(1),
-  }
-  env = SimpleNamespace(
-    step_dt=0.037,
-    ascento_jump_state=state,
-    scene={
-      "left_wheel_contact": SimpleNamespace(data=SimpleNamespace(found=found)),
-      "right_wheel_contact": SimpleNamespace(data=SimpleNamespace(found=found)),
-      "robot": SimpleNamespace(
-        data=SimpleNamespace(root_link_pos_w=torch.tensor([[0.0, 0.0, 0.75]]))
-      ),
-    },
-  )
+  env, left, right, _ = _jump_env(step_dt=0.037)
+  left.zero_()
+  right.zero_()
 
-  update_jump_state(env, None)
+  update_jump_state(env)
 
-  assert state["air_time"].item() == pytest.approx(0.037)
+  assert env.ascento_jump_state["air_time"].item() == pytest.approx(0.037)
+  assert env.ascento_jump_state["takeoff"].item() == pytest.approx(1.0)
+
+
+def test_landing_is_first_subsequent_contact_even_with_one_wheel():
+  env, left, right, _ = _jump_env()
+  left.zero_()
+  right.zero_()
+  update_jump_state(env)
+  assert env.ascento_jump_state["airborne"].item()
+
+  left.fill_(True)
+  update_jump_state(env)
+
+  assert env.ascento_jump_state["landing"].item() == pytest.approx(1.0)
+  assert not env.ascento_jump_state["supported"].item()
+
+
+def test_landing_impact_uses_last_airborne_velocity_not_post_contact_velocity():
+  env, left, right, robot = _jump_env()
+  left.zero_()
+  right.zero_()
+  robot.root_link_lin_vel_w[0, 2] = 1.2
+  update_jump_state(env)
+
+  robot.root_link_lin_vel_w[0, 2] = -3.4
+  update_jump_state(env)
+  assert env.ascento_jump_state["last_airborne_vz"].item() == pytest.approx(-3.4)
+
+  left.fill_(True)
+  robot.root_link_lin_vel_w[0, 2] = -0.2
+  update_jump_state(env)
+
+  assert env.ascento_jump_state["landing"].item() == pytest.approx(1.0)
+  assert env.ascento_jump_state["landing_preimpact_vz"].item() == pytest.approx(-3.4)

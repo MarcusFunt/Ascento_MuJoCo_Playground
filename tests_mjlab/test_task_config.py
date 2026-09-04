@@ -16,7 +16,9 @@ def test_balance_env_is_six_effort_flat_ground():
   obs, _ = env.reset()
   assert obs["actor"].shape[-1] == 38
   assert obs["critic"].shape[-1] == 47
-  obs, reward, terminated, truncated, _ = env.step(torch.zeros((cfg.scene.num_envs, 6)))
+  obs, reward, terminated, truncated, _ = env.step(
+    torch.zeros((cfg.scene.num_envs, 6))
+  )
   assert torch.isfinite(obs["actor"]).all()
   assert torch.isfinite(reward).all()
   assert not terminated.any()
@@ -47,6 +49,28 @@ def test_balance_rl_config_enforces_normalized_actions_and_instrumented_ppo():
   assert cfg.algorithm.class_name == "ascento_mjlab.ppo:InstrumentedPPO"
 
 
+def test_velocity_stage_has_no_reward_that_penalizes_its_commands():
+  cfg = load_env_cfg("Ascento-Velocity-Flat")
+
+  assert set(cfg.commands) == {"twist", "height"}
+  assert "height" not in cfg.rewards
+  assert "planar_speed" not in cfg.rewards
+  assert "track_velocity" in cfg.rewards
+  assert "track_height" in cfg.rewards
+  assert "twist_command" in cfg.observations["actor"].terms
+  assert "height_command" in cfg.observations["actor"].terms
+
+
+def test_recovery_stage_exports_executable_success_metric_and_training_pushes():
+  cfg = load_env_cfg("Ascento-Recovery-Flat")
+  play_cfg = load_env_cfg("Ascento-Recovery-Flat", play=True)
+
+  assert "recovery_success" in cfg.metrics
+  assert "recovery_push" in cfg.events
+  assert cfg.events["recovery_push"].mode == "interval"
+  assert "recovery_push" not in play_cfg.events
+
+
 @pytest.mark.parametrize(
   "task_id",
   [
@@ -68,11 +92,13 @@ def test_all_flat_task_configs_construct_and_step(task_id):
   env.close()
 
 
-def test_jump_state_event_uses_environment_step_timing():
+def test_jump_state_is_synchronized_before_jump_dependent_rewards():
   cfg = load_env_cfg("Ascento-Jump-Flat")
-  event_cfg = cfg.events["update_jump_state"]
 
-  assert event_cfg.params == {}
+  assert "update_jump_state" not in cfg.events
+  reward_names = list(cfg.rewards)
+  assert reward_names.index("jump_state_sync") < reward_names.index("takeoff")
+  assert reward_names.index("jump_state_sync") < reward_names.index("landing")
   assert cfg.sim.mujoco.timestep * cfg.decimation == pytest.approx(0.01)
 
 

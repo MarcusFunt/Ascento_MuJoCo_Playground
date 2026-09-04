@@ -39,6 +39,20 @@ def height_tracking(
   return torch.exp(-torch.square(error) / (std * std))
 
 
+def commanded_height_tracking(
+  env: ManagerBasedRlEnv,
+  command_name: str = "height",
+  std: float = 0.05,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Track a scalar body-height command without a competing fixed-height term."""
+  asset: Entity = env.scene[asset_cfg.name]
+  command = env.command_manager.get_command(command_name)
+  assert command is not None and command.shape[1] == 1
+  error = asset.data.root_link_pos_w[:, 2] - command[:, 0]
+  return torch.exp(-torch.square(error) / (std * std))
+
+
 def angular_rate_penalty(
   env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
 ) -> torch.Tensor:
