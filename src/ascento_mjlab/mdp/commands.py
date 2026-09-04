@@ -1,4 +1,4 @@
-"""Ascento velocity and one-shot motion commands."""
+"""Ascento velocity, height, and one-shot motion commands."""
 
 from __future__ import annotations
 
@@ -7,6 +7,44 @@ from dataclasses import dataclass
 import torch
 from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
+
+
+@dataclass(kw_only=True)
+class AscentoHeightCommandCfg(CommandTermCfg):
+  """Uniform scalar body-height command."""
+
+  entity_name: str
+  height_range: tuple[float, float] = (0.70, 0.80)
+
+  def __post_init__(self) -> None:
+    if self.height_range[0] > self.height_range[1]:
+      raise ValueError("height_range must be ordered low <= high")
+
+  def build(self, env) -> AscentoHeightCommand:
+    return AscentoHeightCommand(self, env)
+
+
+class AscentoHeightCommand(CommandTerm):
+  """One-channel target body height in metres."""
+
+  def __init__(self, cfg: AscentoHeightCommandCfg, env) -> None:
+    super().__init__(cfg, env)
+    self._command = torch.zeros((self.num_envs, 1), device=self.device)
+
+  @property
+  def command(self) -> torch.Tensor:
+    return self._command
+
+  def _update_metrics(self) -> None:
+    return
+
+  def _resample_command(self, env_ids: torch.Tensor) -> None:
+    low, high = self.cfg.height_range
+    samples = torch.rand(len(env_ids), device=self.device)
+    self._command[env_ids, 0] = samples.mul(high - low).add(low)
+
+  def _update_command(self, env_ids: torch.Tensor | None) -> None:
+    del env_ids
 
 
 @dataclass(kw_only=True)
@@ -59,15 +97,18 @@ class AscentoMotionCommand(CommandTerm):
 
   def _update_command(self, env_ids: torch.Tensor | None) -> None:
     if env_ids is None:
-      # Keep a pulse sampled during this compute visible for the next policy
-      # observation, then clear it on the following step.
       consumed = ~self._pulse_is_new
       self._command[consumed, 3] = 0.0
       self._pulse_is_new[:] = False
     else:
-      # Reset keeps the freshly sampled pulse visible to the first policy action.
       self._command[env_ids, 3] = self._jump_pulse[env_ids].float()
       self._pulse_is_new[env_ids] = False
 
 
-__all__ = ["AscentoMotionCommandCfg", "UniformVelocityCommandCfg"]
+__all__ = [
+  "AscentoHeightCommand",
+  "AscentoHeightCommandCfg",
+  "AscentoMotionCommand",
+  "AscentoMotionCommandCfg",
+  "UniformVelocityCommandCfg",
+]
