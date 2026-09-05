@@ -16,8 +16,6 @@ from dashboard.health import (
     discover_dashboard_runs,
     list_dashboard_summaries,
     load_dashboard_records,
-    resolve_dashboard_run,
-    summarize_dashboard_run,
 )
 from dashboard.monitor import tail_lines, training_log_path
 from dashboard.run_service import RunService
@@ -58,7 +56,7 @@ class RunStopRequest(BaseModel):
 
 def _run(run_id: str):
     try:
-        return resolve_dashboard_run(ARTIFACT_ROOT, run_id)
+        return RUN_SERVICE.resolve(run_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="training run not found") from error
     except OSError as error:
