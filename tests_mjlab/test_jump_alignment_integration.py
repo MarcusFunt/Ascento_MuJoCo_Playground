@@ -4,6 +4,7 @@ from mjlab.tasks.registry import load_env_cfg
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights
 
 
 def _contacts(env):
@@ -30,7 +31,7 @@ def _set_root_pose(env, *, z: float, roll: float = 0.0) -> None:
   pose[0, 3:7] = quat_from_euler_xyz(
     torch.tensor([roll], device=env.device), zero, zero
   )[0]
-  env_id = torch.tensor([0], device=env.device)
+  env_id = torch.tensor([0], dtype=torch.long, device=env.device)
   robot.write_root_link_pose_to_sim(pose, env_ids=env_id)
   robot.write_root_link_velocity_to_sim(
     torch.zeros((1, 6), device=env.device), env_ids=env_id
@@ -39,16 +40,29 @@ def _set_root_pose(env, *, z: float, roll: float = 0.0) -> None:
   env.sim.sense()
 
 
-def _find_static_pose_with_contact_count(env, *, roll: float, count: int) -> float:
-  for z in torch.linspace(0.90, 0.45, 181).tolist():
-    _set_root_pose(env, z=float(z), roll=roll)
-    if sum(_contacts(env)) == count:
-      return float(z)
-  raise AssertionError(f"could not construct a static pose with {count} wheel contacts")
+def _place_lowest_wheel_on_support(
+  env, *, roll: float, penetration_m: float = 0.002
+) -> None:
+  """Pose the robot geometrically; contact truth is read only after env.step()."""
+  _set_root_pose(env, z=1.0, roll=roll)
+  bottoms = flat_ground_wheel_bottom_heights(env, env_ids=torch.tensor([0], device=env.device))
+  correction = -float(penetration_m) - float(bottoms.amin().item())
+  robot = env.scene["robot"]
+  pose = robot.data.root_link_pose_w[:1].clone()
+  pose[0, 2] += correction
+  env_id = torch.tensor([0], dtype=torch.long, device=env.device)
+  robot.write_root_link_pose_to_sim(pose, env_ids=env_id)
+  robot.write_root_link_velocity_to_sim(
+    torch.zeros((1, 6), device=env.device), env_ids=env_id
+  )
+  env.sim.forward()
+  env.sim.sense()
 
 
 def _transition(env):
-  obs, reward, terminated, truncated, _ = env.step(torch.zeros((1, 6), device=env.device))
+  obs, reward, terminated, truncated, _ = env.step(
+    torch.zeros((1, 6), device=env.device)
+  )
   state = env.ascento_jump_state
   row = {
     "contacts": _contacts(env),
@@ -74,10 +88,10 @@ def test_real_jump_rollout_aligns_contacts_state_and_reward_pulses():
   try:
     env.reset()
 
-    # Establish a genuinely supported state through a real policy transition.
-    # Geometric tangency alone need not set a contact sensor until physics runs.
-    supported_z = _find_static_pose_with_contact_count(env, roll=0.0, count=2)
-    _set_root_pose(env, z=supported_z, roll=0.0)
+    # Establish support through an actual policy transition. sim.forward()/sense()
+    # is used only to place geometry; contact sensors are never asserted until
+    # ManagerBasedRlEnv.step() has returned.
+    _place_lowest_wheel_on_support(env, roll=0.0)
     supported_row = _transition(env)
     assert supported_row["contacts"] == (True, True)
     assert supported_row["airborne"] is False
@@ -91,9 +105,8 @@ def test_real_jump_rollout_aligns_contacts_state_and_reward_pulses():
     motion._jump_pulse[0] = True
     motion._jump_generation[0] += 1
 
-    # Lift the actual simulated robot clear of the plane, then take one real
-    # ManagerBasedRlEnv policy transition. Contact observation, jump state and
-    # reward pulse must describe this same transition.
+    # The returned transition must simultaneously report no contacts, airborne,
+    # the takeoff event, and the takeoff reward pulse.
     _set_root_pose(env, z=1.05, roll=0.0)
     takeoff_row = _transition(env)
 
@@ -104,10 +117,10 @@ def test_real_jump_rollout_aligns_contacts_state_and_reward_pulses():
     assert takeoff_row["rewards"]["takeoff"] > 0.0
     assert takeoff_row["rewards"]["landing"] == 0.0
 
-    # Probe for a one-wheel first-contact pose without updating jump state;
-    # only the subsequent env.step is allowed to create the landing event.
-    one_wheel_z = _find_static_pose_with_contact_count(env, roll=0.30, count=1)
-    _set_root_pose(env, z=one_wheel_z, roll=0.30)
+    # Tilt the robot and place only its lower wheel into the support plane. This
+    # is the first post-takeoff contact transition; it must therefore produce
+    # landing on the same returned transition, even though the other wheel is free.
+    _place_lowest_wheel_on_support(env, roll=0.30)
     landing_row = _transition(env)
 
     assert sum(landing_row["contacts"]) == 1
