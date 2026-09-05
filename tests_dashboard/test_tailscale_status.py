@@ -2,7 +2,6 @@ import json
 import subprocess
 import sys
 
-
 SCRIPT = "scripts/tailscale_status.py"
 
 

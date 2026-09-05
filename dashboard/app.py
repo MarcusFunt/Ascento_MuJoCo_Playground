@@ -1,4 +1,5 @@
 """FastAPI service for remotely monitoring and managing Ascento PPO training."""
+
 from __future__ import annotations
 
 import asyncio
@@ -178,7 +179,9 @@ def create_run(request: RunCreateRequest):
     try:
         return RUN_SERVICE.create(request.model_dump())
     except KeyError as error:
-        raise HTTPException(status_code=400, detail=f"parent run not found: {error.args[0]}") from error
+        raise HTTPException(
+            status_code=400, detail=f"parent run not found: {error.args[0]}"
+        ) from error
     except (ValueError, PermissionError, OSError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -189,7 +192,9 @@ def compare_runs(run_ids: str):
     try:
         return RUN_SERVICE.compare(ids)
     except KeyError as error:
-        raise HTTPException(status_code=404, detail=f"training run not found: {error.args[0]}") from error
+        raise HTTPException(
+            status_code=404, detail=f"training run not found: {error.args[0]}"
+        ) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -207,7 +212,9 @@ def update_run(run_id: str, request: RunUpdateRequest):
     try:
         return RUN_SERVICE.update_metadata(run_id, request.model_dump(exclude_unset=True))
     except KeyError as error:
-        raise HTTPException(status_code=404, detail="training run or parent run not found") from error
+        raise HTTPException(
+            status_code=404, detail="training run or parent run not found"
+        ) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -282,10 +289,7 @@ async def stream_logs(run_id: str, request: Request):
             except FileNotFoundError:
                 pass
             except OSError as error:
-                yield (
-                    "event: monitor_error\n"
-                    f"data: {json.dumps({'message': str(error)})}\n\n"
-                )
+                yield (f"event: monitor_error\ndata: {json.dumps({'message': str(error)})}\n\n")
             yield ": keepalive\n\n"
             await asyncio.sleep(1.0)
 

@@ -1,9 +1,8 @@
 import importlib
 
 import pytest
-from fastapi import HTTPException
-
 from dashboard.supervisor_client import SupervisorRejected, SupervisorUnavailable
+from fastapi import HTTPException
 
 
 def _load_app(monkeypatch, artifact_root):

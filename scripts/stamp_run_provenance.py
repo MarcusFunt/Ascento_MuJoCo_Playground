@@ -1,4 +1,5 @@
 """Backfill repository provenance for legacy runs that predate launcher metadata."""
+
 from __future__ import annotations
 
 import argparse
@@ -17,8 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from dashboard.health import discover_dashboard_runs
-from dashboard.versioning import run_repository_provenance
+from dashboard.health import discover_dashboard_runs  # noqa: E402
+from dashboard.versioning import run_repository_provenance  # noqa: E402
 
 
 def stamp_missing_runs(root: Path, commit: str, branch: str | None = None) -> int:

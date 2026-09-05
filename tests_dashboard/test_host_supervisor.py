@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from scripts.host_supervisor import HostSupervisor
 
@@ -69,7 +68,9 @@ def test_repository_update_is_blocked_by_active_training(monkeypatch, tmp_path):
         lambda: [{"name": "Recovery long run", "state": "running", "path": "run-a"}],
     )
     monkeypatch.setattr(supervisor, "update_state", lambda: {"status": "idle"})
-    monkeypatch.setattr(supervisor, "_tailscale_status", lambda: {"enabled": False, "connected": False})
+    monkeypatch.setattr(
+        supervisor, "_tailscale_status", lambda: {"enabled": False, "connected": False}
+    )
 
     status = supervisor.repository_status(refresh=True)
 
@@ -84,21 +85,15 @@ def test_active_run_scan_reads_launcher_statuses(tmp_path):
     finished = root / "run-b"
     active.mkdir(parents=True)
     finished.mkdir(parents=True)
-    (active / "run_status.json").write_text(
-        json.dumps({"state": "running"}), encoding="utf-8"
-    )
+    (active / "run_status.json").write_text(json.dumps({"state": "running"}), encoding="utf-8")
     (active / "run_metadata.json").write_text(
         json.dumps({"display_name": "Recovery validation"}), encoding="utf-8"
     )
-    (finished / "run_status.json").write_text(
-        json.dumps({"state": "finished"}), encoding="utf-8"
-    )
+    (finished / "run_status.json").write_text(json.dumps({"state": "finished"}), encoding="utf-8")
 
     runs = HostSupervisor(tmp_path).active_runs()
 
-    assert runs == [
-        {"name": "Recovery validation", "state": "running", "path": "run-a"}
-    ]
+    assert runs == [{"name": "Recovery validation", "state": "running", "path": "run-a"}]
 
 
 def test_dispatch_exposes_only_status_and_update(monkeypatch, tmp_path):

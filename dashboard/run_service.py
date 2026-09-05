@@ -1,4 +1,5 @@
 """Run lifecycle, provenance metadata, and comparison services for the dashboard."""
+
 from __future__ import annotations
 
 import json
@@ -88,7 +89,9 @@ class RunService:
             "run_id": metadata.get("run_id"),
             "display_name": metadata.get("display_name") or run_dir.name,
             "notes": metadata.get("notes") or "",
-            "tags": _clean_tags(metadata.get("tags") if isinstance(metadata.get("tags"), list) else []),
+            "tags": _clean_tags(
+                metadata.get("tags") if isinstance(metadata.get("tags"), list) else []
+            ),
             "purpose": metadata.get("purpose") or "",
             "parent_run_id": metadata.get("parent_run_id"),
             "parent_checkpoint": metadata.get("parent_checkpoint"),
@@ -176,7 +179,9 @@ class RunService:
         if not task.startswith("Ascento-"):
             raise ValueError("task must be an Ascento task name")
         training_args = request.get("training_args") or []
-        if not isinstance(training_args, list) or not all(isinstance(value, str) for value in training_args):
+        if not isinstance(training_args, list) or not all(
+            isinstance(value, str) for value in training_args
+        ):
             raise ValueError("training_args must be a list of strings")
         parent_run_id = request.get("parent_run_id")
         if parent_run_id:

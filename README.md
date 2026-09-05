@@ -142,7 +142,7 @@ commands or use the environment created by `uv sync --extra cu128`.
 ```bash
 uv run --extra cu128 python -m ascento_mjlab.tools.smoke
 uv run --extra cu128 python -m ascento_mjlab.tools.inspect_model
-uv run --extra cu128 pytest -q
+uv run --extra cu128 --extra dashboard pytest -q
 ```
 
 Immediately before committing to a long run, use the production host and the

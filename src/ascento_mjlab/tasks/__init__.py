@@ -14,33 +14,33 @@ from .velocity.rl_cfg import AscentoVelocityRlCfg
 
 
 def _register_tasks() -> None:
-  """Register tasks after all config modules have finished importing."""
-  from mjlab.tasks.registry import register_mjlab_task
+    """Register tasks after all config modules have finished importing."""
+    from mjlab.tasks.registry import register_mjlab_task
 
-  register_mjlab_task(
-    task_id="Ascento-Balance-Flat",
-    env_cfg=ascento_balance_env_cfg(),
-    play_env_cfg=ascento_balance_env_cfg(play=True),
-    rl_cfg=AscentoBalanceRlCfg,
-  )
-  register_mjlab_task(
-    task_id="Ascento-Velocity-Flat",
-    env_cfg=ascento_velocity_env_cfg(),
-    play_env_cfg=ascento_velocity_env_cfg(play=True),
-    rl_cfg=AscentoVelocityRlCfg,
-  )
-  register_mjlab_task(
-    task_id="Ascento-Recovery-Flat",
-    env_cfg=ascento_recovery_env_cfg(),
-    play_env_cfg=ascento_recovery_env_cfg(play=True),
-    rl_cfg=AscentoRecoveryRlCfg,
-  )
-  register_mjlab_task(
-    task_id="Ascento-Jump-Flat",
-    env_cfg=ascento_jump_env_cfg(),
-    play_env_cfg=ascento_jump_env_cfg(play=True),
-    rl_cfg=AscentoJumpRlCfg,
-  )
+    register_mjlab_task(
+        task_id="Ascento-Balance-Flat",
+        env_cfg=ascento_balance_env_cfg(),
+        play_env_cfg=ascento_balance_env_cfg(play=True),
+        rl_cfg=AscentoBalanceRlCfg,
+    )
+    register_mjlab_task(
+        task_id="Ascento-Velocity-Flat",
+        env_cfg=ascento_velocity_env_cfg(),
+        play_env_cfg=ascento_velocity_env_cfg(play=True),
+        rl_cfg=AscentoVelocityRlCfg,
+    )
+    register_mjlab_task(
+        task_id="Ascento-Recovery-Flat",
+        env_cfg=ascento_recovery_env_cfg(),
+        play_env_cfg=ascento_recovery_env_cfg(play=True),
+        rl_cfg=AscentoRecoveryRlCfg,
+    )
+    register_mjlab_task(
+        task_id="Ascento-Jump-Flat",
+        env_cfg=ascento_jump_env_cfg(),
+        play_env_cfg=ascento_jump_env_cfg(play=True),
+        rl_cfg=AscentoJumpRlCfg,
+    )
 
 
 _register_tasks()

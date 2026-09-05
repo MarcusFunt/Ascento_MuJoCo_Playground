@@ -61,6 +61,7 @@ jobs:
         with:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv run --frozen --extra cpu --extra dashboard ruff check .
       - run: bash -n scripts/run_dashboard.sh scripts/maintain.sh scripts/install_supervisor.sh scripts/setup_tailscale.sh
       - run: bash scripts/maintain.sh --help
       - run: bash scripts/install_supervisor.sh --help

@@ -13,20 +13,22 @@ from dashboard.health import (
 
 def test_canonical_metrics_and_non_finite_detection(tmp_path):
     record = decorate_records(
-        [{
-            "completed_steps": 3,
-            "metrics": {
-                "Train/mean_reward": 2.5,
-                "Train/mean_episode_length": 42.0,
-                "Loss/surrogate": 0.12,
-                "Loss/value": 0.003,
-                "Loss/entropy": -0.02,
-                "Loss/kl": 0.006,
-                "Loss/clip_fraction": 0.17,
-                "Loss/learning_rate": 1.5e-4,
-                "bad_metric": float("inf"),
-            },
-        }],
+        [
+            {
+                "completed_steps": 3,
+                "metrics": {
+                    "Train/mean_reward": 2.5,
+                    "Train/mean_episode_length": 42.0,
+                    "Loss/surrogate": 0.12,
+                    "Loss/value": 0.003,
+                    "Loss/entropy": -0.02,
+                    "Loss/kl": 0.006,
+                    "Loss/clip_fraction": 0.17,
+                    "Loss/learning_rate": 1.5e-4,
+                    "bad_metric": float("inf"),
+                },
+            }
+        ],
         tmp_path,
     )[0]
 

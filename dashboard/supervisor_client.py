@@ -1,4 +1,5 @@
 """Restricted Unix-socket client for the host maintenance supervisor."""
+
 from __future__ import annotations
 
 import json
