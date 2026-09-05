@@ -127,8 +127,6 @@ def _actions() -> dict[str, ActionTermCfg]:
       entity_name="robot",
       actuator_names=JOINT_NAMES,
       scale=effort_limit,
-      # JointEffortActionCfg clips after scale/offset. The physical target
-      # therefore needs the physical Nm clamp, not the normalized policy clamp.
       clip={".*": (-effort_limit, effort_limit)},
       preserve_order=True,
     )
@@ -151,7 +149,7 @@ def ascento_balance_env_cfg(
         func=mdp.reset_scene_to_default, mode="reset"
       ),
       "reset_supported_pose": EventTermCfg(
-        func=ascento_mdp.events.reset_root_state_uniform,
+        func=ascento_mdp.events.reset_root_state_supported,
         mode="reset",
         params={
           "pose_range": {
