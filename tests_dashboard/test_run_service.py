@@ -26,10 +26,16 @@ def _run(root: Path, name: str, *, state: str = "finished", reward: float | None
     return run
 
 
+def service_compare_ids(service: RunService, root: Path):
+    from dashboard.health import discover_dashboard_runs
+
+    return [ref.id for ref in discover_dashboard_runs(root)]
+
+
 def test_metadata_can_annotate_existing_runs(tmp_path):
     run = _run(tmp_path, "legacy")
     service = RunService(tmp_path)
-    run_id = service.detail(next(iter(service_compare_ids(service, tmp_path))))["id"]
+    run_id = service_compare_ids(service, tmp_path)[0]
 
     updated = service.update_metadata(
         run_id,
@@ -48,10 +54,30 @@ def test_metadata_can_annotate_existing_runs(tmp_path):
     assert updated["notes"] == "Known-good comparison run."
 
 
-def service_compare_ids(service: RunService, root: Path):
-    from dashboard.health import discover_dashboard_runs
+def test_nested_training_artifacts_use_launcher_metadata(tmp_path):
+    launcher = tmp_path / "managed"
+    launcher.mkdir()
+    (launcher / "run_status.json").write_text(
+        json.dumps({"state": "finished", "task": "Ascento-Recovery-Flat", "stage": "recovery"}),
+        encoding="utf-8",
+    )
+    (launcher / "run_metadata.json").write_text(
+        json.dumps({"display_name": "Managed recovery", "tags": ["recovery"]}),
+        encoding="utf-8",
+    )
+    nested = launcher / "ascento_recovery" / "2026-09-05_12-00-00"
+    nested.mkdir(parents=True)
+    (nested / "telemetry.jsonl").write_text(
+        json.dumps({"completed_steps": 1, "total_steps": 10, "wall_time": 1, "metrics": {}}) + "\n",
+        encoding="utf-8",
+    )
 
-    return [ref.id for ref in discover_dashboard_runs(root)]
+    service = RunService(tmp_path)
+    run_id = service_compare_ids(service, tmp_path)[0]
+    detail = service.detail(run_id)
+
+    assert detail["display_name"] == "Managed recovery"
+    assert detail["tags"] == ["recovery"]
 
 
 def test_lineage_rejects_self_parent_and_accepts_other_run(tmp_path):
