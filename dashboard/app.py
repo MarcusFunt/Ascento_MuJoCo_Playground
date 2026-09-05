@@ -146,8 +146,13 @@ def system_status(refresh: bool = False):
 
 
 @app.post("/api/system/update", status_code=202)
-def system_update():
+def system_update(request: Request):
     """Ask the host supervisor to update to the newest origin/main."""
+    # Requiring a non-simple custom header prevents cross-site forms and simple
+    # browser requests from invoking the privileged host boundary. Tailnet
+    # grants/ACLs remain the authentication boundary for reaching this service.
+    if request.headers.get("x-ascento-control") != "1":
+        raise HTTPException(status_code=403, detail="missing dashboard control header")
     try:
         return SUPERVISOR.update()
     except SupervisorUnavailable as error:
