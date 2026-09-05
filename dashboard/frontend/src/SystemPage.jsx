@@ -48,7 +48,10 @@ function SystemPage() {
   async function updateSystem() {
     setAction('Starting update…')
     try {
-      await fetchJson('/api/system/update', { method: 'POST' })
+      await fetchJson('/api/system/update', {
+        method: 'POST',
+        headers: { 'X-Ascento-Control': '1' },
+      })
       setAction('Update started. The dashboard may disconnect briefly while containers rebuild.')
       await refresh(false)
     } catch (err) {
