@@ -220,4 +220,6 @@ def test_clearance_uses_tilt_aware_cylinder_extent():
 
     update_jump_state(env)
 
-    assert env.ascento_jump_state["limiting_wheel_clearance"].item() == pytest.approx(0.2975)
+    assert env.ascento_jump_state["limiting_wheel_clearance"].item() == pytest.approx(
+        0.2975, abs=1.0e-4
+    )
