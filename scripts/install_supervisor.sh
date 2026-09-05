@@ -92,6 +92,10 @@ if [[ ! -S "$SOCKET_PATH" ]]; then
   exit 1
 fi
 
+printf 'installed_at=%s\nservice=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SERVICE_NAME" \
+  >"$REPO_ROOT/.maintenance/supervisor-installed"
+chmod 600 "$REPO_ROOT/.maintenance/supervisor-installed"
+
 echo "Host supervisor installed and running."
 echo "Service: $SERVICE_NAME"
 echo "Socket:  $SOCKET_PATH"
