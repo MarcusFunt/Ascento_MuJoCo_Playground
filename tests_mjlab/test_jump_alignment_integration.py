@@ -30,12 +30,21 @@ def _set_root_pose(env, *, z: float, roll: float = 0.0) -> None:
   pose[0, 3:7] = quat_from_euler_xyz(
     torch.tensor([roll], device=env.device), zero, zero
   )[0]
-  robot.write_root_link_pose_to_sim(pose, env_ids=torch.tensor([0], device=env.device))
+  env_id = torch.tensor([0], device=env.device)
+  robot.write_root_link_pose_to_sim(pose, env_ids=env_id)
   robot.write_root_link_velocity_to_sim(
-    torch.zeros((1, 6), device=env.device), env_ids=torch.tensor([0], device=env.device)
+    torch.zeros((1, 6), device=env.device), env_ids=env_id
   )
   env.sim.forward()
   env.sim.sense()
+
+
+def _find_static_pose_with_contact_count(env, *, roll: float, count: int) -> float:
+  for z in torch.linspace(0.90, 0.45, 181).tolist():
+    _set_root_pose(env, z=float(z), roll=roll)
+    if sum(_contacts(env)) == count:
+      return float(z)
+  raise AssertionError(f"could not construct a static pose with {count} wheel contacts")
 
 
 def _transition(env):
@@ -59,10 +68,21 @@ def test_real_jump_rollout_aligns_contacts_state_and_reward_pulses():
   cfg = load_env_cfg("Ascento-Jump-Flat", play=True)
   cfg.scene.num_envs = 1
   cfg.auto_reset = False
+  # Eliminate stochastic command requests; this test injects one exact request.
+  cfg.commands["motion"].jump_probability = 0.0
   env = ManagerBasedRlEnv(cfg, device="cpu")
   try:
     env.reset()
-    assert _contacts(env) == (True, True)
+
+    # Establish a genuinely supported state through a real policy transition.
+    # Geometric tangency alone need not set a contact sensor until physics runs.
+    supported_z = _find_static_pose_with_contact_count(env, roll=0.0, count=2)
+    _set_root_pose(env, z=supported_z, roll=0.0)
+    supported_row = _transition(env)
+    assert supported_row["contacts"] == (True, True)
+    assert supported_row["airborne"] is False
+    assert supported_row["takeoff"] == 0.0
+    assert supported_row["landing"] == 0.0
 
     # Force exactly one new jump request without relying on the visible pulse
     # surviving command-manager update order.
@@ -72,7 +92,8 @@ def test_real_jump_rollout_aligns_contacts_state_and_reward_pulses():
     motion._jump_generation[0] += 1
 
     # Lift the actual simulated robot clear of the plane, then take one real
-    # ManagerBasedRlEnv policy transition.
+    # ManagerBasedRlEnv policy transition. Contact observation, jump state and
+    # reward pulse must describe this same transition.
     _set_root_pose(env, z=1.05, roll=0.0)
     takeoff_row = _transition(env)
 
@@ -83,18 +104,10 @@ def test_real_jump_rollout_aligns_contacts_state_and_reward_pulses():
     assert takeoff_row["rewards"]["takeoff"] > 0.0
     assert takeoff_row["rewards"]["landing"] == 0.0
 
-    # Find a static tilted pose with exactly one wheel contacting the plane.
-    # Sensor probing does not update the jump state; the subsequent env.step is
-    # therefore the first policy transition after the airborne sample.
-    candidate = None
-    for z in torch.linspace(0.80, 0.50, 61).tolist():
-      _set_root_pose(env, z=float(z), roll=0.30)
-      if sum(_contacts(env)) == 1:
-        candidate = float(z)
-        break
-    assert candidate is not None, "could not construct a one-wheel first-contact pose"
-
-    _set_root_pose(env, z=candidate, roll=0.30)
+    # Probe for a one-wheel first-contact pose without updating jump state;
+    # only the subsequent env.step is allowed to create the landing event.
+    one_wheel_z = _find_static_pose_with_contact_count(env, roll=0.30, count=1)
+    _set_root_pose(env, z=one_wheel_z, roll=0.30)
     landing_row = _transition(env)
 
     assert sum(landing_row["contacts"]) == 1
