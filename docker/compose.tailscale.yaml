@@ -1,0 +1,36 @@
+services:
+  tailscale-dashboard:
+    image: ${ASCENTO_TAILSCALE_IMAGE:-tailscale/tailscale:v1.102.2}
+    hostname: ${ASCENTO_TAILSCALE_HOSTNAME:-ascento-dashboard}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_AUTH_ONCE: "true"
+      TS_HOSTNAME: ${ASCENTO_TAILSCALE_HOSTNAME:-ascento-dashboard}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      # OAuth client secrets require an advertised tag, for example:
+      # ASCENTO_TAILSCALE_EXTRA_ARGS=--advertise-tags=tag:ascento
+      TS_EXTRA_ARGS: ${ASCENTO_TAILSCALE_EXTRA_ARGS:-}
+    volumes:
+      - tailscale-dashboard-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      # Preserve workstation-local access while the Dashboard shares this
+      # container's network namespace. Tailnet peers connect to port 8000 on
+      # the Tailscale address / MagicDNS name instead.
+      - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  dashboard:
+    network_mode: service:tailscale-dashboard
+    ports: !reset []
+    depends_on:
+      tailscale-dashboard:
+        condition: service_started
+
+volumes:
+  tailscale-dashboard-state:

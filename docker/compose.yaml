@@ -37,9 +37,13 @@ services:
       - ../checkpoints:/workspace/checkpoints:ro
       - ../captures:/workspace/captures:ro
       - ../evaluations:/workspace/evaluations:ro
+      # This is the only host-control surface exposed to the web container.
+      # It is a fixed-operation Unix socket, not Docker's control socket.
+      - ../.maintenance/supervisor:/run/ascento-supervisor
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
       ASCENTO_ARTIFACT_ROOT: /workspace/logs/rsl_rl
       ASCENTO_REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
       ASCENTO_REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
+      ASCENTO_SUPERVISOR_SOCKET: /run/ascento-supervisor/supervisor.sock
     restart: unless-stopped
