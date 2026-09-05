@@ -58,8 +58,8 @@ class RecoverySuccess:
 
   def __init__(self, cfg, env) -> None:
     self.envelope = cfg.params.get("envelope", RecoveryEnvelope())
+    self._step_dt = float(env.step_dt)
     self._stable_steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
-    self._required_steps = max(1, round(self.envelope.stable_duration_s / env.step_dt))
 
   def __call__(self, env, envelope: RecoveryEnvelope | None = None) -> torch.Tensor:
     active_envelope = self.envelope if envelope is None else envelope
@@ -67,7 +67,8 @@ class RecoverySuccess:
     self._stable_steps = torch.where(
       stable, self._stable_steps + 1, torch.zeros_like(self._stable_steps)
     )
-    return (self._stable_steps >= self._required_steps).float()
+    required_steps = max(1, round(active_envelope.stable_duration_s / self._step_dt))
+    return (self._stable_steps >= required_steps).float()
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     ids = slice(None) if env_ids is None else env_ids
