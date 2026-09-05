@@ -1,4 +1,4 @@
-"""FastAPI service for remotely monitoring Ascento PPO training."""
+"""FastAPI service for remotely monitoring and managing Ascento PPO training."""
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +9,7 @@ import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from dashboard.config import load_config, validate_startup
 from dashboard.health import (
@@ -19,16 +20,40 @@ from dashboard.health import (
     summarize_dashboard_run,
 )
 from dashboard.monitor import tail_lines, training_log_path
-from dashboard.versioning import annotate_run_summary, current_repository_version
+from dashboard.run_service import RunService
+from dashboard.versioning import current_repository_version
 
 CONFIG = load_config()
-# The server only monitors artifacts. Docker intentionally mounts logs/checkpoints/
-# captures read-only, so startup validation must never try to create directories.
 STARTUP_WARNINGS = validate_startup(CONFIG, create_artifact_root=False)
 ARTIFACT_ROOT = CONFIG.artifact_root
 FRONTEND_DIST = CONFIG.frontend_dist
+RUN_SERVICE = RunService(ARTIFACT_ROOT, stale_after_seconds=CONFIG.stale_after_seconds)
 
-app = FastAPI(title="Ascento Training Monitor", version="1.3")
+app = FastAPI(title="Ascento Training Monitor", version="2.0")
+
+
+class RunCreateRequest(BaseModel):
+    display_name: str
+    task: str = "Ascento-Balance-Flat"
+    notes: str = ""
+    tags: list[str] = Field(default_factory=list)
+    purpose: str = ""
+    parent_run_id: str | None = None
+    parent_checkpoint: str | None = None
+    training_args: list[str] = Field(default_factory=list)
+
+
+class RunUpdateRequest(BaseModel):
+    display_name: str | None = None
+    notes: str | None = None
+    tags: list[str] | None = None
+    purpose: str | None = None
+    parent_run_id: str | None = None
+    parent_checkpoint: str | None = None
+
+
+class RunStopRequest(BaseModel):
+    reason: str = "user_requested"
 
 
 def _run(run_id: str):
@@ -45,9 +70,6 @@ def _run(run_id: str):
 
 def _artifact_health() -> list[str]:
     problems: list[str] = []
-    # A missing root is normal on a fresh install before the first training run.
-    # discover_runs() treats it as an empty run set, so it is a warning rather
-    # than a health failure.
     if ARTIFACT_ROOT.exists() and not ARTIFACT_ROOT.is_dir():
         problems.append(f"artifact root is not a directory: {ARTIFACT_ROOT}")
     elif ARTIFACT_ROOT.exists():
@@ -67,7 +89,7 @@ def _annotated_summaries() -> list[dict]:
     for summary in summaries:
         ref = refs.get(summary.get("id"))
         if ref is not None:
-            annotate_run_summary(summary, ref.path, ARTIFACT_ROOT)
+            RUN_SERVICE.annotate(summary, ref.path)
     return summaries
 
 
@@ -113,28 +135,63 @@ def runs():
     return {"runs": summaries}
 
 
+@app.post("/api/runs", status_code=202)
+def create_run(request: RunCreateRequest):
+    try:
+        return RUN_SERVICE.create(request.model_dump())
+    except KeyError as error:
+        raise HTTPException(status_code=400, detail=f"parent run not found: {error.args[0]}") from error
+    except (ValueError, PermissionError, OSError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.get("/api/runs/compare")
+def compare_runs(run_ids: str):
+    ids = [value.strip() for value in run_ids.split(",") if value.strip()]
+    try:
+        return RUN_SERVICE.compare(ids)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"training run not found: {error.args[0]}") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
 @app.get("/api/runs/{run_id}")
 def run_status(run_id: str):
-    ref = _run(run_id)
-    summary = summarize_dashboard_run(
-        ref.path,
-        ARTIFACT_ROOT,
-        stale_after_seconds=CONFIG.stale_after_seconds,
-        detailed=True,
-    )
-    return annotate_run_summary(summary, ref.path, ARTIFACT_ROOT)
+    try:
+        return RUN_SERVICE.detail(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="training run not found") from error
+
+
+@app.patch("/api/runs/{run_id}")
+def update_run(run_id: str, request: RunUpdateRequest):
+    try:
+        return RUN_SERVICE.update_metadata(run_id, request.model_dump(exclude_unset=True))
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="training run or parent run not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/api/runs/{run_id}/stop", status_code=202)
+def stop_run(run_id: str, request: RunStopRequest):
+    try:
+        return RUN_SERVICE.stop(run_id, reason=request.reason.strip() or "user_requested")
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="training run not found") from error
+    except ProcessLookupError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.get("/api/runs/{run_id}/summary.json")
 def run_summary(run_id: str):
-    ref = _run(run_id)
-    summary = summarize_dashboard_run(
-        ref.path,
-        ARTIFACT_ROOT,
-        stale_after_seconds=CONFIG.stale_after_seconds,
-        detailed=True,
-    )
-    annotate_run_summary(summary, ref.path, ARTIFACT_ROOT)
+    try:
+        summary = RUN_SERVICE.detail(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="training run not found") from error
     return JSONResponse(
         content=summary,
         headers={"Content-Disposition": 'attachment; filename="run-summary.json"'},
