@@ -57,8 +57,10 @@ bash scripts/install_supervisor.sh
 
 The installer creates a boot-persistent systemd service. The process runs as the
 workstation user, with Docker-group access only so `maintain.sh` can rebuild the
-project stack. The Dashboard receives only `.maintenance/supervisor/supervisor.sock`
-through a bind mount.
+project stack. systemd creates the short-lived `/run/ascento-supervisor` runtime
+directory, and the Dashboard receives only its `supervisor.sock` through a bind
+mount. Keeping the socket outside the checkout avoids Linux's 108-byte
+Unix-domain socket path limit on long WSL-mounted paths.
 
 The supervisor refuses a GUI-triggered update when:
 

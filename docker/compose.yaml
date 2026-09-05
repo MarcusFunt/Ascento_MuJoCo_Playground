@@ -39,7 +39,7 @@ services:
       - ../evaluations:/workspace/evaluations:ro
       # This is the only host-control surface exposed to the web container.
       # It is a fixed-operation Unix socket, not Docker's control socket.
-      - ../.maintenance/supervisor:/run/ascento-supervisor
+      - /run/ascento-supervisor:/run/ascento-supervisor
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
       ASCENTO_ARTIFACT_ROOT: /workspace/logs/rsl_rl
