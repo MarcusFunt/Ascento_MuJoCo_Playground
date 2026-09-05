@@ -14,7 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from dashboard.config import REPO_ROOT
-from dashboard.health import resolve_dashboard_run, summarize_dashboard_run
+from dashboard.health import resolve_dashboard_run, run_status_path, summarize_dashboard_run
 from dashboard.versioning import annotate_run_summary
 
 RUN_METADATA = "run_metadata.json"
@@ -31,6 +31,14 @@ def _slug(value: str) -> str:
 
 def _run_id(relative_path: str) -> str:
     return sha1(relative_path.encode("utf-8")).hexdigest()[:12]
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -68,6 +76,15 @@ class RunService:
         self.stale_after_seconds = stale_after_seconds
 
     def metadata_path(self, run_dir: Path) -> Path:
+        """Find launcher-level metadata even when RSL-RL artifacts are nested below it."""
+        for directory in (run_dir.resolve(), *run_dir.resolve().parents):
+            if not _inside(directory, self.artifact_root):
+                break
+            candidate = directory / RUN_METADATA
+            if candidate.is_file():
+                return candidate
+            if directory == self.artifact_root:
+                break
         return run_dir / RUN_METADATA
 
     def load_metadata(self, run_dir: Path) -> dict[str, Any]:
@@ -210,7 +227,7 @@ class RunService:
 
     def stop(self, run_id: str, *, reason: str = "user_requested") -> dict[str, Any]:
         ref = resolve_dashboard_run(self.artifact_root, run_id)
-        status_path = ref.path / "run_status.json"
+        status_path = run_status_path(ref.path, self.artifact_root)
         status = _load_json(status_path)
         state = str(status.get("state") or "unknown")
         if state not in {"starting", "running", "stopping"}:
