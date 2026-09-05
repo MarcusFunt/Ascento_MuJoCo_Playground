@@ -8,6 +8,9 @@ services:
       TS_HOSTNAME: ${ASCENTO_TAILSCALE_HOSTNAME:-ascento-dashboard}
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
+      # OAuth client secrets require an advertised tag, for example:
+      # ASCENTO_TAILSCALE_EXTRA_ARGS=--advertise-tags=tag:ascento
+      TS_EXTRA_ARGS: ${ASCENTO_TAILSCALE_EXTRA_ARGS:-}
     volumes:
       - tailscale-dashboard-state:/var/lib/tailscale
     devices:
