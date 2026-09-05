@@ -28,6 +28,7 @@ fi
 [[ $# -eq 0 ]] || { usage >&2; exit 2; }
 [[ "$(uname -s)" == "Linux" ]] || { echo "ERROR: Tailscale Docker sidecar requires Linux/WSL2" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || { echo "ERROR: Docker is required" >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 is required" >&2; exit 1; }
 docker compose version >/dev/null 2>&1 || { echo "ERROR: Docker Compose plugin is required" >&2; exit 1; }
 [[ -f "$ENVFILE" ]] || {
   echo "ERROR: $ENVFILE does not exist. Run scripts/maintain.sh once first." >&2
@@ -38,6 +39,27 @@ docker compose version >/dev/null 2>&1 || { echo "ERROR: Docker Compose plugin i
   exit 1
 }
 
+ACTIVE_RUNS="$(python3 - "$REPO_ROOT/logs/rsl_rl" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+active = []
+if root.is_dir():
+    for path in root.rglob('run_status.json'):
+        try:
+            value = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if value.get('state') in {'starting', 'running', 'stopping'}:
+            active.append(str(path.parent.relative_to(root)))
+print('\n'.join(active))
+PY
+)"
+if [[ -n "$ACTIVE_RUNS" ]]; then
+  echo "ERROR: Tailnet enrollment recreates the Dashboard and is blocked while runs are active:" >&2
+  printf '  %s\n' "$ACTIVE_RUNS" >&2
+  exit 1
+fi
+
 AUTH_KEY="${TS_AUTHKEY:-}"
 if [[ -z "$AUTH_KEY" ]]; then
   read -rsp "Tailscale auth key / OAuth client secret: " AUTH_KEY
@@ -46,9 +68,9 @@ fi
 [[ -n "$AUTH_KEY" ]] || { echo "ERROR: no Tailscale credential supplied" >&2; exit 1; }
 
 COMPUTE="$(awk -F= '$1 == "ASCENTO_COMPUTE_EXTRA" {print $2}' "$ENVFILE" | tail -n1)"
-FILES=(-f "$REPO_ROOT/docker/compose.yaml")
-[[ "$COMPUTE" == "cu128" ]] && FILES+=(-f "$REPO_ROOT/docker/compose.gpu.yaml")
-FILES+=(-f "$REPO_ROOT/docker/compose.tailscale.yaml")
+BASE_FILES=(-f "$REPO_ROOT/docker/compose.yaml")
+[[ "$COMPUTE" == "cu128" ]] && BASE_FILES+=(-f "$REPO_ROOT/docker/compose.gpu.yaml")
+FILES=("${BASE_FILES[@]}" -f "$REPO_ROOT/docker/compose.tailscale.yaml")
 
 compose() {
   docker compose --env-file "$ENVFILE" "${FILES[@]}" "$@"
@@ -56,6 +78,9 @@ compose() {
 
 mkdir -p "$MAINTENANCE"
 echo "Enrolling ${ASCENTO_TAILSCALE_HOSTNAME:-ascento-dashboard} in the tailnet..."
+# Release the local 127.0.0.1 dashboard port before the sidecar takes ownership
+# of that same port in the shared network namespace.
+docker compose --env-file "$ENVFILE" "${BASE_FILES[@]}" stop dashboard >/dev/null 2>&1 || true
 TS_AUTHKEY="$AUTH_KEY" compose up -d tailscale-dashboard dashboard
 
 connected=0
@@ -106,7 +131,7 @@ echo "Tailnet enrollment complete."
 if [[ -n "$DNS_NAME" ]]; then
   echo "Remote Dashboard: http://$DNS_NAME:$DASHBOARD_PORT"
 else
-  echo "Use the Tailscale IP shown by: docker compose ... exec tailscale-dashboard tailscale status"
+  echo "Use the Tailscale IP shown by the tailscale-dashboard service."
 fi
 echo "Local Dashboard:  http://127.0.0.1:$DASHBOARD_PORT"
-echo "Only the Dashboard network namespace is attached to the tailnet; the training service is not exposed."
+echo "Only the Dashboard service identity is exposed to the tailnet; the ascento-mjlab service remains private."
