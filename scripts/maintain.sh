@@ -303,7 +303,8 @@ build_frontend() {
 
 write_maintenance_state() {
   local state="$INSTALL_DIR/.maintenance"
-  mkdir -p "$state"
+  mkdir -p "$state" "$state/supervisor"
+  chmod 700 "$state/supervisor"
   local commit branch
   commit="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
   branch="$(git -C "$INSTALL_DIR" branch --show-current)"
@@ -323,24 +324,32 @@ ASCENTO_DASHBOARD_PORT=${ASCENTO_DASHBOARD_PORT:-8000}
 EOF
 }
 
+compose_files() {
+  COMPOSE_FILES=(-f "$INSTALL_DIR/docker/compose.yaml")
+  [[ "$COMPUTE" == "cu128" ]] && COMPOSE_FILES+=(-f "$INSTALL_DIR/docker/compose.gpu.yaml")
+  if [[ -f "$INSTALL_DIR/.maintenance/tailscale-enabled" ]]; then
+    COMPOSE_FILES+=(-f "$INSTALL_DIR/docker/compose.tailscale.yaml")
+  fi
+}
+
 build_containers() {
   (( BUILD_DOCKER )) || return 0
   log "Rebuilding Docker image from the current lockfiles"
   local envfile="$INSTALL_DIR/.maintenance/compose.env"
-  local files=(-f "$INSTALL_DIR/docker/compose.yaml")
-  [[ "$COMPUTE" == "cu128" ]] && files+=(-f "$INSTALL_DIR/docker/compose.gpu.yaml")
-  docker_exec compose --env-file "$envfile" "${files[@]}" down --remove-orphans || true
-  docker_exec compose --env-file "$envfile" "${files[@]}" build --pull --no-cache
-  if (( START_DASHBOARD )); then docker_exec compose --env-file "$envfile" "${files[@]}" up -d dashboard; fi
+  compose_files
+  docker_exec compose --env-file "$envfile" "${COMPOSE_FILES[@]}" down --remove-orphans || true
+  docker_exec compose --env-file "$envfile" "${COMPOSE_FILES[@]}" build --pull --no-cache
+  if (( START_DASHBOARD )); then
+    docker_exec compose --env-file "$envfile" "${COMPOSE_FILES[@]}" up -d dashboard
+  fi
 }
 
 verify_installation() {
   log "Running maintenance verification"
   (cd "$INSTALL_DIR" && .venv/bin/python -m pytest -q tests_dashboard)
   if (( BUILD_DOCKER )); then
-    local files=(-f "$INSTALL_DIR/docker/compose.yaml")
-    [[ "$COMPUTE" == "cu128" ]] && files+=(-f "$INSTALL_DIR/docker/compose.gpu.yaml")
-    docker_exec compose --env-file "$INSTALL_DIR/.maintenance/compose.env" "${files[@]}" config >/dev/null
+    compose_files
+    docker_exec compose --env-file "$INSTALL_DIR/.maintenance/compose.env" "${COMPOSE_FILES[@]}" config >/dev/null
   fi
 }
 
@@ -363,4 +372,9 @@ log "Maintenance complete"
 echo "Checkout: $INSTALL_DIR"
 echo "Repository: $(git -C "$INSTALL_DIR" rev-parse --short HEAD) ($BRANCH)"
 echo "Compute backend: $COMPUTE"
-if (( BUILD_DOCKER && START_DASHBOARD )); then echo "Dashboard: http://127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}"; fi
+if (( BUILD_DOCKER && START_DASHBOARD )); then
+  echo "Dashboard: http://127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}"
+  if [[ -f "$INSTALL_DIR/.maintenance/tailscale-enabled" ]]; then
+    echo "Tailnet dashboard ingress: enabled (persistent sidecar state retained)"
+  fi
+fi
