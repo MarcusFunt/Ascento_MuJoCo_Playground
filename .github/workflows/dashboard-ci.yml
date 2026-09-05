@@ -55,8 +55,11 @@ jobs:
         with:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v6
-      - run: bash -n scripts/run_dashboard.sh scripts/maintain.sh
+      - run: bash -n scripts/run_dashboard.sh scripts/maintain.sh scripts/install_supervisor.sh scripts/setup_tailscale.sh
       - run: bash scripts/maintain.sh --help
+      - run: bash scripts/install_supervisor.sh --help
+      - run: bash scripts/setup_tailscale.sh --help
+      - run: python -m py_compile scripts/host_supervisor.py dashboard/supervisor_client.py
       - run: uv run --frozen --extra cpu --extra dashboard python -m pytest -q tests_dashboard
 
   maintenance-config:
@@ -64,7 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          mkdir -p .maintenance
+          mkdir -p .maintenance/supervisor
           cat > .maintenance/compose.env <<'EOF'
           ASCENTO_COMPUTE_EXTRA=cpu
           ASCENTO_REPOSITORY_COMMIT=testcommit
@@ -73,6 +76,7 @@ jobs:
           EOF
       - run: docker compose --env-file .maintenance/compose.env -f docker/compose.yaml config >/dev/null
       - run: docker compose --env-file .maintenance/compose.env -f docker/compose.yaml -f docker/compose.gpu.yaml config >/dev/null
+      - run: TS_AUTHKEY=test-key docker compose --env-file .maintenance/compose.env -f docker/compose.yaml -f docker/compose.tailscale.yaml config >/dev/null
       - run: docker build --check -f docker/Dockerfile .
 
   frontend:
