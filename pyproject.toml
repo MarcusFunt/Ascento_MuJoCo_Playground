@@ -24,6 +24,7 @@ ascento-evaluate = "ascento_mjlab.evaluation.cli:main"
 ascento-evaluate-checkpoints = "ascento_mjlab.evaluation.checkpoints:main"
 ascento-compare-evaluations = "ascento_mjlab.evaluation.compare:main"
 ascento-replay-eval = "ascento_mjlab.evaluation.replay:main"
+ascento-preflight-evaluator = "ascento_mjlab.evaluation.preflight:main"
 
 [dependency-groups]
 dev = [

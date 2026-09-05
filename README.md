@@ -95,6 +95,24 @@ uv run --extra cu128 python -m ascento_mjlab.tools.inspect_model
 uv run --extra cu128 pytest -q
 ```
 
+Immediately before committing to a long run, use the production host and the
+actual balance, velocity, and recovery checkpoints to run the complete preflight:
+
+```bash
+export ASCENTO_BALANCE_CHECKPOINT=logs/rsl_rl/ascento_balance/<run>/model_<n>.pt
+export ASCENTO_VELOCITY_CHECKPOINT=logs/rsl_rl/ascento_velocity/<run>/model_<n>.pt
+export ASCENTO_RECOVERY_CHECKPOINT=logs/rsl_rl/ascento_recovery/<run>/model_<n>.pt
+export ASCENTO_COMPUTE_EXTRA=cu128
+bash scripts/preflight_long_run.sh
+```
+
+That command runs the finite plant smoke test, model inspection, the full test
+suite, a two-iteration 512-environment PPO smoke using the production training
+path, and deterministic quantitative evaluator preflight. The evaluator runs the
+same scenarios twice and fails on non-finite outputs, ambiguous episode endings,
+unfinished vector slots, mixed-horizon lifecycle errors, or deterministic result
+drift. Do not launch a long run if this command fails.
+
 The smoke command prints Torch/CUDA/GPU/VRAM, MuJoCo, Warp, mjlab, and
 RSL-RL versions, then runs 100 finite Warp steps. Start balance training with
 the standard mjlab entry point after Gate D review:

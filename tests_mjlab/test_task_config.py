@@ -92,14 +92,34 @@ def test_all_flat_task_configs_construct_and_step(task_id):
   env.close()
 
 
-def test_jump_state_is_synchronized_before_jump_dependent_rewards():
+def test_jump_state_sync_is_first_and_base_rewards_are_phase_aware():
   cfg = load_env_cfg("Ascento-Jump-Flat")
 
   assert "update_jump_state" not in cfg.events
   reward_names = list(cfg.rewards)
+  assert reward_names[0] == "jump_state_sync"
+  assert cfg.rewards["height"].func.__name__ == "jump_nominal_height_tracking"
+  assert cfg.rewards["angular_rate"].func.__name__ == "jump_angular_rate_penalty"
+  assert cfg.rewards["planar_speed"].func.__name__ == "jump_planar_speed_penalty"
+  assert cfg.rewards["crouch"].func.__name__ == "jump_crouch"
+  assert cfg.rewards["thrust"].func.__name__ == "jump_thrust"
+  assert cfg.rewards["distance_tracking"].func.__name__ == "jump_distance_tracking"
+  assert cfg.rewards["landing_softness"].func.__name__ == "jump_landing_softness"
   assert reward_names.index("jump_state_sync") < reward_names.index("takeoff")
   assert reward_names.index("jump_state_sync") < reward_names.index("landing")
   assert cfg.sim.mujoco.timestep * cfg.decimation == pytest.approx(0.01)
+
+
+def test_jump_observation_contains_phase_and_remaining_distance():
+  cfg = load_env_cfg("Ascento-Jump-Flat", play=True)
+  cfg.scene.num_envs = 1
+  env = ManagerBasedRlEnv(cfg, device="cpu")
+  try:
+    obs, _ = env.reset()
+    # Balance actor (38) + motion command (6) + jump state (6).
+    assert obs["actor"].shape[-1] == 50
+  finally:
+    env.close()
 
 
 def test_custom_sim_timestep_reaches_actuator():

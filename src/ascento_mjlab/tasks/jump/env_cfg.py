@@ -1,7 +1,7 @@
-"""Flat-ground jump specialist configuration placeholder.
+"""Flat-ground jump specialist configuration.
 
-Terrain is intentionally disabled here. This task is not expanded until
-takeoff, flight, landing, and post-landing recovery are sound on a plane.
+Terrain remains intentionally disabled until flat-ground takeoff, flight,
+landing, distance tracking, and recovery are all quantitatively sound.
 """
 
 from mjlab.managers.event_manager import EventTermCfg
@@ -9,7 +9,7 @@ from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 
 from ascento_mjlab import mdp as ascento_mdp
-from ascento_mjlab.tasks.balance.env_cfg import ascento_balance_env_cfg
+from ascento_mjlab.tasks.balance.env_cfg import ROBOT_CFG, ascento_balance_env_cfg
 
 
 def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
@@ -45,19 +45,55 @@ def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
     mode="reset",
   )
 
-  # Reward computation happens before mjlab's step events. Synchronize the
-  # contact-derived jump state here so takeoff/landing rewards correspond to
-  # the same transition that produced the returned contact observation.
-  cfg.rewards["jump_state_sync"] = RewardTermCfg(
-    func=ascento_mdp.jump.sync_jump_state_reward,
+  # Synchronization must be the first reward term. Phase-dependent inherited
+  # rewards otherwise see the previous contact sample/phase on a transition.
+  base_rewards = dict(cfg.rewards)
+  base_rewards["height"] = RewardTermCfg(
+    func=ascento_mdp.rewards.jump_nominal_height_tracking,
     weight=1.0,
+    params={"target": 0.75, "std": 0.08, "asset_cfg": ROBOT_CFG},
   )
-  cfg.rewards["takeoff"] = RewardTermCfg(func=ascento_mdp.rewards.jump_takeoff, weight=2.0)
-  cfg.rewards["landing"] = RewardTermCfg(func=ascento_mdp.rewards.jump_landing, weight=3.0)
-  cfg.rewards["height_progress"] = RewardTermCfg(
-    func=ascento_mdp.rewards.airborne_height_progress,
-    weight=0.5,
-    params={"command_name": "motion"},
+  base_rewards["angular_rate"] = RewardTermCfg(
+    func=ascento_mdp.rewards.jump_angular_rate_penalty,
+    weight=-0.04,
+    params={"asset_cfg": ROBOT_CFG},
   )
+  base_rewards["planar_speed"] = RewardTermCfg(
+    func=ascento_mdp.rewards.jump_planar_speed_penalty,
+    weight=-0.2,
+    params={"asset_cfg": ROBOT_CFG},
+  )
+  cfg.rewards = {
+    "jump_state_sync": RewardTermCfg(
+      func=ascento_mdp.jump.sync_jump_state_reward,
+      weight=1.0,
+    ),
+    **base_rewards,
+    "crouch": RewardTermCfg(
+      func=ascento_mdp.rewards.jump_crouch,
+      weight=0.8,
+      params={"asset_cfg": ROBOT_CFG},
+    ),
+    "thrust": RewardTermCfg(
+      func=ascento_mdp.rewards.jump_thrust,
+      weight=1.2,
+      params={"asset_cfg": ROBOT_CFG},
+    ),
+    "takeoff": RewardTermCfg(func=ascento_mdp.rewards.jump_takeoff, weight=2.0),
+    "landing": RewardTermCfg(func=ascento_mdp.rewards.jump_landing, weight=2.0),
+    "landing_softness": RewardTermCfg(
+      func=ascento_mdp.rewards.jump_landing_softness,
+      weight=1.0,
+    ),
+    "distance_tracking": RewardTermCfg(
+      func=ascento_mdp.rewards.jump_distance_tracking,
+      weight=3.0,
+    ),
+    "height_progress": RewardTermCfg(
+      func=ascento_mdp.rewards.airborne_height_progress,
+      weight=0.5,
+      params={"command_name": "motion"},
+    ),
+  }
   cfg.episode_length_s = 8.0 if not play else 10000.0
   return cfg

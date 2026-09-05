@@ -12,7 +12,7 @@ from .schema import EpisodeResult
 from .statistics import summarize_binary, summarize_numeric
 
 
-BINARY_METRICS = {"recovered", "recovery_success"}
+BINARY_METRICS = {"recovered", "recovery_success", "jump_takeoff", "jump_landing"}
 
 
 def summarize_results(
@@ -52,6 +52,8 @@ def select_worst_scenarios(results: list[EpisodeResult], limit: int = 5) -> dict
     "net_displacement": True,
     "effort_rms": True,
     "recovery_time_s": True,
+    "jump_distance_abs_error": True,
+    "landing_preimpact_speed": True,
   }
   output = {"failures": failures}
   for metric, descending in selectors.items():

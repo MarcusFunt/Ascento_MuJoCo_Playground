@@ -68,17 +68,27 @@ class AscentoMotionCommandCfg(CommandTermCfg):
 
 
 class AscentoMotionCommand(CommandTerm):
-  """Six channels: vx, yaw, height, one-shot request, target height, distance."""
+  """Six channels: vx, yaw, height, one-shot request, target height, distance.
+
+  ``jump_generation`` is a monotonically increasing per-environment counter.
+  It lets downstream jump semantics observe every request exactly once even if
+  the visible request pulse has already been cleared by command-manager timing.
+  """
 
   def __init__(self, cfg: AscentoMotionCommandCfg, env) -> None:
     super().__init__(cfg, env)
     self._command = torch.zeros((self.num_envs, 6), device=self.device)
     self._jump_pulse = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
     self._pulse_is_new = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    self._jump_generation = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
   @property
   def command(self) -> torch.Tensor:
     return self._command
+
+  @property
+  def jump_generation(self) -> torch.Tensor:
+    return self._jump_generation
 
   def _update_metrics(self) -> None:
     return
@@ -94,6 +104,8 @@ class AscentoMotionCommand(CommandTerm):
     self._jump_pulse[env_ids] = samples[:, 5] < self.cfg.jump_probability
     self._command[env_ids, 3] = self._jump_pulse[env_ids].float()
     self._pulse_is_new[env_ids] = True
+    pulse_ids = env_ids[self._jump_pulse[env_ids]]
+    self._jump_generation[pulse_ids] += 1
 
   def _update_command(self, env_ids: torch.Tensor | None) -> None:
     if env_ids is None:

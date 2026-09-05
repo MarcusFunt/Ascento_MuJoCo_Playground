@@ -93,6 +93,70 @@ def track_velocity(
   return torch.exp(-error / (std * std))
 
 
+def _phase_weight(env: ManagerBasedRlEnv, values: tuple[float, ...]) -> torch.Tensor:
+  from .jump import PHASE_RECOVERY
+
+  if len(values) != PHASE_RECOVERY + 1:
+    raise ValueError("phase-weight table must contain idle through recovery")
+  phase = env.ascento_jump_state["phase"].clamp(min=0, max=PHASE_RECOVERY)
+  table = torch.tensor(values, dtype=torch.float32, device=env.device)
+  return table[phase]
+
+
+def jump_nominal_height_tracking(
+  env: ManagerBasedRlEnv,
+  target: float = 0.75,
+  std: float = 0.08,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Use nominal-height pressure only where it does not fight the jump motion."""
+  weight = _phase_weight(env, (1.0, 0.05, 0.0, 0.0, 0.20, 0.70))
+  return height_tracking(env, target=target, std=std, asset_cfg=asset_cfg) * weight
+
+
+def jump_angular_rate_penalty(
+  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
+) -> torch.Tensor:
+  weight = _phase_weight(env, (1.0, 0.8, 0.5, 0.7, 1.0, 1.0))
+  return angular_rate_penalty(env, asset_cfg=asset_cfg) * weight
+
+
+def jump_planar_speed_penalty(
+  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
+) -> torch.Tensor:
+  weight = _phase_weight(env, (1.0, 0.5, 0.2, 0.0, 0.3, 1.0))
+  return planar_speed_penalty(env, asset_cfg=asset_cfg) * weight
+
+
+def jump_crouch(
+  env: ManagerBasedRlEnv,
+  target_height: float = 0.64,
+  std: float = 0.05,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward an actual lower body pose, not unsigned joint displacement."""
+  from .jump import PHASE_CROUCH
+
+  asset: Entity = env.scene[asset_cfg.name]
+  error = asset.data.root_link_pos_w[:, 2] - target_height
+  score = torch.exp(-torch.square(error) / (std * std))
+  return score * (env.ascento_jump_state["phase"] == PHASE_CROUCH).float()
+
+
+def jump_thrust(
+  env: ManagerBasedRlEnv,
+  target_vz: float = 1.2,
+  std: float = 0.7,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  from .jump import PHASE_THRUST
+
+  asset: Entity = env.scene[asset_cfg.name]
+  error = asset.data.root_link_lin_vel_w[:, 2] - target_vz
+  score = torch.exp(-torch.square(error) / (std * std))
+  return score * (env.ascento_jump_state["phase"] == PHASE_THRUST).float()
+
+
 def jump_takeoff(env: ManagerBasedRlEnv) -> torch.Tensor:
   from .jump import takeoff_bonus
 
@@ -103,6 +167,20 @@ def jump_landing(env: ManagerBasedRlEnv) -> torch.Tensor:
   from .jump import landing_bonus
 
   return landing_bonus(env)
+
+
+def jump_distance_tracking(env: ManagerBasedRlEnv, std: float = 0.08) -> torch.Tensor:
+  """Score heading-relative landing displacement against the requested distance."""
+  state = env.ascento_jump_state
+  score = torch.exp(-torch.square(state["landing_distance_error"]) / (std * std))
+  return score * state["landing"]
+
+
+def jump_landing_softness(env: ManagerBasedRlEnv, std: float = 1.0) -> torch.Tensor:
+  """Reward low pre-contact vertical speed without using post-contact deceleration."""
+  state = env.ascento_jump_state
+  score = torch.exp(-torch.square(state["landing_preimpact_vz"]) / (std * std))
+  return score * state["landing"]
 
 
 def airborne_height_progress(

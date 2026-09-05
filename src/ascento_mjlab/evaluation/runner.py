@@ -15,6 +15,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights
 from .policy import RslRlPolicyAdapter
 from .schema import EpisodeResult, ScenarioSpec
 
@@ -45,7 +46,15 @@ def task_capabilities(task: str) -> set[str]:
   if "Recovery" in task:
     capabilities.update({"recovery", "recovery_success"})
   if "Jump" in task:
-    capabilities.update({"jump_events", "command:motion"})
+    capabilities.update(
+      {
+        "jump_events",
+        "command:motion",
+        "jump_distance_tracking",
+        "landing_preimpact",
+        "limiting_wheel_clearance",
+      }
+    )
   return capabilities
 
 
@@ -63,7 +72,7 @@ def task_step_dt(task: str) -> float:
 
 
 def _exact_reset(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec]) -> torch.Tensor:
-  """Overwrite stochastic training resets with resolved scenario states."""
+  """Overwrite stochastic training resets with resolved, support-consistent states."""
   robot = base_env.scene["robot"]
   device = base_env.device
   count = len(scenarios)
@@ -130,18 +139,30 @@ def _exact_reset(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec]) -> 
 
   base_env.sim.forward()
   base_env.sim.sense()
+
+  # A zero scenario Z means "supported flat-ground reset", not "keep the
+  # nominal root height after rotating the robot". Preserve non-zero Z for
+  # scenarios that intentionally request a drop/hover offset.
+  anchor_mask = torch.tensor(
+    [abs(float(scenario.reset.get("z", 0.0))) <= 1.0e-12 for scenario in scenarios],
+    dtype=torch.bool,
+    device=device,
+  )
+  if bool(anchor_mask.any().item()):
+    bottoms = flat_ground_wheel_bottom_heights(base_env, env_ids=env_ids)
+    correction = -bottoms.amin(dim=1)
+    corrected_pose = robot.data.root_link_pose_w[env_ids].clone()
+    corrected_pose[anchor_mask, 2] += correction[anchor_mask]
+    robot.write_root_link_pose_to_sim(corrected_pose, env_ids=env_ids)
+    positions = corrected_pose[:, :3]
+    base_env.sim.forward()
+    base_env.sim.sense()
+
   return positions[:, :2].clone()
 
 
 def _refresh_exact_observation_history(base_env: ManagerBasedRlEnv) -> None:
-  """Seed stateful observation buffers from the exact scenario state only.
-
-  ``env.reset()`` must run first to reset managers, but it also writes a
-  stochastic training reset into history/delay buffers. After `_exact_reset`
-  overwrites that state, clear those buffers and seed them with the resolved
-  deterministic frame so history-dependent policies do not see a hidden random
-  pre-scenario observation.
-  """
+  """Seed stateful observation buffers from the exact scenario state only."""
   env_ids = torch.arange(base_env.num_envs, device=base_env.device, dtype=torch.long)
   base_env.observation_manager.reset(env_ids)
   base_env.obs_buf = base_env.observation_manager.compute(
@@ -150,12 +171,7 @@ def _refresh_exact_observation_history(base_env: ManagerBasedRlEnv) -> None:
 
 
 def _reset_finished_slots(base_env: ManagerBasedRlEnv, policy, finish: torch.Tensor) -> None:
-  """Clear mjlab manual-reset state for completed vector slots.
-
-  mjlab 1.6 requires every done slot to be explicitly reset before the next
-  vector ``step()`` when ``auto_reset=False``. Horizon-complete slots are reset
-  too so all inactive slots have the same benign lifecycle.
-  """
+  """Clear mjlab manual-reset state for completed vector slots."""
   if not bool(finish.any().item()):
     return
   env_ids = finish.nonzero(as_tuple=False).squeeze(-1)
@@ -178,6 +194,16 @@ def _command_values_for_step(
   return updates
 
 
+def _is_explicit_jump_pulse(scenario: ScenarioSpec, step: int) -> bool:
+  return any(
+    point.step == step
+    and point.name == "motion"
+    and len(point.values) >= 4
+    and point.values[3] > 0.5
+    for point in scenario.commands
+  )
+
+
 def _apply_commands(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec], step: int) -> None:
   for name, updates in _command_values_for_step(scenarios, step).items():
     try:
@@ -191,6 +217,12 @@ def _apply_commands(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec], 
           f"Command {name!r} expects {command.shape[1]} values, got {len(values)}"
         )
       command[env_id] = torch.tensor(values, device=command.device, dtype=command.dtype)
+      if (
+        name == "motion"
+        and hasattr(term, "_jump_generation")
+        and _is_explicit_jump_pulse(scenarios[env_id], step)
+      ):
+        term._jump_generation[env_id] += 1
 
 
 def _command_target(
@@ -315,6 +347,7 @@ def _run_batch(
   dev = base_env.device
   is_velocity_task = "Velocity" in task
   is_recovery_task = "Recovery" in task
+  is_jump_task = "Jump" in task
   active = torch.ones(count, dtype=torch.bool, device=dev)
   finished_success = torch.zeros(count, dtype=torch.bool, device=dev)
   episode_steps = torch.zeros(count, dtype=torch.long, device=dev)
@@ -349,6 +382,13 @@ def _run_batch(
   recovery_stable_count = torch.zeros(count, dtype=torch.long, device=dev)
   recovery_success = torch.zeros(count, dtype=torch.bool, device=dev)
   recovery_from_start_s = torch.full((count,), float("nan"), device=dev)
+
+  jump_takeoff_seen = torch.zeros(count, dtype=torch.bool, device=dev)
+  jump_landing_seen = torch.zeros(count, dtype=torch.bool, device=dev)
+  jump_distance_abs_error = torch.ones(count, device=dev)
+  landing_preimpact_speed = torch.full((count,), 10.0, device=dev)
+  limiting_wheel_clearance = torch.zeros(count, device=dev)
+
   prev_xy = initial_xy.clone()
   final_xy_snapshot = initial_xy.clone()
 
@@ -421,8 +461,6 @@ def _run_batch(
       )
       planar_speed = torch.linalg.vector_norm(robot.data.root_link_lin_vel_w[:, :2], dim=1)
       angular_xy = torch.linalg.vector_norm(robot.data.root_link_ang_vel_b[:, :2], dim=1)
-      linear_speed = torch.linalg.vector_norm(robot.data.root_link_lin_vel_b, dim=1)
-      angular_speed = torch.linalg.vector_norm(robot.data.root_link_ang_vel_b, dim=1)
       height = robot.data.root_link_pos_w[:, 2]
       effort = robot.data.actuator_force
       effort_abs = torch.mean(torch.abs(effort), dim=1)
@@ -485,6 +523,32 @@ def _run_batch(
       if height_target is not None:
         sum_height_tracking_sq += torch.square(height - height_target[:, 0]) * weight
       episode_steps += active.long()
+
+      if is_jump_task:
+        state = base_env.ascento_jump_state
+        takeoff_now = state["takeoff"] > 0.5
+        landing_now = state["landing"] > 0.5
+        jump_takeoff_seen |= active & takeoff_now
+        jump_landing_seen |= active & landing_now
+        landing_mask = active & landing_now
+        jump_distance_abs_error = torch.where(
+          landing_mask,
+          torch.abs(state["landing_distance_error"]),
+          jump_distance_abs_error,
+        )
+        landing_preimpact_speed = torch.where(
+          landing_mask,
+          torch.abs(state["landing_preimpact_vz"]),
+          landing_preimpact_speed,
+        )
+        limiting_wheel_clearance = torch.maximum(
+          limiting_wheel_clearance,
+          torch.where(
+            active,
+            state["limiting_wheel_clearance"],
+            torch.zeros_like(limiting_wheel_clearance),
+          ),
+        )
 
       if is_recovery_task:
         from ascento_mjlab.mdp.recovery import RecoveryEnvelope, recovery_condition
@@ -595,6 +659,12 @@ def _run_batch(
     if is_recovery_task:
       arrays["recovery_success"] = recovery_success.float()
       arrays["recovery_from_start_s"] = recovery_from_start_s
+    if is_jump_task:
+      arrays["jump_takeoff"] = jump_takeoff_seen.float()
+      arrays["jump_landing"] = jump_landing_seen.float()
+      arrays["jump_distance_abs_error"] = jump_distance_abs_error
+      arrays["landing_preimpact_speed"] = landing_preimpact_speed
+      arrays["limiting_wheel_clearance"] = limiting_wheel_clearance
     cpu = {key: value.detach().cpu().numpy() for key, value in arrays.items()}
 
     results: list[EpisodeResult] = []
