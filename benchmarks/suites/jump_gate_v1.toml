@@ -3,9 +3,6 @@ suite_id = "jump_gate_v1"
 task = "Ascento-Jump-Flat"
 root_seed = 902117
 policy_mode = "deterministic"
-# These capabilities intentionally fail closed on current main. The jump gate
-# must not become authoritative until heading-relative distance, true first-
-# contact impact, and limiting-wheel clearance are canonical signals.
 required_capabilities = [
   "jump_events",
   "command:motion",
@@ -19,7 +16,51 @@ id = "flat_jump"
 kind = "uniform_reset"
 count = 1024
 horizon_s = 8.0
+commands = [
+  { time_s = 0.0, name = "motion", values = [0.0, 0.0, 0.75, 1.0, 0.20, 0.20] },
+  { time_s = 0.01, name = "motion", values = [0.0, 0.0, 0.75, 0.0, 0.20, 0.20] },
+]
 [families.reset]
 roll = [-0.08, 0.08]
 pitch = [-0.08, 0.08]
 yaw = [-3.141592653589793, 3.141592653589793]
+
+[[gates]]
+id = "takeoff_rate"
+family = "flat_jump"
+metric = "jump_takeoff"
+statistic = "success_rate"
+op = ">="
+threshold = 0.90
+
+[[gates]]
+id = "landing_rate"
+family = "flat_jump"
+metric = "jump_landing"
+statistic = "success_rate"
+op = ">="
+threshold = 0.85
+
+[[gates]]
+id = "distance_error_p95"
+family = "flat_jump"
+metric = "jump_distance_abs_error"
+statistic = "p95"
+op = "<="
+threshold = 0.12
+
+[[gates]]
+id = "landing_preimpact_speed_p95"
+family = "flat_jump"
+metric = "landing_preimpact_speed"
+statistic = "p95"
+op = "<="
+threshold = 2.0
+
+[[gates]]
+id = "limiting_wheel_clearance_p05"
+family = "flat_jump"
+metric = "limiting_wheel_clearance"
+statistic = "p05"
+op = ">="
+threshold = 0.04
