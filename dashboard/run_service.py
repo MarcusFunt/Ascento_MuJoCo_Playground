@@ -8,13 +8,12 @@ import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
-from hashlib import sha1
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from dashboard.config import REPO_ROOT
-from dashboard.health import resolve_dashboard_run, run_status_path, summarize_dashboard_run
+from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
 from dashboard.versioning import annotate_run_summary
 
 RUN_METADATA = "run_metadata.json"
@@ -27,10 +26,6 @@ def _now() -> str:
 def _slug(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:48] or "run"
-
-
-def _run_id(relative_path: str) -> str:
-    return sha1(relative_path.encode("utf-8")).hexdigest()[:12]
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -90,6 +85,7 @@ class RunService:
     def load_metadata(self, run_dir: Path) -> dict[str, Any]:
         metadata = _load_json(self.metadata_path(run_dir))
         return {
+            "run_id": metadata.get("run_id"),
             "display_name": metadata.get("display_name") or run_dir.name,
             "notes": metadata.get("notes") or "",
             "tags": _clean_tags(metadata.get("tags") if isinstance(metadata.get("tags"), list) else []),
@@ -101,8 +97,20 @@ class RunService:
             "schema_version": int(metadata.get("schema_version") or 1),
         }
 
+    def resolve(self, run_id: str):
+        for ref in discover_dashboard_runs(self.artifact_root):
+            metadata = self.load_metadata(ref.path)
+            if ref.id == run_id or metadata.get("run_id") == run_id:
+                return ref
+        raise KeyError(run_id)
+
     def annotate(self, summary: dict[str, Any], run_dir: Path) -> dict[str, Any]:
         metadata = self.load_metadata(run_dir)
+        legacy_id = summary.get("id")
+        if metadata.get("run_id"):
+            summary["id"] = metadata["run_id"]
+            if legacy_id != summary["id"]:
+                summary["legacy_id"] = legacy_id
         summary["metadata"] = metadata
         summary["display_name"] = metadata["display_name"]
         summary["notes"] = metadata["notes"]
@@ -114,7 +122,7 @@ class RunService:
         return annotate_run_summary(summary, run_dir, self.artifact_root)
 
     def detail(self, run_id: str) -> dict[str, Any]:
-        ref = resolve_dashboard_run(self.artifact_root, run_id)
+        ref = self.resolve(run_id)
         summary = summarize_dashboard_run(
             ref.path,
             self.artifact_root,
@@ -124,12 +132,13 @@ class RunService:
         return self.annotate(summary, ref.path)
 
     def update_metadata(self, run_id: str, changes: dict[str, Any]) -> dict[str, Any]:
-        ref = resolve_dashboard_run(self.artifact_root, run_id)
+        ref = self.resolve(run_id)
         path = self.metadata_path(ref.path)
         current = _load_json(path)
         if not current:
             current = {
                 "schema_version": 1,
+                "run_id": run_id,
                 "created_at": _now(),
                 "display_name": ref.path.name,
                 "notes": "",
@@ -138,6 +147,8 @@ class RunService:
                 "parent_run_id": None,
                 "parent_checkpoint": None,
             }
+        else:
+            current.setdefault("run_id", run_id)
 
         for key in ("display_name", "notes", "purpose", "parent_checkpoint"):
             if key in changes and changes[key] is not None:
@@ -149,13 +160,13 @@ class RunService:
             if parent:
                 if str(parent) == run_id:
                     raise ValueError("a run cannot be its own parent")
-                resolve_dashboard_run(self.artifact_root, str(parent))
+                self.resolve(str(parent))
                 current["parent_run_id"] = str(parent)
             else:
                 current["parent_run_id"] = None
         current["updated_at"] = _now()
         _write_json(path, current)
-        return self.detail(run_id)
+        return self.detail(str(current["run_id"]))
 
     def create(self, request: dict[str, Any]) -> dict[str, Any]:
         display_name = str(request.get("display_name") or "").strip()
@@ -169,14 +180,15 @@ class RunService:
             raise ValueError("training_args must be a list of strings")
         parent_run_id = request.get("parent_run_id")
         if parent_run_id:
-            resolve_dashboard_run(self.artifact_root, str(parent_run_id))
+            self.resolve(str(parent_run_id))
 
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         if not os.access(self.artifact_root, os.W_OK | os.X_OK):
             raise PermissionError(f"artifact root is not writable: {self.artifact_root}")
 
+        stable_run_id = uuid4().hex[:12]
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        directory_name = f"{stamp}_{_slug(display_name)}_{uuid4().hex[:8]}"
+        directory_name = f"{stamp}_{_slug(display_name)}_{stable_run_id[:8]}"
         command = [
             sys.executable,
             "-m",
@@ -187,6 +199,8 @@ class RunService:
             directory_name,
             "--task",
             task,
+            "--run-id",
+            stable_run_id,
             "--display-name",
             display_name,
         ]
@@ -216,7 +230,7 @@ class RunService:
             close_fds=True,
         )
         return {
-            "id": _run_id(directory_name),
+            "id": stable_run_id,
             "name": directory_name,
             "display_name": display_name,
             "task": task,
@@ -226,7 +240,7 @@ class RunService:
         }
 
     def stop(self, run_id: str, *, reason: str = "user_requested") -> dict[str, Any]:
-        ref = resolve_dashboard_run(self.artifact_root, run_id)
+        ref = self.resolve(run_id)
         status_path = run_status_path(ref.path, self.artifact_root)
         status = _load_json(status_path)
         state = str(status.get("state") or "unknown")
