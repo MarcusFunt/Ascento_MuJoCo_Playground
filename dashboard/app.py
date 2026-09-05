@@ -19,6 +19,11 @@ from dashboard.health import (
 )
 from dashboard.monitor import tail_lines, training_log_path
 from dashboard.run_service import RunService
+from dashboard.supervisor_client import (
+    SupervisorClient,
+    SupervisorRejected,
+    SupervisorUnavailable,
+)
 from dashboard.versioning import current_repository_version
 
 CONFIG = load_config()
@@ -26,8 +31,9 @@ STARTUP_WARNINGS = validate_startup(CONFIG, create_artifact_root=False)
 ARTIFACT_ROOT = CONFIG.artifact_root
 FRONTEND_DIST = CONFIG.frontend_dist
 RUN_SERVICE = RunService(ARTIFACT_ROOT, stale_after_seconds=CONFIG.stale_after_seconds)
+SUPERVISOR = SupervisorClient()
 
-app = FastAPI(title="Ascento Training Monitor", version="2.0")
+app = FastAPI(title="Ascento Training Monitor", version="2.1")
 
 
 class RunCreateRequest(BaseModel):
@@ -119,6 +125,35 @@ def configuration():
         "startup_warnings": STARTUP_WARNINGS,
         "repository_version": current_repository_version(),
     }
+
+
+@app.get("/api/system")
+def system_status(refresh: bool = False):
+    """Return host repository/update/Tailnet state through the restricted supervisor."""
+    try:
+        return {"connected": True, **SUPERVISOR.status(refresh=refresh)}
+    except SupervisorUnavailable as error:
+        return {
+            "connected": False,
+            "error": str(error),
+            "repository": None,
+            "active_runs": [],
+            "update": {"status": "unavailable"},
+            "tailscale": {"enabled": False, "connected": False},
+            "can_update": False,
+            "update_blockers": ["host supervisor is unavailable"],
+        }
+
+
+@app.post("/api/system/update", status_code=202)
+def system_update():
+    """Ask the host supervisor to update to the newest origin/main."""
+    try:
+        return SUPERVISOR.update()
+    except SupervisorUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except SupervisorRejected as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.get("/api/runs")
@@ -268,6 +303,7 @@ def index():
             "api": "/api/runs",
             "health": "/api/health",
             "config": "/api/config",
+            "system": "/api/system",
         }
     )
 
