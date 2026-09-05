@@ -16,8 +16,11 @@ is used only for initial enrollment and is removed from the recreated Docker
 container immediately after state has been persisted in the named volume.
 
 Optional environment variables:
-  ASCENTO_TAILSCALE_HOSTNAME   Tailnet hostname (default: ascento-dashboard)
-  TS_AUTHKEY                   Tailscale auth key or OAuth client secret
+  ASCENTO_TAILSCALE_HOSTNAME     Tailnet hostname (default: ascento-dashboard)
+  ASCENTO_TAILSCALE_EXTRA_ARGS   Additional tailscaled login args. Required for
+                                 OAuth client secrets, e.g.
+                                 --advertise-tags=tag:ascento
+  TS_AUTHKEY                     Tailscale auth key or OAuth client secret
 EOF
 }
 
