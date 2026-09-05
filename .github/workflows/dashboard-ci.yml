@@ -17,6 +17,8 @@ on:
       - '.dockerignore'
       - '.github/workflows/dashboard-ci.yml'
   push:
+    branches:
+      - main
     paths:
       - 'dashboard/**'
       - 'scripts/**'
@@ -32,17 +34,21 @@ on:
       - '.dockerignore'
       - '.github/workflows/dashboard-ci.yml'
 
+concurrency:
+  group: dashboard-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   backend:
     runs-on: ubuntu-latest
     env:
       MUJOCO_GL: disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
       - run: uv run --frozen --extra cpu python -m pytest -q tests_mjlab
 
   dashboard-backend:
@@ -50,11 +56,11 @@ jobs:
     env:
       MUJOCO_GL: disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
       - run: bash -n scripts/run_dashboard.sh scripts/maintain.sh scripts/install_supervisor.sh scripts/setup_tailscale.sh
       - run: bash scripts/maintain.sh --help
       - run: bash scripts/install_supervisor.sh --help
@@ -65,7 +71,7 @@ jobs:
   maintenance-config:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: |
           mkdir -p .maintenance/supervisor
           cat > .maintenance/compose.env <<'EOF'
@@ -85,8 +91,8 @@ jobs:
       run:
         working-directory: dashboard/frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
       - run: npm ci
