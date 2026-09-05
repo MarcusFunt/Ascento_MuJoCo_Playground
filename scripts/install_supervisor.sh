@@ -2,7 +2,10 @@
 set -Eeuo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOCKET_DIR="$REPO_ROOT/.maintenance/supervisor"
+# Keep this outside the checkout: Linux limits Unix-domain socket paths to
+# 108 bytes, which long WSL-mounted paths (for example, OneDrive checkouts)
+# can exceed.
+SOCKET_DIR="/run/ascento-supervisor"
 SOCKET_PATH="$SOCKET_DIR/supervisor.sock"
 PYTHON_BIN="${ASCENTO_SUPERVISOR_PYTHON:-$(command -v python3 || true)}"
 SERVICE_NAME="ascento-supervisor.service"
@@ -25,9 +28,6 @@ fi
 
 [[ "$(uname -s)" == "Linux" ]] || { echo "ERROR: supervisor installation requires Linux/WSL2" >&2; exit 1; }
 [[ -n "$PYTHON_BIN" ]] || { echo "ERROR: python3 is required" >&2; exit 1; }
-mkdir -p "$SOCKET_DIR"
-chmod 700 "$SOCKET_DIR"
-
 if ! command -v systemctl >/dev/null 2>&1 || [[ ! -d /run/systemd/system ]]; then
   echo "ERROR: systemd is required for the boot-persistent host supervisor." >&2
   echo "On WSL2, enable systemd in /etc/wsl.conf and restart WSL, then rerun this script." >&2
@@ -71,6 +71,8 @@ Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
+RuntimeDirectory=ascento-supervisor
+RuntimeDirectoryMode=0770
 UMask=0007
 
 [Install]
