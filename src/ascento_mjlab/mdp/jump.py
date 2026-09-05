@@ -1,7 +1,7 @@
 """Flat-ground jump state semantics and one-attempt phase tracking.
 
 All contact-derived events are synchronized during reward computation from the
-same sensor sample that is returned in the next observation.  A single state
+same sensor sample that is returned in the next observation. A single state
 owner also carries the active jump attempt, heading-relative distance target,
 phase, landing impact sample, and simultaneous two-wheel clearance.
 """
@@ -39,6 +39,7 @@ def initialize_jump_state(env, env_ids: torch.Tensor | None = None) -> None:
       "phase_time": torch.zeros(env.num_envs, device=env.device),
       "attempt_active": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
       "has_taken_off": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+      "last_jump_generation": torch.zeros(env.num_envs, dtype=torch.long, device=env.device),
       "target_distance": torch.zeros(env.num_envs, device=env.device),
       "takeoff_xy": torch.zeros((env.num_envs, 2), device=env.device),
       "takeoff_forward_xy": torch.zeros((env.num_envs, 2), device=env.device),
@@ -59,6 +60,7 @@ def initialize_jump_state(env, env_ids: torch.Tensor | None = None) -> None:
   state["phase_time"][ids] = 0.0
   state["attempt_active"][ids] = False
   state["has_taken_off"][ids] = False
+  state["last_jump_generation"][ids] = 0
   state["target_distance"][ids] = 0.0
   state["takeoff_xy"][ids] = 0.0
   state["takeoff_forward_xy"][ids] = 0.0
@@ -80,9 +82,9 @@ def _wheel_contacts(env) -> tuple[torch.Tensor, torch.Tensor]:
   )
 
 
-def _motion_command(env) -> torch.Tensor | None:
+def _motion_term(env):
   try:
-    return env.command_manager.get_command("motion")
+    return env.command_manager.get_term("motion")
   except (AttributeError, KeyError):
     return None
 
@@ -129,13 +131,21 @@ def update_jump_state(
   root_vz = robot.data.root_link_lin_vel_w[:, 2]
   root_quat = robot.data.root_link_quat_w
 
-  command = _motion_command(env)
-  request = (
-    command[:, 3] > 0.5
-    if command is not None and command.shape[1] >= 6
-    else torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-  )
-  new_request = ids & request & ~state["attempt_active"]
+  motion_term = _motion_term(env)
+  command = motion_term.command if motion_term is not None else None
+  if motion_term is not None and hasattr(motion_term, "jump_generation"):
+    generation = motion_term.jump_generation
+    generation_changed = ids & (generation != state["last_jump_generation"])
+    state["last_jump_generation"][generation_changed] = generation[generation_changed]
+    new_request = generation_changed & ~state["attempt_active"]
+  else:
+    request = (
+      command[:, 3] > 0.5
+      if command is not None and command.shape[1] >= 6
+      else torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    )
+    new_request = ids & request & ~state["attempt_active"]
+
   if bool(new_request.any().item()):
     state["attempt_active"][new_request] = True
     state["has_taken_off"][new_request] = False
