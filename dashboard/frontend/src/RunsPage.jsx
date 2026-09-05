@@ -47,6 +47,7 @@ function defaultCreateForm() {
     notes: '',
     parent_run_id: '',
     parent_checkpoint: '',
+    episode_horizon_s: '20',
     training_args: '--env.scene.num-envs\n512\n--agent.max-iterations\n10000',
   }
 }
@@ -132,6 +133,9 @@ function RunsPage() {
         notes: createForm.notes,
         parent_run_id: createForm.parent_run_id || null,
         parent_checkpoint: createForm.parent_checkpoint || null,
+        episode_horizon_s: ['Ascento-Balance-Flat', 'Ascento-Velocity-Flat'].includes(createForm.task)
+          ? Number(createForm.episode_horizon_s)
+          : null,
         training_args: parseArgs(createForm.training_args),
       }
       const created = await fetchJson('/api/runs', {
@@ -330,8 +334,9 @@ function RunsPage() {
               <label>Tags<input value={createForm.tags} onChange={(event) => setCreateForm({ ...createForm, tags: event.target.value })} placeholder="recovery, pr83, baseline" /></label>
               <label>Parent run<select value={createForm.parent_run_id} onChange={(event) => setCreateForm({ ...createForm, parent_run_id: event.target.value })}><option value="">None</option>{runs.map((run) => <option key={run.id} value={run.id}>{run.display_name || run.name}</option>)}</select></label>
               <label>Parent checkpoint<input value={createForm.parent_checkpoint} onChange={(event) => setCreateForm({ ...createForm, parent_checkpoint: event.target.value })} placeholder="model_7500.pt" /></label>
+              {['Ascento-Balance-Flat', 'Ascento-Velocity-Flat'].includes(createForm.task) && <label>Initial episode horizon (seconds)<select value={createForm.episode_horizon_s} onChange={(event) => setCreateForm({ ...createForm, episode_horizon_s: event.target.value })}><option value="20">20 seconds — frequent reset practice</option><option value="60">60 seconds</option><option value="120">120 seconds</option><option value="300">300 seconds — longest horizon</option></select><small>Starts at this horizon, then advances through 20 → 60 → 120 → 300 seconds after three 512-episode windows each reach at least 90% timeout completions. Short early episodes preserve randomized-reset practice.</small></label>}
               <label>Notes<textarea rows="3" value={createForm.notes} onChange={(event) => setCreateForm({ ...createForm, notes: event.target.value })} placeholder="Why this run exists and what should be learned from it." /></label>
-              <label>Training arguments <small>one argument/value per line</small><textarea className="mono" rows="7" value={createForm.training_args} onChange={(event) => setCreateForm({ ...createForm, training_args: event.target.value })} /></label>
+              <label>Advanced training arguments <small>One argument/value per line. Common settings: <code>--env.scene.num-envs</code> controls parallel simulations; <code>--agent.max-iterations</code> controls PPO updates; <code>--agent.seed</code> makes a run repeatable. The episode horizon is set above so it can be recorded and adapted safely.</small><textarea className="mono" rows="7" value={createForm.training_args} onChange={(event) => setCreateForm({ ...createForm, training_args: event.target.value })} /></label>
               <button className="runs-button primary" disabled={busy}>Start training</button>
             </form>
           </section>
@@ -347,7 +352,9 @@ function RunsPage() {
                 <div><span>Iteration</span><strong>{fmtNumber(detail.telemetry?.iteration, 0)}</strong></div>
                 <div><span>Started</span><strong>{fmtDate(detail.run_info?.started_at)}</strong></div>
                 <div><span>Commit</span><strong className="mono">{shortCommit(detail.repository_version?.run_commit)}</strong></div>
+                <div><span>Active horizon</span><strong>{fmtNumber(detail.run_info?.episode_horizon_s ?? detail.run_info?.requested_episode_horizon_s, 0)} s</strong></div>
               </div>
+              {detail.run_info?.command && <details className="runs-command"><summary>Training arguments and launch command</summary><pre>{Array.isArray(detail.run_info.command) ? detail.run_info.command.join('\n') : detail.run_info.command}</pre></details>}
               {active && <button className="runs-button danger full" disabled={busy || detail.state === 'stopping'} onClick={stopRun}>{detail.state === 'stopping' ? 'Stopping…' : 'Graceful stop'}</button>}
               <form className="runs-form edit-form" onSubmit={saveMetadata}>
                 <label>Human name<input value={editForm.display_name} onChange={(event) => setEditForm({ ...editForm, display_name: event.target.value })} /></label>

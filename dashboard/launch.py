@@ -20,6 +20,10 @@ TRAINING_RUNTIME_RE = re.compile(
     r"Training with:\s*device=([^,\s]+),\s*seed=([^,\s]+),\s*rank=(\d+)"
 )
 GPU_WORLD_RE = re.compile(r"Launching training with\s+(\d+)\s+GPUs?", re.IGNORECASE)
+HORIZON_CURRICULUM_RE = re.compile(
+    r"HORIZON_CURRICULUM\s+horizon_s=(\S+)\s+stage=(\d+)\s+qualified_windows=(\d+)"
+    r"(?:\s+timeout_fraction=(\S+))?"
+)
 
 
 def write_status(path: Path, **values: Any) -> None:
@@ -137,6 +141,13 @@ def _runtime_status_from_line(line: str) -> dict[str, Any]:
     world = GPU_WORLD_RE.search(line)
     if world:
         values["gpu_world_size"] = int(world.group(1))
+    horizon = HORIZON_CURRICULUM_RE.search(line)
+    if horizon:
+        values["episode_horizon_s"] = float(horizon.group(1))
+        values["horizon_stage"] = int(horizon.group(2))
+        values["horizon_qualified_windows"] = int(horizon.group(3))
+        if horizon.group(4) is not None:
+            values["horizon_timeout_fraction"] = float(horizon.group(4))
     return values
 
 
@@ -239,6 +250,7 @@ def main() -> int:
             "--simulation.dt",
         )
     )
+    episode_horizon_s = _number(_training_arg(training_args, "--env.episode-length-s"))
     started = datetime.now(timezone.utc).isoformat()
     git = git_metadata()
     display_name = (args.display_name or run_name).strip()
@@ -271,6 +283,7 @@ def main() -> int:
         seed=seed,
         device=device,
         simulation_timestep=sim_timestep,
+        requested_episode_horizon_s=episode_horizon_s,
         started_at=started,
         command=command,
         command_line=" ".join(command),

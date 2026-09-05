@@ -178,6 +178,16 @@ class RunService:
         task = str(request.get("task") or "Ascento-Balance-Flat").strip()
         if not task.startswith("Ascento-"):
             raise ValueError("task must be an Ascento task name")
+        episode_horizon_s = request.get("episode_horizon_s")
+        if episode_horizon_s is not None:
+            if task not in {"Ascento-Balance-Flat", "Ascento-Velocity-Flat"}:
+                raise ValueError("episode horizon is currently configurable only for balance and velocity")
+            try:
+                episode_horizon_s = float(episode_horizon_s)
+            except (TypeError, ValueError) as error:
+                raise ValueError("episode_horizon_s must be a number") from error
+            if episode_horizon_s not in {20.0, 60.0, 120.0, 300.0}:
+                raise ValueError("episode_horizon_s must be one of 20, 60, 120, or 300 seconds")
         training_args = request.get("training_args") or []
         if not isinstance(training_args, list) or not all(
             isinstance(value, str) for value in training_args
@@ -220,6 +230,8 @@ class RunService:
             command.extend(["--parent-run-id", str(parent_run_id)])
         if parent_checkpoint:
             command.extend(["--parent-checkpoint", parent_checkpoint])
+        if episode_horizon_s is not None:
+            command.extend(["--env.episode-length-s", str(episode_horizon_s)])
         for tag in _clean_tags(request.get("tags")):
             command.extend(["--tag", tag])
         command.append("--")

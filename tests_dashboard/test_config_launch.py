@@ -37,6 +37,14 @@ def test_launcher_extracts_runtime_device_seed_and_world_size():
     assert _runtime_status_from_line("[INFO] Launching training with 2 GPUs") == {
         "gpu_world_size": 2
     }
+    assert _runtime_status_from_line(
+        "HORIZON_CURRICULUM horizon_s=60.0 stage=2 qualified_windows=0 timeout_fraction=0.9219"
+    ) == {
+        "episode_horizon_s": 60.0,
+        "horizon_stage": 2,
+        "horizon_qualified_windows": 0,
+        "horizon_timeout_fraction": 0.9219,
+    }
 
 
 def test_launcher_uses_injected_repository_version_without_git(monkeypatch):
