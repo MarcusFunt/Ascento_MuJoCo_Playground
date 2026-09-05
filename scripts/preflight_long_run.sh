@@ -9,12 +9,14 @@ PY=(uv run --frozen --extra "$EXTRA")
 "${PY[@]}" python -m pytest -q
 
 # Two PPO iterations at the production vector width catch runner/optimizer/GPU
-# failures without pretending that the resulting policy is useful.
+# failures without pretending that the resulting policy is useful. TensorBoard
+# keeps this machine-local smoke independent of WandB credentials/network state.
 "${PY[@]}" train Ascento-Balance-Flat \
   --env.scene.num-envs 512 \
   --agent.max-iterations 2 \
   --agent.save-interval 1 \
-  --agent.run-name preflight-smoke
+  --agent.run-name preflight-smoke \
+  --agent.logger tensorboard
 
 if [[ -n "${ASCENTO_BALANCE_CHECKPOINT:-}" \
    && -n "${ASCENTO_VELOCITY_CHECKPOINT:-}" \
