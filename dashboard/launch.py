@@ -11,6 +11,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from dashboard.config import REPO_ROOT, load_config
 
@@ -172,6 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--name", help="run directory name; defaults to timestamp_stage")
     parser.add_argument("--task", default="Ascento-Balance-Flat")
+    parser.add_argument("--run-id", help="stable dashboard run id; generated automatically when omitted")
     parser.add_argument("--display-name", help="human-readable run name shown by the dashboard")
     parser.add_argument("--notes", default="", help="human notes stored with the run")
     parser.add_argument("--tag", action="append", default=[], help="repeatable run tag")
@@ -237,10 +239,12 @@ def main() -> int:
     started = datetime.now(timezone.utc).isoformat()
     git = git_metadata()
     display_name = (args.display_name or run_name).strip()
+    stable_run_id = (args.run_id or uuid4().hex[:12]).strip()
     tags = list(dict.fromkeys(tag.strip() for tag in args.tag if tag.strip()))
 
     write_metadata(
         metadata_path,
+        run_id=stable_run_id,
         display_name=display_name,
         notes=args.notes.strip(),
         tags=tags,
@@ -257,6 +261,7 @@ def main() -> int:
         status_path,
         schema_version=4,
         state="starting",
+        run_id=stable_run_id,
         task=args.task,
         stage=stage,
         display_name=display_name,
