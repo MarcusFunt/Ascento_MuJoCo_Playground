@@ -11,9 +11,12 @@ DEFAULT_WHEEL_RADIUS_M = 0.25
 
 
 def _resolved_env_ids(env, env_ids: torch.Tensor | slice | None) -> torch.Tensor:
-  if env_ids is None or isinstance(env_ids, slice):
-    return torch.arange(env.num_envs, dtype=torch.long, device=env.device)[env_ids]
-  return env_ids
+  all_ids = torch.arange(env.num_envs, dtype=torch.long, device=env.device)
+  if env_ids is None:
+    return all_ids
+  if isinstance(env_ids, slice):
+    return all_ids[env_ids]
+  return env_ids.reshape(-1).to(dtype=torch.long, device=env.device)
 
 
 def flat_ground_wheel_bottom_heights(
@@ -32,9 +35,6 @@ def flat_ground_wheel_bottom_heights(
   except ValueError as exc:
     raise RuntimeError("Expected left_wheel and right_wheel bodies") from exc
 
-  # Use explicit index_select rather than chained advanced indexing. The latter
-  # can move indexed dimensions in surprising ways and previously returned XYZ
-  # vectors instead of one Z coordinate per wheel.
   positions = asset.data.body_link_pos_w.index_select(0, ids)
   wheel_ids = torch.tensor([left_id, right_id], dtype=torch.long, device=positions.device)
   wheel_positions = positions.index_select(1, wheel_ids)
