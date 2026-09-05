@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MAINTENANCE="$REPO_ROOT/.maintenance"
+ENVFILE="$MAINTENANCE/compose.env"
+MARKER="$MAINTENANCE/tailscale-enabled"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/setup_tailscale.sh
+
+Enroll the Dashboard ingress sidecar in your Tailscale tailnet. Supply the auth
+credential through TS_AUTHKEY or enter it at the hidden prompt. The credential
+is used only for initial enrollment and is removed from the recreated Docker
+container immediately after state has been persisted in the named volume.
+
+Optional environment variables:
+  ASCENTO_TAILSCALE_HOSTNAME   Tailnet hostname (default: ascento-dashboard)
+  TS_AUTHKEY                   Tailscale auth key or OAuth client secret
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+[[ $# -eq 0 ]] || { usage >&2; exit 2; }
+[[ "$(uname -s)" == "Linux" ]] || { echo "ERROR: Tailscale Docker sidecar requires Linux/WSL2" >&2; exit 1; }
+command -v docker >/dev/null 2>&1 || { echo "ERROR: Docker is required" >&2; exit 1; }
+docker compose version >/dev/null 2>&1 || { echo "ERROR: Docker Compose plugin is required" >&2; exit 1; }
+[[ -f "$ENVFILE" ]] || {
+  echo "ERROR: $ENVFILE does not exist. Run scripts/maintain.sh once first." >&2
+  exit 1
+}
+[[ -e /dev/net/tun ]] || {
+  echo "ERROR: /dev/net/tun is unavailable. Tailscale kernel networking cannot start." >&2
+  exit 1
+}
+
+AUTH_KEY="${TS_AUTHKEY:-}"
+if [[ -z "$AUTH_KEY" ]]; then
+  read -rsp "Tailscale auth key / OAuth client secret: " AUTH_KEY
+  echo
+fi
+[[ -n "$AUTH_KEY" ]] || { echo "ERROR: no Tailscale credential supplied" >&2; exit 1; }
+
+COMPUTE="$(awk -F= '$1 == "ASCENTO_COMPUTE_EXTRA" {print $2}' "$ENVFILE" | tail -n1)"
+FILES=(-f "$REPO_ROOT/docker/compose.yaml")
+[[ "$COMPUTE" == "cu128" ]] && FILES+=(-f "$REPO_ROOT/docker/compose.gpu.yaml")
+FILES+=(-f "$REPO_ROOT/docker/compose.tailscale.yaml")
+
+compose() {
+  docker compose --env-file "$ENVFILE" "${FILES[@]}" "$@"
+}
+
+mkdir -p "$MAINTENANCE"
+echo "Enrolling ${ASCENTO_TAILSCALE_HOSTNAME:-ascento-dashboard} in the tailnet..."
+TS_AUTHKEY="$AUTH_KEY" compose up -d tailscale-dashboard dashboard
+
+connected=0
+for _ in {1..60}; do
+  if compose exec -T tailscale-dashboard tailscale status --json >/dev/null 2>&1; then
+    connected=1
+    break
+  fi
+  sleep 0.5
+done
+if (( ! connected )); then
+  echo "ERROR: Tailscale sidecar did not become ready." >&2
+  compose logs --tail=100 tailscale-dashboard >&2 || true
+  exit 1
+fi
+
+# Recreate without TS_AUTHKEY so the secret is no longer present in Docker's
+# inspectable container environment. Persistent Tailscale state keeps the node
+# enrolled and TS_AUTH_ONCE prevents unnecessary reauthentication.
+unset TS_AUTHKEY
+AUTH_KEY=""
+compose up -d --force-recreate tailscale-dashboard dashboard
+
+connected=0
+for _ in {1..60}; do
+  if compose exec -T tailscale-dashboard tailscale status --json >/dev/null 2>&1; then
+    connected=1
+    break
+  fi
+  sleep 0.5
+done
+if (( ! connected )); then
+  echo "ERROR: Tailscale failed to reconnect from persisted state." >&2
+  compose logs --tail=100 tailscale-dashboard >&2 || true
+  exit 1
+fi
+
+printf 'enabled_at=%s\nhostname=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "${ASCENTO_TAILSCALE_HOSTNAME:-ascento-dashboard}" >"$MARKER"
+chmod 600 "$MARKER"
+
+STATUS_JSON="$(compose exec -T tailscale-dashboard tailscale status --json)"
+DNS_NAME="$(printf '%s' "$STATUS_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("Self") or {}).get("DNSName", "").rstrip("."))')"
+DASHBOARD_PORT="$(awk -F= '$1 == "ASCENTO_DASHBOARD_PORT" {print $2}' "$ENVFILE" | tail -n1)"
+DASHBOARD_PORT="${DASHBOARD_PORT:-8000}"
+
+echo "Tailnet enrollment complete."
+if [[ -n "$DNS_NAME" ]]; then
+  echo "Remote Dashboard: http://$DNS_NAME:$DASHBOARD_PORT"
+else
+  echo "Use the Tailscale IP shown by: docker compose ... exec tailscale-dashboard tailscale status"
+fi
+echo "Local Dashboard:  http://127.0.0.1:$DASHBOARD_PORT"
+echo "Only the Dashboard network namespace is attached to the tailnet; the training service is not exposed."
