@@ -1,4 +1,5 @@
 """Training health, process/GPU status, and reproducibility metadata for the dashboard."""
+
 from __future__ import annotations
 
 import json
@@ -15,13 +16,57 @@ from typing import Any
 from dashboard import monitor
 
 ALIASES: dict[str, tuple[str, ...]] = {
-    "reward": ("Train/mean_reward", "train/mean_reward", "eval/episode_reward", "Episode/reward", "episode_reward"),
-    "episode_length": ("Train/mean_episode_length", "train/mean_episode_length", "eval/avg_episode_length", "Episode/length", "episode_length"),
-    "ppo_loss": ("Loss/surrogate", "loss/surrogate", "training/policy_loss", "training/total_loss", "ppo_loss"),
-    "value_loss": ("Loss/value", "Loss/value_function", "loss/value_function", "training/v_loss", "value_loss"),
-    "entropy": ("Loss/entropy", "loss/entropy", "Policy/entropy", "training/entropy", "training/entropy_loss", "entropy"),
-    "kl": ("Loss/kl", "loss/kl", "Policy/kl", "training/kl", "training/approx_kl", "approx_kl", "kl"),
-    "clip_fraction": ("Loss/clip_fraction", "Policy/clip_fraction", "training/clip_fraction", "clip_fraction"),
+    "reward": (
+        "Train/mean_reward",
+        "train/mean_reward",
+        "eval/episode_reward",
+        "Episode/reward",
+        "episode_reward",
+    ),
+    "episode_length": (
+        "Train/mean_episode_length",
+        "train/mean_episode_length",
+        "eval/avg_episode_length",
+        "Episode/length",
+        "episode_length",
+    ),
+    "ppo_loss": (
+        "Loss/surrogate",
+        "loss/surrogate",
+        "training/policy_loss",
+        "training/total_loss",
+        "ppo_loss",
+    ),
+    "value_loss": (
+        "Loss/value",
+        "Loss/value_function",
+        "loss/value_function",
+        "training/v_loss",
+        "value_loss",
+    ),
+    "entropy": (
+        "Loss/entropy",
+        "loss/entropy",
+        "Policy/entropy",
+        "training/entropy",
+        "training/entropy_loss",
+        "entropy",
+    ),
+    "kl": (
+        "Loss/kl",
+        "loss/kl",
+        "Policy/kl",
+        "training/kl",
+        "training/approx_kl",
+        "approx_kl",
+        "kl",
+    ),
+    "clip_fraction": (
+        "Loss/clip_fraction",
+        "Policy/clip_fraction",
+        "training/clip_fraction",
+        "clip_fraction",
+    ),
     "learning_rate": ("Loss/learning_rate", "training/learning_rate", "learning_rate"),
     "invalid_update": ("training/invalid_update", "Train/invalid_update", "invalid_update"),
     "throughput": ("Perf/total_fps", "perf/total_fps", "training/fps", "steps_per_second"),
@@ -50,7 +95,11 @@ def _json(path: Path) -> dict[str, Any] | None:
 
 
 def _finite(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
 
 
 def _timestamp(value: Any) -> float | None:
@@ -150,7 +199,11 @@ def decorate_records(records: list[dict[str, Any]], run_dir: Path) -> list[dict[
         safe_metrics: dict[str, Any] = {}
         non_finite: list[str] = []
         for key, value in raw_metrics.items():
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and not math.isfinite(float(value)):
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and not math.isfinite(float(value))
+            ):
                 safe_metrics[str(key)] = None
                 non_finite.append(str(key))
             else:
@@ -217,9 +270,7 @@ def decorate_records(records: list[dict[str, Any]], run_dir: Path) -> list[dict[
         if delta_i > 0 and delta_t > 0:
             rate = delta_i / delta_t
             record["iterations_per_second"] = rate
-            record["eta_seconds"] = max(
-                0.0, (float(total_iterations) - float(iteration)) / rate
-            )
+            record["eta_seconds"] = max(0.0, (float(total_iterations) - float(iteration)) / rate)
     return decorated
 
 
@@ -546,11 +597,7 @@ def summarize_dashboard_run(
     status = _json(status_file) or base.get("status") or {}
     modified_at = float(base.get("modified_at") or 0.0)
     wall = latest.get("wall_time") if latest else None
-    freshness = (
-        max(0.0, now - float(wall))
-        if _finite(wall)
-        else max(0.0, now - modified_at)
-    )
+    freshness = max(0.0, now - float(wall)) if _finite(wall) else max(0.0, now - modified_at)
     state = status.get("state") or base.get("state") or "unknown"
     if latest is not None:
         started = _timestamp(status.get("started_at"))

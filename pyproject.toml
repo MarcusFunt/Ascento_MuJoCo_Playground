@@ -69,7 +69,7 @@ torch = [
 ascento_mjlab = "ascento_mjlab.tasks"
 
 [tool.pytest.ini_options]
-testpaths = ["tests_mjlab"]
+testpaths = ["tests_mjlab", "tests_dashboard"]
 markers = [
   "gpu: requires a CUDA-capable device",
   "slow: long-running integration test",

@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from dashboard.run_service import RunService
 
 
@@ -20,7 +19,15 @@ def _run(root: Path, name: str, *, state: str = "finished", reward: float | None
     (run / "run_status.json").write_text(json.dumps(status), encoding="utf-8")
     if reward is not None:
         (run / "telemetry.jsonl").write_text(
-            json.dumps({"completed_steps": 4, "total_steps": 10, "wall_time": 1, "metrics": {"Train/mean_reward": reward}}) + "\n",
+            json.dumps(
+                {
+                    "completed_steps": 4,
+                    "total_steps": 10,
+                    "wall_time": 1,
+                    "metrics": {"Train/mean_reward": reward},
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
     return run
@@ -84,7 +91,9 @@ def test_lineage_rejects_self_parent_and_accepts_other_run(tmp_path):
     _run(tmp_path, "parent")
     _run(tmp_path, "child")
     service = RunService(tmp_path)
-    ids = {service.detail(run_id)["name"]: run_id for run_id in service_compare_ids(service, tmp_path)}
+    ids = {
+        service.detail(run_id)["name"]: run_id for run_id in service_compare_ids(service, tmp_path)
+    }
 
     with pytest.raises(ValueError, match="own parent"):
         service.update_metadata(ids["child"], {"parent_run_id": ids["child"]})
@@ -140,7 +149,9 @@ def test_stop_marks_stopping_before_signalling(monkeypatch, tmp_path):
     run_id = service_compare_ids(service, tmp_path)[0]
     calls = []
 
-    monkeypatch.setattr("dashboard.run_service.os.killpg", lambda pgid, sig: calls.append((pgid, sig)))
+    monkeypatch.setattr(
+        "dashboard.run_service.os.killpg", lambda pgid, sig: calls.append((pgid, sig))
+    )
     monkeypatch.setattr("dashboard.health.os.kill", lambda pid, sig: None)
 
     result = service.stop(run_id, reason="plateau")

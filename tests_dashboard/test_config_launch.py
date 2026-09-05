@@ -1,8 +1,5 @@
-from pathlib import Path
-
-import pytest
-
 import dashboard.launch as launch
+import pytest
 from dashboard.config import load_config, validate_startup
 from dashboard.launch import _runtime_status_from_line, _training_arg, build_parser
 
@@ -32,9 +29,11 @@ def test_launcher_argument_metadata_parser_supports_both_cli_forms():
 
 
 def test_launcher_extracts_runtime_device_seed_and_world_size():
-    assert _runtime_status_from_line(
-        "[INFO] Training with: device=cuda:0, seed=42, rank=0"
-    ) == {"device": "cuda:0", "seed": 42, "rank": 0}
+    assert _runtime_status_from_line("[INFO] Training with: device=cuda:0, seed=42, rank=0") == {
+        "device": "cuda:0",
+        "seed": 42,
+        "rank": 0,
+    }
     assert _runtime_status_from_line("[INFO] Launching training with 2 GPUs") == {
         "gpu_world_size": 2
     }

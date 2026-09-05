@@ -1,4 +1,5 @@
 """Repository provenance helpers for dashboard run compatibility warnings."""
+
 from __future__ import annotations
 
 import json
@@ -84,11 +85,20 @@ def run_repository_provenance(run_dir: Path, root: Path) -> dict[str, Any]:
     manifest = _load_json(manifest_path) if manifest_path else None
     sidecar = _load_json(sidecar_path) if sidecar_path else None
 
-    for source_name, source in (("run_status", status), ("manifest", manifest), ("maintenance", sidecar)):
+    for source_name, source in (
+        ("run_status", status),
+        ("manifest", manifest),
+        ("maintenance", sidecar),
+    ):
         if not source:
             continue
         git_data = source.get("git") if isinstance(source.get("git"), dict) else {}
-        commit = source.get("git_commit") or source.get("commit") or git_data.get("commit") or git_data.get("sha")
+        commit = (
+            source.get("git_commit")
+            or source.get("commit")
+            or git_data.get("commit")
+            or git_data.get("sha")
+        )
         branch = source.get("git_branch") or source.get("branch") or git_data.get("branch")
         if commit:
             return {
@@ -143,7 +153,11 @@ def classify_run_version(run_dir: Path, root: Path) -> dict[str, Any]:
             status = "different"
             is_outdated = False
         else:
-            same_branch = not run.get("branch") or not current.get("branch") or run.get("branch") == current.get("branch")
+            same_branch = (
+                not run.get("branch")
+                or not current.get("branch")
+                or run.get("branch") == current.get("branch")
+            )
             status = "outdated" if same_branch else "different"
             is_outdated = same_branch
 

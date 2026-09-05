@@ -5,6 +5,7 @@ The dashboard container talks to this process over a Unix-domain socket.  The
 protocol deliberately exposes only a small fixed command set; it is not a shell
 proxy and never accepts arbitrary commands, paths, branches, or Docker actions.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -143,17 +144,21 @@ class HostSupervisor:
         if not enabled:
             return result
         try:
-            container_id = self._run(
-                [
-                    "docker",
-                    "ps",
-                    "--filter",
-                    "label=com.docker.compose.service=tailscale-dashboard",
-                    "--format",
-                    "{{.ID}}",
-                ],
-                timeout=4.0,
-            ).stdout.splitlines()[0].strip()
+            container_id = (
+                self._run(
+                    [
+                        "docker",
+                        "ps",
+                        "--filter",
+                        "label=com.docker.compose.service=tailscale-dashboard",
+                        "--format",
+                        "{{.ID}}",
+                    ],
+                    timeout=4.0,
+                )
+                .stdout.splitlines()[0]
+                .strip()
+            )
             raw = self._run(
                 ["docker", "exec", container_id, "tailscale", "status", "--json"],
                 timeout=5.0,
@@ -161,7 +166,11 @@ class HostSupervisor:
             status = json.loads(raw)
             self_status = status.get("Self") if isinstance(status.get("Self"), dict) else {}
             dns_name = str(self_status.get("DNSName") or "").rstrip(".") or None
-            ips = self_status.get("TailscaleIPs") if isinstance(self_status.get("TailscaleIPs"), list) else []
+            ips = (
+                self_status.get("TailscaleIPs")
+                if isinstance(self_status.get("TailscaleIPs"), list)
+                else []
+            )
             connected = str(status.get("BackendState") or "").lower() == "running" or bool(ips)
             port = _env_file(self.maintenance_root / "compose.env").get(
                 "ASCENTO_DASHBOARD_PORT", "8000"
@@ -330,13 +339,18 @@ class HostSupervisor:
                 with self._status_lock:
                     self._status_cache = None
 
-            threading.Thread(target=wait_for_update, daemon=True, name="ascento-update-waiter").start()
+            threading.Thread(
+                target=wait_for_update, daemon=True, name="ascento-update-waiter"
+            ).start()
             return state
 
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         operation = request.get("op")
         if operation == "status":
-            return {"ok": True, "result": self.repository_status(refresh=bool(request.get("refresh")))}
+            return {
+                "ok": True,
+                "result": self.repository_status(refresh=bool(request.get("refresh"))),
+            }
         if operation == "update":
             try:
                 return {"ok": True, "result": self.start_update()}

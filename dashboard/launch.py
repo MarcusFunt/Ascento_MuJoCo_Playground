@@ -1,4 +1,5 @@
 """Launch an mjlab/RSL-RL run with durable dashboard metadata and console logging."""
+
 from __future__ import annotations
 
 import argparse
@@ -173,7 +174,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--name", help="run directory name; defaults to timestamp_stage")
     parser.add_argument("--task", default="Ascento-Balance-Flat")
-    parser.add_argument("--run-id", help="stable dashboard run id; generated automatically when omitted")
+    parser.add_argument(
+        "--run-id", help="stable dashboard run id; generated automatically when omitted"
+    )
     parser.add_argument("--display-name", help="human-readable run name shown by the dashboard")
     parser.add_argument("--notes", default="", help="human notes stored with the run")
     parser.add_argument("--tag", action="append", default=[], help="repeatable run tag")

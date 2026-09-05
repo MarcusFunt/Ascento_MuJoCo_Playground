@@ -1,4 +1,5 @@
 """Filesystem-backed monitoring helpers for Ascento training runs."""
+
 from __future__ import annotations
 
 import json
@@ -15,10 +16,10 @@ ERROR_PATTERN = re.compile(
     re.IGNORECASE,
 )
 RUN_MARKERS = (
-  "telemetry.jsonl",
-  "training.log",
-  "run_status.json",
-  "training_manifest.json",
+    "telemetry.jsonl",
+    "training.log",
+    "run_status.json",
+    "training_manifest.json",
 )
 _TENSORBOARD_CACHE: dict[Path, tuple[tuple[int, int], Any]] = {}
 _TENSORBOARD_RECORD_CACHE: dict[
@@ -69,16 +70,16 @@ def load_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
 
 
 def _training_limit(run_dir: Path) -> int | None:
-  """Read the configured iteration count when an RSL-RL run recorded it."""
-  params_path = run_dir / "params" / "agent.yaml"
-  if not params_path.is_file():
-    return None
-  try:
-    contents = params_path.read_text(encoding="utf-8")
-  except OSError:
-    return None
-  match = re.search(r"^\s*max_iterations:\s*(\d+)\s*$", contents, re.MULTILINE)
-  return int(match.group(1)) if match else None
+    """Read the configured iteration count when an RSL-RL run recorded it."""
+    params_path = run_dir / "params" / "agent.yaml"
+    if not params_path.is_file():
+        return None
+    try:
+        contents = params_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(r"^\s*max_iterations:\s*(\d+)\s*$", contents, re.MULTILINE)
+    return int(match.group(1)) if match else None
 
 
 def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
@@ -282,7 +283,11 @@ def latest_render(run_dir: Path) -> dict[str, Any] | None:
             if not path.is_file():
                 path = manifest_path.parent / path.name
             if path.is_file() and _inside(path, run_dir):
-                return {**record, "filename": path.name, "relative_path": path.relative_to(run_dir).as_posix()}
+                return {
+                    **record,
+                    "filename": path.name,
+                    "relative_path": path.relative_to(run_dir).as_posix(),
+                }
     pngs = list((run_dir / "renders").glob("*.png")) if (run_dir / "renders").exists() else []
     if not pngs:
         pngs = list(run_dir.glob("*.png"))
@@ -314,7 +319,11 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
         else:
             state = "unknown"
 
-    relative = "." if run_dir.resolve() == root.resolve() else run_dir.resolve().relative_to(root.resolve()).as_posix()
+    relative = (
+        "."
+        if run_dir.resolve() == root.resolve()
+        else run_dir.resolve().relative_to(root.resolve()).as_posix()
+    )
     return {
         "id": sha1(relative.encode("utf-8")).hexdigest()[:12],
         "name": relative,
@@ -326,7 +335,8 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
         "errors": errors,
         "latest_render": latest_render(run_dir),
         "has_log": log_path.is_file(),
-        "has_checkpoint": (run_dir / "checkpoint").is_dir() or bool(list(run_dir.glob("model_*.pt"))),
+        "has_checkpoint": (run_dir / "checkpoint").is_dir()
+        or bool(list(run_dir.glob("model_*.pt"))),
     }
 
 

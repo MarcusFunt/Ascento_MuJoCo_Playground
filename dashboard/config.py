@@ -1,4 +1,5 @@
 """Shared dashboard configuration and startup validation."""
+
 from __future__ import annotations
 
 import os
@@ -47,12 +48,16 @@ def _positive_float(name: str, raw: str | None, default: float) -> float:
 
 
 def load_config() -> DashboardConfig:
-    artifact_root = Path(
-        os.environ.get("ASCENTO_ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT))
-    ).expanduser().resolve()
-    frontend_dist = Path(
-        os.environ.get("ASCENTO_DASHBOARD_DIST", str(DEFAULT_FRONTEND_DIST))
-    ).expanduser().resolve()
+    artifact_root = (
+        Path(os.environ.get("ASCENTO_ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT)))
+        .expanduser()
+        .resolve()
+    )
+    frontend_dist = (
+        Path(os.environ.get("ASCENTO_DASHBOARD_DIST", str(DEFAULT_FRONTEND_DIST)))
+        .expanduser()
+        .resolve()
+    )
     stale_after = _positive_float(
         "ASCENTO_STALE_AFTER_SECONDS",
         os.environ.get("ASCENTO_STALE_AFTER_SECONDS"),
@@ -104,8 +109,7 @@ def validate_startup(config: DashboardConfig, *, create_artifact_root: bool = Tr
 
     if config.frontend_dist.exists() and not config.frontend_dist.is_dir():
         raise RuntimeError(
-            "ASCENTO_DASHBOARD_DIST must point to a directory, got "
-            f"{config.frontend_dist}"
+            f"ASCENTO_DASHBOARD_DIST must point to a directory, got {config.frontend_dist}"
         )
     if not (config.frontend_dist / "index.html").is_file():
         warnings.append(
