@@ -1,26 +1,52 @@
 import torch
 from mjlab.envs import ManagerBasedRlEnv
+from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.registry import load_env_cfg
 
 import ascento_mjlab.tasks  # noqa: F401
 from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights
 
 
-def test_recovery_resets_anchor_lowest_wheel_to_flat_support_plane():
+def test_recovery_resets_are_support_consistent_across_thousands_of_samples():
   cfg = load_env_cfg("Ascento-Recovery-Flat")
-  cfg.scene.num_envs = 64
+  cfg.scene.num_envs = 128
+  cfg.scene.sensors = (*cfg.scene.sensors, ContactSensorCfg(
+    name="nonwheel_ground_contact",
+    primary=ContactMatch(
+      mode="body",
+      pattern=r".*",
+      entity="robot",
+      exclude=(r".*_wheel$",),
+    ),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("found", "dist"),
+    reduce="mindist",
+  ))
   env = ManagerBasedRlEnv(cfg, device="cpu")
   try:
-    observed = []
-    for _ in range(16):
+    observed_lowest = []
+    observed_nonwheel = []
+    # 128 envs * 32 resets = 4096 independently sampled recovery states.
+    for _ in range(32):
       env.reset()
       bottoms = flat_ground_wheel_bottom_heights(env)
-      observed.append(bottoms.amin(dim=1))
-    lowest = torch.cat(observed)
+      observed_lowest.append(bottoms.amin(dim=1))
 
-    # The support-aware reset should eliminate both penetration and whole-robot
-    # hovering caused solely by orientation perturbation at a fixed root height.
+      sensor = env.scene["nonwheel_ground_contact"].data
+      assert sensor.found is not None
+      observed_nonwheel.append(sensor.found.gt(0).any(dim=1))
+
+    lowest = torch.cat(observed_lowest)
+    nonwheel = torch.cat(observed_nonwheel)
+    assert lowest.numel() == 4096
+
+    # No accidental penetration or whole-robot hovering from a fixed root
+    # height: the true lower outer-wheel surface is anchored to the plane.
     assert torch.max(torch.abs(lowest)).item() <= 2.0e-3
+
+    # Recovery difficulty should come from the configured pose/velocity
+    # disturbance, not the chassis/thigh/shank starting inside the floor.
+    assert not torch.any(nonwheel).item()
   finally:
     env.close()
 
