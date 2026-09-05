@@ -8,7 +8,6 @@ from typing import Any
 import torch
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 
-
 HORIZON_SCHEDULE_S = (20.0, 60.0, 120.0, 300.0)
 """Successive episode horizons used by balance and velocity training."""
 
