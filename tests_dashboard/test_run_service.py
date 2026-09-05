@@ -143,7 +143,15 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
     assert command[-2:] == ["--agent.max-iterations", "5000"]
     assert "--env.episode-length-s" in command
     assert command[command.index("--env.episode-length-s") + 1] == "60.0"
+    assert "--preinitialized" in command
     assert captured["kwargs"]["start_new_session"] is True
+
+    run = service.resolve(created["id"])
+    status = json.loads((run.path / "run_status.json").read_text(encoding="utf-8"))
+    metadata = json.loads((run.path / "run_metadata.json").read_text(encoding="utf-8"))
+    assert status["state"] == "starting"
+    assert status["launcher_pid"] == 4321
+    assert metadata["run_id"] == created["id"]
 
 
 def test_create_rejects_horizon_for_non_progressive_tasks(tmp_path):
