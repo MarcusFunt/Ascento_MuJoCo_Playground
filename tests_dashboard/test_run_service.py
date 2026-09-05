@@ -126,6 +126,7 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
         {
             "display_name": "Velocity validation",
             "task": "Ascento-Velocity-Flat",
+            "episode_horizon_s": 60,
             "purpose": "validation",
             "tags": ["velocity", "gate"],
             "notes": "Verify the current gate.",
@@ -140,7 +141,22 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
     assert "--display-name" in command
     assert "Velocity validation" in command
     assert command[-2:] == ["--agent.max-iterations", "5000"]
+    assert "--env.episode-length-s" in command
+    assert command[command.index("--env.episode-length-s") + 1] == "60.0"
     assert captured["kwargs"]["start_new_session"] is True
+
+
+def test_create_rejects_horizon_for_non_progressive_tasks(tmp_path):
+    service = RunService(tmp_path)
+
+    with pytest.raises(ValueError, match="only for balance and velocity"):
+        service.create(
+            {
+                "display_name": "Jump validation",
+                "task": "Ascento-Jump-Flat",
+                "episode_horizon_s": 60,
+            }
+        )
 
 
 def test_stop_marks_stopping_before_signalling(monkeypatch, tmp_path):
