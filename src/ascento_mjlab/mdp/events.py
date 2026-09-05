@@ -26,12 +26,19 @@ def flat_ground_wheel_bottom_heights(
   """Return [left, right] wheel-bottom heights above the flat support plane."""
   ids = _resolved_env_ids(env, env_ids)
   asset = env.scene[asset_name]
-  left_ids, _ = asset.find_bodies(r"^left_wheel$")
-  right_ids, _ = asset.find_bodies(r"^right_wheel$")
-  if len(left_ids) != 1 or len(right_ids) != 1:
-    raise RuntimeError("Expected exactly one left_wheel and one right_wheel body")
-  wheel_centres = asset.data.body_link_pos_w[ids][:, [left_ids[0], right_ids[0]], 2]
-  return wheel_centres - float(wheel_radius_m)
+  try:
+    left_id = asset.body_names.index("left_wheel")
+    right_id = asset.body_names.index("right_wheel")
+  except ValueError as exc:
+    raise RuntimeError("Expected left_wheel and right_wheel bodies") from exc
+
+  # Use explicit index_select rather than chained advanced indexing. The latter
+  # can move indexed dimensions in surprising ways and previously returned XYZ
+  # vectors instead of one Z coordinate per wheel.
+  positions = asset.data.body_link_pos_w.index_select(0, ids)
+  wheel_ids = torch.tensor([left_id, right_id], dtype=torch.long, device=positions.device)
+  wheel_positions = positions.index_select(1, wheel_ids)
+  return wheel_positions[..., 2] - float(wheel_radius_m)
 
 
 def reset_root_state_supported(
@@ -46,8 +53,8 @@ def reset_root_state_supported(
   """Sample a root reset, then vertically align its lowest wheel with flat ground.
 
   The generic mjlab root reset perturbs orientation while leaving the nominal root
-  height unchanged.  For a wheel-legged robot that can introduce accidental wheel
-  penetration or unsupported hovering before the first physics step.  This helper
+  height unchanged. For a wheel-legged robot that can introduce accidental wheel
+  penetration or unsupported hovering before the first physics step. This helper
   preserves the sampled pose/velocity but translates the root in Z so the lowest
   wheel starts exactly on the flat support plane.
   """
@@ -72,7 +79,7 @@ def reset_root_state_supported(
     env_ids=ids,
   )
   correction = float(support_clearance_m) - bottoms.amin(dim=1)
-  pose = asset.data.root_link_pose_w[ids].clone()
+  pose = asset.data.root_link_pose_w.index_select(0, ids).clone()
   pose[:, 2] += correction
   asset.write_root_link_pose_to_sim(pose, env_ids=ids)
   env.sim.forward()
