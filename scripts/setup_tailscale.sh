@@ -79,6 +79,25 @@ compose() {
   docker compose --env-file "$ENVFILE" "${FILES[@]}" "$@"
 }
 
+tailscale_running() {
+  compose exec -T tailscale-dashboard tailscale status --json 2>/dev/null \
+    | python3 "$REPO_ROOT/scripts/tailscale_status.py" >/dev/null 2>&1
+}
+
+wait_for_tailscale_running() {
+  local phase="$1"
+  local attempts="${2:-120}"
+  local attempt
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if tailscale_running; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "ERROR: Tailscale did not reach authenticated Running state during $phase." >&2
+  return 1
+}
+
 mkdir -p "$MAINTENANCE"
 echo "Enrolling ${ASCENTO_TAILSCALE_HOSTNAME:-ascento-dashboard} in the tailnet..."
 # Release the local 127.0.0.1 dashboard port before the sidecar takes ownership
@@ -86,17 +105,12 @@ echo "Enrolling ${ASCENTO_TAILSCALE_HOSTNAME:-ascento-dashboard} in the tailnet.
 docker compose --env-file "$ENVFILE" "${BASE_FILES[@]}" stop dashboard >/dev/null 2>&1 || true
 TS_AUTHKEY="$AUTH_KEY" compose up -d tailscale-dashboard dashboard
 
-connected=0
-for _ in {1..60}; do
-  if compose exec -T tailscale-dashboard tailscale status --json >/dev/null 2>&1; then
-    connected=1
-    break
-  fi
-  sleep 0.5
-done
-if (( ! connected )); then
-  echo "ERROR: Tailscale sidecar did not become ready." >&2
-  compose logs --tail=100 tailscale-dashboard >&2 || true
+# Do not treat a successful `tailscale status --json` invocation as readiness by
+# itself. The CLI can emit valid JSON while containerboot is still in NeedsLogin
+# or Starting. Removing TS_AUTHKEY at that point races authentication and can
+# leave the recreated sidecar repeatedly asking for interactive browser login.
+if ! wait_for_tailscale_running "initial enrollment"; then
+  compose logs --tail=120 tailscale-dashboard >&2 || true
   exit 1
 fi
 
@@ -107,17 +121,8 @@ unset TS_AUTHKEY
 AUTH_KEY=""
 compose up -d --force-recreate tailscale-dashboard dashboard
 
-connected=0
-for _ in {1..60}; do
-  if compose exec -T tailscale-dashboard tailscale status --json >/dev/null 2>&1; then
-    connected=1
-    break
-  fi
-  sleep 0.5
-done
-if (( ! connected )); then
-  echo "ERROR: Tailscale failed to reconnect from persisted state." >&2
-  compose logs --tail=100 tailscale-dashboard >&2 || true
+if ! wait_for_tailscale_running "credential-free reconnect"; then
+  compose logs --tail=120 tailscale-dashboard >&2 || true
   exit 1
 fi
 
