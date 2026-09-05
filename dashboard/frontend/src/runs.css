@@ -156,7 +156,7 @@
 }
 
 .runs-table tbody tr {
-  cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
 .runs-table tbody tr:hover,
@@ -167,6 +167,26 @@
 .runs-table td strong,
 .runs-table td small {
   display: block;
+}
+
+.runs-select-run {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.runs-select-run:focus-visible,
+.runs-button:focus-visible,
+.runs-form input:focus-visible,
+.runs-form select:focus-visible,
+.runs-form textarea:focus-visible {
+  outline: 2px solid rgba(135, 205, 255, 0.9);
+  outline-offset: 3px;
 }
 
 .runs-table td small {
@@ -208,6 +228,48 @@
   align-items: center;
   gap: 8px;
   padding-top: 14px;
+}
+
+.runs-library-tools {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.runs-search {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.runs-search input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(127, 127, 127, 0.34);
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: rgba(0, 0, 0, 0.16);
+  color: inherit;
+  font: inherit;
+}
+
+.runs-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.runs-match-count {
+  min-width: max-content;
+  padding-bottom: 10px;
+  font-size: 12px;
+  opacity: 0.62;
 }
 
 .runs-compare-bar span {
@@ -267,6 +329,25 @@
 
 .runs-form textarea {
   resize: vertical;
+}
+
+.runs-advanced-options {
+  border: 1px solid rgba(127, 127, 127, 0.24);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.runs-advanced-options summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.runs-advanced-options p {
+  margin: 9px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.68;
 }
 
 .mono {
@@ -380,5 +461,18 @@
 
   .runs-summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .runs-library-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .runs-filter-toggle {
+    min-height: 28px;
+  }
+
+  .runs-match-count {
+    padding-bottom: 0;
   }
 }

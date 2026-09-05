@@ -64,6 +64,8 @@ function RunsPage() {
   const [editForm, setEditForm] = useState(null)
   const [compareIds, setCompareIds] = useState([])
   const [comparison, setComparison] = useState(null)
+  const [filterText, setFilterText] = useState('')
+  const [showOnlyActive, setShowOnlyActive] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
@@ -119,6 +121,19 @@ function RunsPage() {
     () => runs.filter((run) => run.id !== selectedId),
     [runs, selectedId],
   )
+
+  const visibleRuns = useMemo(() => {
+    const query = filterText.trim().toLowerCase()
+    return runs.filter((run) => {
+      if (showOnlyActive && !['starting', 'running', 'stopping'].includes(run.state)) return false
+      if (!query) return true
+      return [run.display_name, run.name, run.state, run.stage, ...(run.tags || [])]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(query)
+    })
+  }, [filterText, runs, showOnlyActive])
 
   async function createRun(event) {
     event.preventDefault()
@@ -240,8 +255,8 @@ function RunsPage() {
         </div>
       </section>
 
-      {error && <div className="runs-alert runs-alert-error">{error}</div>}
-      {notice && <div className="runs-alert runs-alert-ok">{notice}</div>}
+      {error && <div className="runs-alert runs-alert-error" role="alert">{error}</div>}
+      {notice && <div className="runs-alert runs-alert-ok" role="status">{notice}</div>}
 
       <section className="runs-layout">
         <div className="runs-main-column">
@@ -252,6 +267,26 @@ function RunsPage() {
                 <p>Human names are separate from machine artifact directories. Existing runs can be annotated in place.</p>
               </div>
               <button className="runs-button subtle" onClick={refreshRuns}>Refresh</button>
+            </div>
+            <div className="runs-library-tools">
+              <label className="runs-search">
+                <span>Find a run</span>
+                <input
+                  type="search"
+                  value={filterText}
+                  onChange={(event) => setFilterText(event.target.value)}
+                  placeholder="Name, task, stage, or tag"
+                />
+              </label>
+              <label className="runs-filter-toggle">
+                <input
+                  type="checkbox"
+                  checked={showOnlyActive}
+                  onChange={(event) => setShowOnlyActive(event.target.checked)}
+                />
+                Active only
+              </label>
+              <span className="runs-match-count">{visibleRuns.length} of {runs.length}</span>
             </div>
             <div className="runs-table-wrap">
               <table className="runs-table">
@@ -267,13 +302,19 @@ function RunsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {runs.map((run) => (
-                    <tr key={run.id} className={run.id === selectedId ? 'selected' : ''} onClick={() => setSelectedId(run.id)}>
-                      <td onClick={(event) => event.stopPropagation()}>
+                  {visibleRuns.map((run) => (
+                    <tr key={run.id} className={run.id === selectedId ? 'selected' : ''}>
+                      <td>
                         <input type="checkbox" checked={compareIds.includes(run.id)} onChange={() => toggleCompare(run.id)} />
                       </td>
                       <td>
-                        <strong>{run.display_name || run.name}</strong>
+                        <button
+                          className="runs-select-run"
+                          aria-pressed={run.id === selectedId}
+                          onClick={() => setSelectedId(run.id)}
+                        >
+                          <strong>{run.display_name || run.name}</strong>
+                        </button>
                         <small>{run.name}</small>
                       </td>
                       <td><StateBadge state={run.state} /></td>
@@ -289,6 +330,7 @@ function RunsPage() {
                     </tr>
                   ))}
                   {runs.length === 0 && <tr><td colSpan="7" className="runs-empty">No runs found yet.</td></tr>}
+                  {runs.length > 0 && visibleRuns.length === 0 && <tr><td colSpan="7" className="runs-empty">No runs match these filters.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -336,7 +378,11 @@ function RunsPage() {
               <label>Parent checkpoint<input value={createForm.parent_checkpoint} onChange={(event) => setCreateForm({ ...createForm, parent_checkpoint: event.target.value })} placeholder="model_7500.pt" /></label>
               {['Ascento-Balance-Flat', 'Ascento-Velocity-Flat'].includes(createForm.task) && <label>Initial episode horizon (seconds)<select value={createForm.episode_horizon_s} onChange={(event) => setCreateForm({ ...createForm, episode_horizon_s: event.target.value })}><option value="20">20 seconds — frequent reset practice</option><option value="60">60 seconds</option><option value="120">120 seconds</option><option value="300">300 seconds — longest horizon</option></select><small>Starts at this horizon, then advances through 20 → 60 → 120 → 300 seconds after three 512-episode windows each reach at least 90% timeout completions. Short early episodes preserve randomized-reset practice.</small></label>}
               <label>Notes<textarea rows="3" value={createForm.notes} onChange={(event) => setCreateForm({ ...createForm, notes: event.target.value })} placeholder="Why this run exists and what should be learned from it." /></label>
-              <label>Advanced training arguments <small>One argument/value per line. Common settings: <code>--env.scene.num-envs</code> controls parallel simulations; <code>--agent.max-iterations</code> controls PPO updates; <code>--agent.seed</code> makes a run repeatable. The episode horizon is set above so it can be recorded and adapted safely.</small><textarea className="mono" rows="7" value={createForm.training_args} onChange={(event) => setCreateForm({ ...createForm, training_args: event.target.value })} /></label>
+              <details className="runs-advanced-options">
+                <summary>Advanced training arguments</summary>
+                <p>Adjust parallel simulations, PPO updates, or the seed only when the preset is not suitable. The episode horizon is controlled above.</p>
+                <label>Arguments <textarea className="mono" rows="7" value={createForm.training_args} onChange={(event) => setCreateForm({ ...createForm, training_args: event.target.value })} /></label>
+              </details>
               <button className="runs-button primary" disabled={busy}>Start training</button>
             </form>
           </section>
