@@ -45,11 +45,10 @@ RUN_GROUP="$(id -gn "$RUN_USER")"
 UNIT_PATH="/etc/systemd/system/$SERVICE_NAME"
 DOCKER_GROUP_LINE=""
 if getent group docker >/dev/null 2>&1; then
+  # The process itself runs as the workstation user. This supplemental group is
+  # the only extra host capability it receives and is required for maintain.sh
+  # to rebuild/restart the project's Compose stack.
   DOCKER_GROUP_LINE="SupplementaryGroups=docker"
-  if ! id -nG "$RUN_USER" | tr ' ' '\n' | grep -qx docker; then
-    echo "WARNING: $RUN_USER is not currently in the docker group."
-    echo "         The supervisor can report Git status, but maintenance Docker rebuilds may fail."
-  fi
 fi
 
 TMP_UNIT="$(mktemp)"
