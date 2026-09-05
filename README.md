@@ -56,7 +56,8 @@ The maintainer:
   remain in the active image;
 - starts the dashboard container on `127.0.0.1:8000` by default;
 - preserves existing runs and records pre-update Git provenance for legacy runs
-  that did not already record their repository commit.
+  that did not already record their repository commit;
+- preserves the optional Tailscale dashboard ingress after it has been enrolled.
 
 `cpu` and `cu128` are declared as conflicting extras, so only one can be
 installed at a time. All other compatible optional extras are installed.
@@ -67,6 +68,55 @@ contents of the current lockfile.
 The script refuses to overwrite tracked local changes or local-only commits
 unless `--force` is explicitly supplied. See `bash scripts/maintain.sh --help`
 for CPU/GPU, install-directory, and Docker options.
+
+### Dashboard host updates
+
+The Dashboard's **System** page can compare the local checkout with
+`origin/main` and request an update, but the web container never receives the
+Docker socket or arbitrary host shell access. Install the small host-side
+supervisor once:
+
+```bash
+bash scripts/install_supervisor.sh
+```
+
+The supervisor runs as the workstation user under systemd and exposes only a
+restricted Unix socket to the Dashboard. It accepts repository-status checks and
+a guarded request to run the existing `scripts/maintain.sh`; it does not accept
+arbitrary commands, branches, paths, or Docker operations from the web API.
+
+GUI-triggered updates are refused while training is active, while the checkout
+is dirty, when local-only commits exist, when the checkout is not on `main`, or
+when `origin/main` cannot be verified. When an update is accepted, the supervisor
+continues running outside Docker while the Dashboard is rebuilt and restarted.
+
+### Remote Dashboard over Tailscale
+
+The maintained Docker stack can expose the Dashboard privately to your Tailscale
+tailnet without opening it to the LAN or public internet. Enroll it once on the
+workstation:
+
+```bash
+bash scripts/setup_tailscale.sh
+```
+
+Supply a Tailscale auth key at the hidden prompt or through `TS_AUTHKEY`. The
+credential is used for initial enrollment only; after persistent Tailscale state
+has been created, the sidecar is recreated without the credential in its Docker
+environment. For OAuth client-secret enrollment, also provide the required
+advertised tag, for example:
+
+```bash
+ASCENTO_TAILSCALE_EXTRA_ARGS='--advertise-tags=tag:ascento' \
+TS_AUTHKEY='<oauth-client-secret>' \
+bash scripts/setup_tailscale.sh
+```
+
+The Tailscale sidecar owns the Dashboard's network namespace. Tailnet peers can
+open port `8000` on its Tailscale IP or MagicDNS name, while local access remains
+available on `127.0.0.1:8000`. The separate `ascento-mjlab` service is not joined
+to that Tailnet ingress. Tailscale Funnel is not enabled; your Tailnet grants or
+ACLs determine who can reach the private Dashboard.
 
 ## Manual setup
 
@@ -190,11 +240,22 @@ docker compose -f docker/compose.yaml build
 docker compose -f docker/compose.yaml -f docker/compose.gpu.yaml build
 ```
 
+The optional Tailnet overlay is normally managed by `scripts/setup_tailscale.sh`:
+
+```bash
+docker compose \
+  -f docker/compose.yaml \
+  -f docker/compose.tailscale.yaml config
+```
+
 The maintenance script normally handles the build arguments and starts the
 `dashboard` service automatically. Training logs, checkpoints, and captures are
 bind-mounted from the repository, so container rebuilds do not delete runs.
-The dashboard mount is read-only and defaults to the shared `logs/rsl_rl`
-artifact root.
+The Dashboard has read-write access to `logs/` because managed runs create their
+status, TensorBoard output, logs, and checkpoints there; separate
+`checkpoints/`, `captures/`, and `evaluations/` mounts stay read-only. The only
+host-control mount is the restricted supervisor Unix socket directory; Docker's
+control socket is never mounted into the Dashboard.
 
 The dashboard compares each run's recorded Git commit with the repository
 version serving the UI. Runs from older commits are labelled `OUTDATED` in the
@@ -217,7 +278,10 @@ specific important plant regression.
 - `src/ascento_mjlab/mdp/`: Ascento observations, rewards, resets, semantics, metrics.
 - `src/ascento_mjlab/tasks/`: balance, velocity, recovery, and flat-jump configs.
 - `src/ascento_mjlab/tools/`: smoke, model inspection, plant comparison, capture, clip processing, and motion-quality ranking.
+- `dashboard/`: run-management, monitoring, System/update UI, and host-supervisor client.
+- `scripts/host_supervisor.py`: fixed-operation host update boundary.
 - `tests_mjlab/`: migration unit and integration tests.
+- `tests_dashboard/`: dashboard, run-control, supervisor, and update API tests.
 
 The old JAX/MJX/Brax implementation remains available only in Git history and
 the `archive/mjx-playground` branch during migration validation.
