@@ -204,6 +204,43 @@ class RunService:
         stable_run_id = uuid4().hex[:12]
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         directory_name = f"{stamp}_{_slug(display_name)}_{stable_run_id[:8]}"
+        run_dir = self.artifact_root / directory_name
+        started_at = _now()
+        try:
+            # Make the returned run ID immediately readable. Previously the
+            # detached launcher created these files asynchronously, so the UI
+            # could request its detail endpoint before the directory existed.
+            run_dir.mkdir()
+            _write_json(
+                run_dir / RUN_METADATA,
+                {
+                    "schema_version": 1,
+                    "run_id": stable_run_id,
+                    "display_name": display_name,
+                    "notes": str(request.get("notes") or "").strip(),
+                    "tags": _clean_tags(request.get("tags")),
+                    "purpose": str(request.get("purpose") or "").strip(),
+                    "parent_run_id": str(parent_run_id) if parent_run_id else None,
+                    "parent_checkpoint": str(request.get("parent_checkpoint") or "").strip(),
+                    "created_at": started_at,
+                    "updated_at": started_at,
+                },
+            )
+            _write_json(
+                run_dir / "run_status.json",
+                {
+                    "schema_version": 4,
+                    "state": "starting",
+                    "run_id": stable_run_id,
+                    "task": task,
+                    "stage": task.removeprefix("Ascento-").removesuffix("-Flat").lower(),
+                    "display_name": display_name,
+                    "started_at": started_at,
+                },
+            )
+        except OSError as error:
+            raise OSError(f"cannot initialize run directory {run_dir}: {error}") from error
+
         command = [
             sys.executable,
             "-m",
@@ -218,6 +255,7 @@ class RunService:
             stable_run_id,
             "--display-name",
             display_name,
+            "--preinitialized",
         ]
         notes = str(request.get("notes") or "").strip()
         purpose = str(request.get("purpose") or "").strip()
@@ -237,15 +275,30 @@ class RunService:
         command.append("--")
         command.extend(training_args)
 
-        process = subprocess.Popen(
-            command,
-            cwd=REPO_ROOT,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            close_fds=True,
-        )
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=REPO_ROOT,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                close_fds=True,
+            )
+        except OSError as error:
+            status = _load_json(run_dir / "run_status.json")
+            status.update(
+                {
+                    "state": "failed",
+                    "finished_at": _now(),
+                    "error": f"dashboard launcher could not start: {error}",
+                }
+            )
+            _write_json(run_dir / "run_status.json", status)
+            raise
+        status = _load_json(run_dir / "run_status.json")
+        status["launcher_pid"] = process.pid
+        _write_json(run_dir / "run_status.json", status)
         return {
             "id": stable_run_id,
             "name": directory_name,

@@ -188,6 +188,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-id", help="stable dashboard run id; generated automatically when omitted"
     )
+    parser.add_argument(
+        "--preinitialized",
+        action="store_true",
+        help="reuse the empty run directory initialized synchronously by the dashboard API",
+    )
     parser.add_argument("--display-name", help="human-readable run name shown by the dashboard")
     parser.add_argument("--notes", default="", help="human notes stored with the run")
     parser.add_argument("--tag", action="append", default=[], help="repeatable run tag")
@@ -214,7 +219,11 @@ def main() -> int:
     run_dir = (args.artifact_root.expanduser().resolve() / run_name).resolve()
 
     try:
-        if run_dir.exists() and any(run_dir.iterdir()):
+        expected_files = {"run_metadata.json", "run_status.json"}
+        existing_files = {path.name for path in run_dir.iterdir()} if run_dir.exists() else set()
+        if args.preinitialized and existing_files != expected_files:
+            parser.error(f"preinitialized run directory is incomplete: {run_dir}")
+        if not args.preinitialized and existing_files:
             parser.error(f"run directory already exists and is not empty: {run_dir}")
         run_dir.mkdir(parents=True, exist_ok=True)
     except OSError as error:
