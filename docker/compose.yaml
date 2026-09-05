@@ -31,7 +31,9 @@ services:
     ports:
       - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
     volumes:
-      - ../logs:/workspace/logs:ro
+      # Run management writes launcher metadata, logs and checkpoints beneath
+      # the shared artifact root. Other repository artifacts stay read-only.
+      - ../logs:/workspace/logs
       - ../checkpoints:/workspace/checkpoints:ro
       - ../captures:/workspace/captures:ro
       - ../evaluations:/workspace/evaluations:ro

@@ -5,11 +5,13 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from dashboard.config import REPO_ROOT, load_config
 
@@ -29,6 +31,22 @@ def write_status(path: Path, **values: Any) -> None:
     current.update(values)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(current, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def write_metadata(path: Path, **values: Any) -> None:
+    current: dict[str, Any] = {}
+    if path.exists():
+        try:
+            current = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            current = {}
+    current.update(values)
+    current["updated_at"] = datetime.now(timezone.utc).isoformat()
+    current.setdefault("created_at", current["updated_at"])
+    current.setdefault("schema_version", 1)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(current, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -155,6 +173,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--name", help="run directory name; defaults to timestamp_stage")
     parser.add_argument("--task", default="Ascento-Balance-Flat")
+    parser.add_argument("--run-id", help="stable dashboard run id; generated automatically when omitted")
+    parser.add_argument("--display-name", help="human-readable run name shown by the dashboard")
+    parser.add_argument("--notes", default="", help="human notes stored with the run")
+    parser.add_argument("--tag", action="append", default=[], help="repeatable run tag")
+    parser.add_argument("--purpose", default="", help="run purpose, e.g. baseline or validation")
+    parser.add_argument("--parent-run-id", help="dashboard id of the parent run")
+    parser.add_argument("--parent-checkpoint", help="checkpoint inherited from the parent run")
     parser.add_argument("training_args", nargs=argparse.REMAINDER)
     return parser
 
@@ -182,6 +207,7 @@ def main() -> int:
         parser.error(f"cannot create run directory {run_dir}: {error}")
 
     status_path = run_dir / "run_status.json"
+    metadata_path = run_dir / "run_metadata.json"
     log_path = run_dir / "training.log"
     command = [
         sys.executable,
@@ -212,13 +238,33 @@ def main() -> int:
     )
     started = datetime.now(timezone.utc).isoformat()
     git = git_metadata()
+    display_name = (args.display_name or run_name).strip()
+    stable_run_id = (args.run_id or uuid4().hex[:12]).strip()
+    tags = list(dict.fromkeys(tag.strip() for tag in args.tag if tag.strip()))
 
+    write_metadata(
+        metadata_path,
+        run_id=stable_run_id,
+        display_name=display_name,
+        notes=args.notes.strip(),
+        tags=tags,
+        purpose=args.purpose.strip(),
+        parent_run_id=args.parent_run_id,
+        parent_checkpoint=args.parent_checkpoint,
+    )
+
+    # The API starts launchers in a new session so their process group can be
+    # signalled without touching uvicorn. Direct CLI launches are still safe:
+    # they simply omit process_group and the launcher forwards SIGINT itself.
+    process_group = os.getpgrp() if os.getpid() == os.getpgrp() else None
     write_status(
         status_path,
-        schema_version=3,
+        schema_version=4,
         state="starting",
+        run_id=stable_run_id,
         task=args.task,
         stage=stage,
+        display_name=display_name,
         seed=seed,
         device=device,
         simulation_timestep=sim_timestep,
@@ -231,11 +277,16 @@ def main() -> int:
         git=git,
         git_commit=git.get("commit"),
         git_branch=git.get("branch"),
+        launcher_pid=os.getpid(),
+        process_group=process_group,
         pid_namespace=_pid_namespace(),
         exit_code=None,
+        stop_requested_at=None,
+        stop_reason=None,
     )
 
     exit_code = 127
+    stop_requested = False
     try:
         with log_path.open("a", encoding="utf-8", buffering=1) as log:
             log.write("DASHBOARD_LAUNCH " + " ".join(command) + "\n")
@@ -273,16 +324,23 @@ def main() -> int:
                         write_status(status_path, **runtime_values)
                 exit_code = process.wait()
             except KeyboardInterrupt:
-                process.terminate()
-                exit_code = process.wait()
-                write_status(
-                    status_path,
-                    state="cancelled",
-                    exit_code=exit_code,
-                    finished_at=datetime.now(timezone.utc).isoformat(),
-                    checkpoint_path=_latest_checkpoint(run_dir),
-                )
-                raise
+                stop_requested = True
+                # SIGINT is the graceful request for both native and API-managed
+                # launches. Give the trainer time to run its interrupt cleanup
+                # before escalating to terminate/kill.
+                try:
+                    process.send_signal(signal.SIGINT)
+                except ProcessLookupError:
+                    pass
+                try:
+                    exit_code = process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    try:
+                        exit_code = process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        exit_code = process.wait()
     except OSError as error:
         message = f"Dashboard launcher cannot write {log_path}: {error}"
         print(message, file=sys.stderr)
@@ -296,15 +354,16 @@ def main() -> int:
         return 127
 
     finished = datetime.now(timezone.utc).isoformat()
-    state = "finished" if exit_code == 0 else "error"
+    state = "stopped" if stop_requested else ("finished" if exit_code == 0 else "error")
     write_status(
         status_path,
         state=state,
         exit_code=exit_code,
         finished_at=finished,
         checkpoint_path=_latest_checkpoint(run_dir),
+        stop_reason="user_requested" if stop_requested else None,
     )
-    return exit_code
+    return 130 if stop_requested else exit_code
 
 
 if __name__ == "__main__":
