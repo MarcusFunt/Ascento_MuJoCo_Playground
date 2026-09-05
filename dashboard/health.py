@@ -549,6 +549,13 @@ def build_run_info(run_dir: Path, root: Path, stage: str) -> dict[str, Any]:
         "seed": seed,
         "command": _first((status, manifest), "command", "command_line"),
         "simulation_timestep": sim_timestep,
+        "episode_horizon_s": _first((status, manifest), "episode_horizon_s"),
+        "requested_episode_horizon_s": _first(
+            (status, manifest), "requested_episode_horizon_s"
+        ),
+        "horizon_stage": _first((status, manifest), "horizon_stage"),
+        "horizon_qualified_windows": _first((status, manifest), "horizon_qualified_windows"),
+        "horizon_timeout_fraction": _first((status, manifest), "horizon_timeout_fraction"),
         "device": device,
         "gpu_world_size": _first((status, manifest, runtime), "gpu_world_size"),
         "checkpoint_path": _first((status, manifest), "checkpoint_path", "model_path")

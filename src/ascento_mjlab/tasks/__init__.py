@@ -3,6 +3,8 @@
 # Import configuration modules before touching mjlab's registry. mjlab
 # discovers task entry points while its own task package is being imported;
 # keeping registry access lazy makes both import directions safe.
+from ascento_mjlab.horizon_curriculum import HorizonCurriculumRunner
+
 from .balance.env_cfg import ascento_balance_env_cfg
 from .balance.rl_cfg import AscentoBalanceRlCfg
 from .jump.env_cfg import ascento_jump_env_cfg
@@ -22,12 +24,14 @@ def _register_tasks() -> None:
         env_cfg=ascento_balance_env_cfg(),
         play_env_cfg=ascento_balance_env_cfg(play=True),
         rl_cfg=AscentoBalanceRlCfg,
+        runner_cls=HorizonCurriculumRunner,
     )
     register_mjlab_task(
         task_id="Ascento-Velocity-Flat",
         env_cfg=ascento_velocity_env_cfg(),
         play_env_cfg=ascento_velocity_env_cfg(play=True),
         rl_cfg=AscentoVelocityRlCfg,
+        runner_cls=HorizonCurriculumRunner,
     )
     register_mjlab_task(
         task_id="Ascento-Recovery-Flat",

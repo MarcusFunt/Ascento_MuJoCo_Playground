@@ -294,6 +294,27 @@
   display: block;
 }
 
+.runs-command {
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+
+.runs-command summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.runs-command pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .runs-summary-grid span {
   font-size: 11px;
   opacity: 0.58;
