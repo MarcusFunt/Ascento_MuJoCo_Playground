@@ -28,6 +28,31 @@ def test_launcher_argument_metadata_parser_supports_both_cli_forms():
     assert _training_arg(args, "--env.sim.mujoco.timestep") == "0.002"
 
 
+def test_launcher_accepts_dashboard_horizon_after_training_separator():
+    args = build_parser().parse_args(
+        [
+            "--artifact-root",
+            "/tmp/runs",
+            "--name",
+            "dashboard-run",
+            "--preinitialized",
+            "--",
+            "--env.episode-length-s",
+            "20.0",
+            "--env.scene.num-envs",
+            "512",
+        ]
+    )
+
+    assert args.training_args == [
+        "--",
+        "--env.episode-length-s",
+        "20.0",
+        "--env.scene.num-envs",
+        "512",
+    ]
+
+
 def test_launcher_extracts_runtime_device_seed_and_world_size():
     assert _runtime_status_from_line("[INFO] Training with: device=cuda:0, seed=42, rank=0") == {
         "device": "cuda:0",
