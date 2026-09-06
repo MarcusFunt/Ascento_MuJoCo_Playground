@@ -141,7 +141,8 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
     assert "--display-name" in command
     assert "Velocity validation" in command
     assert command[-2:] == ["--agent.max-iterations", "5000"]
-    assert "--env.episode-length-s" in command
+    separator = command.index("--")
+    assert command.index("--env.episode-length-s") > separator
     assert command[command.index("--env.episode-length-s") + 1] == "60.0"
     assert "--preinitialized" in command
     assert captured["kwargs"]["start_new_session"] is True

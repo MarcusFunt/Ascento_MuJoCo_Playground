@@ -268,11 +268,16 @@ class RunService:
             command.extend(["--parent-run-id", str(parent_run_id)])
         if parent_checkpoint:
             command.extend(["--parent-checkpoint", parent_checkpoint])
-        if episode_horizon_s is not None:
-            command.extend(["--env.episode-length-s", str(episode_horizon_s)])
         for tag in _clean_tags(request.get("tags")):
             command.extend(["--tag", tag])
+        # Everything following this separator belongs to mjlab's trainer.  In
+        # particular, ``--env.episode-length-s`` is not an option understood
+        # by this launcher.  Keeping it before the separator made argparse
+        # terminate the detached launcher before it could write its status or
+        # training log, leaving dashboard-created runs stuck at "starting".
         command.append("--")
+        if episode_horizon_s is not None:
+            command.extend(["--env.episode-length-s", str(episode_horizon_s)])
         command.extend(training_args)
 
         try:
