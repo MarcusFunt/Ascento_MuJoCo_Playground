@@ -14,6 +14,9 @@ from ascento_mjlab.tasks.balance.env_cfg import ROBOT_CFG, ascento_balance_env_c
 
 def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
     cfg = ascento_balance_env_cfg(play=play, num_envs=num_envs)
+    cfg.rewards.pop("position_hold", None)
+    cfg.rewards.pop("settled_balance", None)
+    cfg.events.pop("balance_push", None)
     cfg.commands = {
         "motion": ascento_mdp.commands.AscentoMotionCommandCfg(
             entity_name="robot",

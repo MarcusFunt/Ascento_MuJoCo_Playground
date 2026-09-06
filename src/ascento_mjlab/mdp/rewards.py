@@ -68,6 +68,69 @@ def planar_speed_penalty(
     return torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=1)
 
 
+def position_hold(
+    env: ManagerBasedRlEnv,
+    std: float = 0.50,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Reward remaining near the actual supported reset position in balance."""
+    if not hasattr(env, "ascento_balance_state"):
+        raise RuntimeError("balance origin must be initialized before position_hold")
+    if std <= 0.0:
+        raise ValueError("std must be positive")
+    asset: Entity = env.scene[asset_cfg.name]
+    displacement = asset.data.root_link_pos_w[:, :2] - env.ascento_balance_state["origin_xy"]
+    return torch.exp(-torch.sum(torch.square(displacement), dim=1) / (std * std))
+
+
+def leg_pose_symmetry_penalty(
+    env: ManagerBasedRlEnv,
+    beta: float = 0.15,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Softly penalize mirrored hip/knee coordinate mismatch without coupling actions."""
+    if beta <= 0.0:
+        raise ValueError("beta must be positive")
+    asset: Entity = env.scene[asset_cfg.name]
+    joint_positions = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    if joint_positions.shape[-1] < 5:
+        raise RuntimeError("leg symmetry requires left/right hip and knee joints")
+    deltas = torch.stack(
+        (
+            joint_positions[:, 0] - joint_positions[:, 3],
+            joint_positions[:, 1] - joint_positions[:, 4],
+        ),
+        dim=1,
+    ).abs()
+    huber = torch.where(
+        deltas <= beta,
+        0.5 * torch.square(deltas) / beta,
+        deltas - 0.5 * beta,
+    )
+    return torch.mean(huber, dim=1)
+
+
+def settled_balance(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Reward the same low-motion, supported state required by the balance gate."""
+    asset: Entity = env.scene[asset_cfg.name]
+    tilt_sq = torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
+    planar_speed_sq = torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=1)
+    angular_speed_sq = torch.sum(torch.square(asset.data.root_link_ang_vel_b[:, :2]), dim=1)
+    height_error_sq = torch.square(asset.data.root_link_pos_w[:, 2] - 0.75)
+    left = env.scene["left_wheel_contact"].data.found
+    right = env.scene["right_wheel_contact"].data.found
+    assert left is not None and right is not None
+    supported = left.flatten(start_dim=1).any(dim=1) & right.flatten(start_dim=1).any(dim=1)
+    score = torch.exp(-tilt_sq / 0.08**2)
+    score *= torch.exp(-planar_speed_sq / 0.10**2)
+    score *= torch.exp(-angular_speed_sq / 0.25**2)
+    score *= torch.exp(-height_error_sq / 0.05**2)
+    return score * supported.float()
+
+
 def effort_penalty(
     env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
 ) -> torch.Tensor:

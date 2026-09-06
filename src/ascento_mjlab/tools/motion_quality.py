@@ -52,12 +52,25 @@ def compute_motion_quality(capture: dict[str, np.ndarray]) -> dict[str, Any]:
         report[f"{prefix}_peak"] = float(np.max(np.abs(values)))
         report[f"{prefix}_jerk_rms"] = _rms(third)
     if "joint_pos" in capture:
-        joint_acceleration = _derivative(
-            _derivative(capture["joint_pos"].astype(np.float64), time), time
-        )
+        joint_pos = capture["joint_pos"].astype(np.float64)
+        joint_acceleration = _derivative(_derivative(joint_pos, time), time)
         report["joint_acceleration_rms_rad_s2"] = _rms(joint_acceleration)
+        if joint_pos.ndim == 2 and joint_pos.shape[1] >= 5:
+            for name, values in (
+                ("leg_hip_mismatch", joint_pos[:, 0] - joint_pos[:, 3]),
+                ("leg_knee_mismatch", joint_pos[:, 1] - joint_pos[:, 4]),
+            ):
+                report[f"{name}_rms_rad"] = _rms(values)
+                report[f"{name}_p95_abs_rad"] = float(np.percentile(np.abs(values), 95.0))
+    if "root_quat" in capture:
+        quat = capture["root_quat"].astype(np.float64)
+        if quat.ndim == 2 and quat.shape[1] == 4:
+            _, x, y, _ = quat.T
+            body_z_world_z = np.clip(1.0 - 2.0 * (x * x + y * y), -1.0, 1.0)
+            report["max_tilt_rad"] = float(np.max(np.arccos(body_z_world_z)))
     if "contacts" in capture:
         contacts = capture["contacts"] > 0.5
+        report["both_supported_fraction"] = float(np.mean(np.all(contacts, axis=1)))
         report["contact_toggle_count"] = int(
             np.count_nonzero(np.any(contacts[1:] != contacts[:-1], axis=1))
         )

@@ -29,9 +29,11 @@ Result states:
 ## Current suites
 
 - `balance_dev_v1`: smaller, faster development screen.
-- `balance_gate_v1`: authoritative Gate D benchmark with nominal resets,
-  expanded resets, deterministic corners, physical force disturbances, and
-  60-second endurance.
+- `balance_gate_v1`: immutable authoritative Gate D performance baseline with
+  nominal resets, expanded resets, deterministic corners, physical force
+  disturbances, and 60-second endurance.
+- `balance_gate_v2`: v1 performance checks plus nominal mirrored-hip and
+  mirrored-knee RMS mismatch gates.
 - `velocity_gate_v1`: deterministic command-timeline tracking benchmark.
 - `recovery_gate_v1`: wide-reset recovery benchmark using the canonical
   `RecoveryEnvelope` fields plus continuous stable duration.

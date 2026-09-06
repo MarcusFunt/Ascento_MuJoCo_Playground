@@ -106,10 +106,36 @@ def reset_root_state_supported(
     env.sim.sense()
 
 
+def initialize_balance_origin(
+    env,
+    env_ids: torch.Tensor | slice | None = None,
+    *,
+    asset_name: str = "robot",
+) -> None:
+    """Remember the supported root XY pose used as this episode's balance target.
+
+    The balance task randomizes its initial XY position slightly.  Tracking the
+    actual post-reset position, rather than the environment-grid origin, keeps a
+    position-hold reward free of a reset-dependent bias.  The state is stored on
+    the environment because rewards run after the reset event has completed.
+    """
+    ids = _resolved_env_ids(env, env_ids)
+    if ids.numel() == 0:
+        return
+    if not hasattr(env, "ascento_balance_state"):
+        env.ascento_balance_state = {
+            "origin_xy": torch.zeros((env.num_envs, 2), dtype=torch.float32, device=env.device)
+        }
+    origin_xy = env.ascento_balance_state["origin_xy"]
+    asset = env.scene[asset_name]
+    origin_xy[ids] = asset.data.root_link_pos_w[ids, :2]
+
+
 __all__ = [
     "DEFAULT_WHEEL_HALF_WIDTH_M",
     "DEFAULT_WHEEL_RADIUS_M",
     "flat_ground_wheel_bottom_heights",
+    "initialize_balance_origin",
     "reset_root_state_supported",
     "reset_root_state_uniform",
 ]

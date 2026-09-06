@@ -135,6 +135,56 @@ def _actions() -> dict[str, ActionTermCfg]:
 
 def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerBasedRlEnvCfg:
     """Build the validated flat-ground balance configuration."""
+    events = {
+        "reset_scene_to_default": EventTermCfg(func=mdp.reset_scene_to_default, mode="reset"),
+        "reset_supported_pose": EventTermCfg(
+            func=ascento_mdp.events.reset_root_state_supported,
+            mode="reset",
+            params={
+                "pose_range": {
+                    "x": (-0.02, 0.02),
+                    "y": (-0.02, 0.02),
+                    "z": (0.0, 0.0),
+                    "roll": (-0.08, 0.08),
+                    "pitch": (-0.08, 0.08),
+                    "yaw": (-3.14159, 3.14159),
+                },
+                "velocity_range": {
+                    "x": (-0.05, 0.05),
+                    "y": (-0.05, 0.05),
+                    "z": (-0.05, 0.05),
+                    "roll": (-0.1, 0.1),
+                    "pitch": (-0.1, 0.1),
+                    "yaw": (-0.1, 0.1),
+                },
+                "asset_cfg": ROBOT_CFG,
+            },
+        ),
+        "initialize_balance_origin": EventTermCfg(
+            func=ascento_mdp.events.initialize_balance_origin,
+            mode="reset",
+            params={"asset_name": "robot"},
+        ),
+    }
+    if not play:
+        # The authoritative balance gate applies lateral impulses after the
+        # policy has settled.  Train the same recovery behavior without adding
+        # disturbances to deterministic play/evaluation environments.
+        events["balance_push"] = EventTermCfg(
+            func=mdp.push_by_setting_velocity,
+            mode="interval",
+            interval_range_s=(3.0, 6.0),
+            params={
+                "velocity_range": {
+                    "x": (-0.45, 0.45),
+                    "y": (-0.45, 0.45),
+                    "z": (0.0, 0.0),
+                    "roll": (-0.25, 0.25),
+                    "pitch": (-0.35, 0.35),
+                    "yaw": (-0.20, 0.20),
+                }
+            },
+        )
     cfg = ManagerBasedRlEnvCfg(
         decimation=PHYSICS_PROFILE.decimation,
         scene=_scene(1 if play else num_envs),
@@ -142,32 +192,7 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
         viewer=deepcopy(VIEWER_CONFIG),
         observations=_observations(play),
         actions=_actions(),
-        events={
-            "reset_scene_to_default": EventTermCfg(func=mdp.reset_scene_to_default, mode="reset"),
-            "reset_supported_pose": EventTermCfg(
-                func=ascento_mdp.events.reset_root_state_supported,
-                mode="reset",
-                params={
-                    "pose_range": {
-                        "x": (-0.02, 0.02),
-                        "y": (-0.02, 0.02),
-                        "z": (0.0, 0.0),
-                        "roll": (-0.08, 0.08),
-                        "pitch": (-0.08, 0.08),
-                        "yaw": (-3.14159, 3.14159),
-                    },
-                    "velocity_range": {
-                        "x": (-0.05, 0.05),
-                        "y": (-0.05, 0.05),
-                        "z": (-0.05, 0.05),
-                        "roll": (-0.1, 0.1),
-                        "pitch": (-0.1, 0.1),
-                        "yaw": (-0.1, 0.1),
-                    },
-                    "asset_cfg": ROBOT_CFG,
-                },
-            ),
-        },
+        events=events,
         rewards={
             "alive": RewardTermCfg(func=ascento_mdp.rewards.alive, weight=1.0),
             "upright": RewardTermCfg(
@@ -193,6 +218,21 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
                 func=ascento_mdp.rewards.planar_speed_penalty,
                 weight=-0.2,
                 params={"asset_cfg": ROBOT_CFG},
+            ),
+            "position_hold": RewardTermCfg(
+                func=ascento_mdp.rewards.position_hold,
+                weight=2.0,
+                params={"std": 0.50, "asset_cfg": ROBOT_CFG},
+            ),
+            "settled_balance": RewardTermCfg(
+                func=ascento_mdp.rewards.settled_balance,
+                weight=1.0,
+                params={"asset_cfg": ROBOT_CFG},
+            ),
+            "leg_pose_symmetry": RewardTermCfg(
+                func=ascento_mdp.rewards.leg_pose_symmetry_penalty,
+                weight=-2.0,
+                params={"beta": 0.15, "asset_cfg": ROBOT_CFG},
             ),
             "effort": RewardTermCfg(
                 func=ascento_mdp.rewards.effort_penalty,

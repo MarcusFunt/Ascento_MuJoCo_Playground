@@ -45,6 +45,9 @@ def ascento_velocity_env_cfg(play: bool = False, num_envs: int = 512):
     # contradictory objectives before adding command tracking.
     cfg.rewards.pop("height", None)
     cfg.rewards.pop("planar_speed", None)
+    cfg.rewards.pop("position_hold", None)
+    cfg.rewards.pop("settled_balance", None)
+    cfg.events.pop("balance_push", None)
     cfg.rewards["track_velocity"] = RewardTermCfg(
         func=ascento_mdp.rewards.track_velocity,
         weight=2.0,

@@ -173,10 +173,12 @@ uv run --extra cu128 play Ascento-Balance-Flat --agent zero
 ```
 
 Gate D is mjlab-native: the validated plant must learn robust, visually
-plausible balance with sensible control. The balance objective mildly penalizes
-horizontal root speed so recovery motion remains available without rewarding
-persistent drift. Old-stack policy behavior is a diagnostic reference only,
-never the acceptance target.
+plausible balance with sensible control. Balance rewards hold the root near its
+supported reset position, reward the same settled state measured by the gate,
+and softly prefer equal mirrored hip/knee coordinates without coupling their
+actions. Training includes interval recovery pushes; exact evaluator pushes are
+provided only by the immutable scenario suite. Old-stack policy behavior is a
+diagnostic reference only, never the acceptance target.
 
 ## Tasks and sequencing
 
