@@ -23,6 +23,11 @@ from .schema import EpisodeResult, ScenarioSpec
 DEFAULT_PHYSICAL_EFFORT_LIMIT = 40.0
 
 
+def physics_timestep(cfg: Any) -> float:
+    """Return the MuJoCo physics timestep from an mjlab environment config."""
+    return float(cfg.sim.mujoco.timestep)
+
+
 def task_capabilities(task: str) -> set[str]:
     capabilities = {
         "generic_body_metrics",
@@ -68,7 +73,7 @@ def checkpoint_sha256(path: str | Path) -> str:
 
 def task_step_dt(task: str) -> float:
     cfg = load_env_cfg(task, play=False)
-    return float(cfg.sim.timestep) * int(cfg.decimation)
+    return physics_timestep(cfg) * int(cfg.decimation)
 
 
 def _exact_reset(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec]) -> torch.Tensor:
@@ -312,7 +317,7 @@ def _run_batch(
     cfg.scene.num_envs = len(scenarios)
     cfg.auto_reset = False
     cfg.seed = 0
-    step_dt = float(cfg.sim.timestep) * int(cfg.decimation)
+    step_dt = physics_timestep(cfg) * int(cfg.decimation)
     max_horizon = max(scenario.horizon_steps for scenario in scenarios)
     cfg.episode_length_s = (max_horizon + 2) * step_dt
 
