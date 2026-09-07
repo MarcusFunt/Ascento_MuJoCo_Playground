@@ -6,7 +6,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from dashboard.health import list_dashboard_summaries
+from dashboard.health import list_dashboard_summaries, load_dashboard_records
+from dashboard.monitor import tail_lines, training_log_path
 from dashboard.run_service import RunService
 
 try:
@@ -17,7 +18,7 @@ except ImportError as error:  # pragma: no cover - exercised when extra is absen
 
 
 def _root() -> Path:
-    return Path(os.environ.get("ASCENTO_ARTIFACT_ROOT", "logs/rsl_rl")).expanduser()
+    return Path(os.environ.get("ASCENTO_ARTIFACT_ROOT", "logs/rsl_rl")).expanduser().resolve()
 
 
 def _service() -> RunService:
@@ -44,6 +45,27 @@ if FastMCP is not None:
     def get_run_details(run_id: str) -> dict[str, Any]:
         """Read detailed telemetry, health, provenance, and artifact metadata."""
         return _service().detail(run_id)
+
+    @mcp.tool()
+    def get_run_logs(run_id: str, tail: int = 200) -> dict[str, Any]:
+        """Read a bounded tail of a run log without loading the full file."""
+        service = _service()
+        ref = service.resolve(run_id)
+        return {"run_id": run_id, "lines": tail_lines(training_log_path(ref.path), max(1, min(tail, 5000)))}
+
+    @mcp.tool()
+    def get_run_telemetry(run_id: str, limit: int = 50) -> dict[str, Any]:
+        """Read bounded normalized telemetry history for a run."""
+        service = _service()
+        ref = service.resolve(run_id)
+        return {"run_id": run_id, "records": load_dashboard_records(ref.path, limit=max(1, min(limit, 2000)))}
+
+    @mcp.tool()
+    def get_dashboard_health() -> dict[str, Any]:
+        """Return dashboard health and repository-version status."""
+        from dashboard.app import health
+
+        return health()
 
     @mcp.tool()
     def start_run(

@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,68 @@ def _stop(args: argparse.Namespace) -> int:
     return 0
 
 
+def _logs(args: argparse.Namespace) -> int:
+    from dashboard.monitor import tail_lines, training_log_path
+
+    service = _service(_artifact_root(args.artifact_root))
+    ref = service.resolve(args.run_id)
+    _print({"run_id": args.run_id, "lines": tail_lines(training_log_path(ref.path), args.tail)}, args.json)
+    return 0
+
+
+def _telemetry(args: argparse.Namespace) -> int:
+    from dashboard.health import load_dashboard_records
+
+    service = _service(_artifact_root(args.artifact_root))
+    ref = service.resolve(args.run_id)
+    _print({"run_id": args.run_id, "records": load_dashboard_records(ref.path, limit=args.limit)}, args.json)
+    return 0
+
+
+def _compare(args: argparse.Namespace) -> int:
+    _print(_service(_artifact_root(args.artifact_root)).compare(args.run_ids), args.json)
+    return 0
+
+
+def _dashboard_status(args: argparse.Namespace) -> int:
+    url = f"http://{args.host}:{args.port}/api/health"
+    try:
+        with urllib.request.urlopen(url, timeout=args.timeout) as response:
+            payload = json.load(response)
+    except (OSError, ValueError) as error:
+        _print({"ok": False, "url": url, "error": str(error)}, args.json)
+        return 1
+    _print(payload, args.json)
+    return 0
+
+
+def _dashboard_start(args: argparse.Namespace) -> int:
+    command = [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "dashboard.app:app",
+        "--host",
+        args.host,
+        "--port",
+        str(args.port),
+    ]
+    if args.reload:
+        command.append("--reload")
+    if args.detach:
+        process = subprocess.Popen(
+            command,
+            cwd=_repo_root(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        _print({"state": "starting", "pid": process.pid, "host": args.host, "port": args.port}, args.json)
+        return 0
+    return subprocess.run(command, cwd=_repo_root(), check=False).returncode
+
+
 def _monitor(args: argparse.Namespace) -> int:
     service = _service(_artifact_root(args.artifact_root))
     previous: tuple[Any, ...] | None = None
@@ -174,10 +237,36 @@ def build_parser() -> argparse.ArgumentParser:
     stop.add_argument("run_id")
     stop.add_argument("--reason", default="user_requested")
     stop.set_defaults(handler=_stop)
+    logs = run_sub.add_parser("logs", parents=[common], help="show a bounded training-log tail")
+    logs.add_argument("run_id")
+    logs.add_argument("--tail", type=int, default=200)
+    logs.set_defaults(handler=_logs)
+    telemetry = run_sub.add_parser("telemetry", parents=[common], help="show bounded normalized telemetry")
+    telemetry.add_argument("run_id")
+    telemetry.add_argument("--limit", type=int, default=50)
+    telemetry.set_defaults(handler=_telemetry)
+    compare = run_sub.add_parser("compare", parents=[common], help="compare normalized latest metrics")
+    compare.add_argument("run_ids", nargs="+", metavar="RUN_ID")
+    compare.set_defaults(handler=_compare)
 
     maintain = sub.add_parser("maintain", help="run scripts/maintain.sh")
     maintain.add_argument("maintain_args", nargs=argparse.REMAINDER)
     maintain.set_defaults(handler=_maintain)
+
+    dashboard = sub.add_parser("dashboard", help="start or inspect the dashboard")
+    dashboard_sub = dashboard.add_subparsers(dest="dashboard_command", required=True)
+    dashboard_common = argparse.ArgumentParser(add_help=False)
+    dashboard_common.add_argument("--host", default="127.0.0.1")
+    dashboard_common.add_argument("--port", type=int, default=8000)
+    dashboard_common.add_argument("--json", action="store_true")
+    dashboard_status = dashboard_sub.add_parser("status", parents=[dashboard_common])
+    dashboard_status.add_argument("--timeout", type=float, default=5.0)
+    dashboard_status.set_defaults(handler=_dashboard_status)
+    dashboard_start = dashboard_sub.add_parser("start", parents=[dashboard_common])
+    dashboard_start.add_argument("--foreground", dest="detach", action="store_false")
+    dashboard_start.set_defaults(detach=True)
+    dashboard_start.add_argument("--reload", action="store_true")
+    dashboard_start.set_defaults(handler=_dashboard_start)
     return parser
 
 

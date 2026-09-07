@@ -147,7 +147,11 @@ uv run --extra dashboard ascento run start --task Ascento-Balance-Flat \
 uv run --extra dashboard ascento run list --active
 uv run --extra dashboard ascento run monitor <run-id> --interval 30
 uv run --extra dashboard ascento run progress <run-id> --json
+uv run --extra dashboard ascento run logs <run-id> --tail 100
+uv run --extra dashboard ascento run telemetry <run-id> --limit 50 --json
+uv run --extra dashboard ascento run compare <run-a> <run-b> --json
 uv run --extra dashboard ascento run stop <run-id>
+uv run --extra dashboard ascento dashboard status
 uv run ascento maintain --skip-system-install
 ```
 
