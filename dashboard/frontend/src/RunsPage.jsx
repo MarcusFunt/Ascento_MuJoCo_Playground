@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-const POLL_MS = 5000
+const POLL_MS = 15000
 const TASKS = [
   'Ascento-Balance-Flat',
   'Ascento-Velocity-Flat',
@@ -69,8 +69,13 @@ function RunsPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const runsRefreshInFlight = useRef(false)
+  const detailRefreshInFlight = useRef(false)
+  const editFormRunId = useRef('')
 
   async function refreshRuns() {
+    if (runsRefreshInFlight.current) return
+    runsRefreshInFlight.current = true
     try {
       const data = await fetchJson('/api/runs')
       const next = data.runs || []
@@ -79,28 +84,38 @@ function RunsPage() {
       setError('')
     } catch (caught) {
       setError(caught.message)
+    } finally {
+      runsRefreshInFlight.current = false
     }
   }
 
   async function refreshDetail(id) {
     if (!id) {
       setDetail(null)
+      editFormRunId.current = ''
       return
     }
+    if (detailRefreshInFlight.current) return
+    detailRefreshInFlight.current = true
     try {
       const value = await fetchJson(`/api/runs/${id}`)
       setDetail(value)
-      setEditForm({
-        display_name: value.display_name || value.name || '',
-        purpose: value.metadata?.purpose || '',
-        tags: (value.tags || []).join(', '),
-        notes: value.notes || '',
-        parent_run_id: value.lineage?.parent_run_id || '',
-        parent_checkpoint: value.lineage?.parent_checkpoint || '',
-      })
+      if (editFormRunId.current !== id) {
+        editFormRunId.current = id
+        setEditForm({
+          display_name: value.display_name || value.name || '',
+          purpose: value.metadata?.purpose || '',
+          tags: (value.tags || []).join(', '),
+          notes: value.notes || '',
+          parent_run_id: value.lineage?.parent_run_id || '',
+          parent_checkpoint: value.lineage?.parent_checkpoint || '',
+        })
+      }
       setError('')
     } catch (caught) {
       setError(caught.message)
+    } finally {
+      detailRefreshInFlight.current = false
     }
   }
 

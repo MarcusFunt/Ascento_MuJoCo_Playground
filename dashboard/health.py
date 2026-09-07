@@ -296,7 +296,9 @@ def _has_training_signal(path: Path) -> bool:
         return True
     if (path / "params" / "agent.yaml").is_file():
         return True
-    if any(path.glob("events.out.tfevents.*")) or any(path.glob("model_*.pt")):
+    if next(path.glob("events.out.tfevents.*"), None) is not None:
+        return True
+    if next(path.glob("model_*.pt"), None) is not None:
         return True
     return False
 
@@ -304,12 +306,13 @@ def _has_training_signal(path: Path) -> bool:
 def discover_dashboard_runs(root: Path) -> list[monitor.RunRef]:
     refs = monitor.discover_runs(root)
     paths = {ref.path.resolve() for ref in refs}
+    signals = {path: _has_training_signal(path) for path in paths}
     filtered: list[monitor.RunRef] = []
     for ref in refs:
         path = ref.path.resolve()
-        launcher_only = (path / "run_status.json").is_file() and not _has_training_signal(path)
+        launcher_only = (path / "run_status.json").is_file() and not signals[path]
         has_nested_signal = any(
-            other != path and _inside(other, path) and _has_training_signal(other)
+            other != path and _inside(other, path) and signals[other]
             for other in paths
         )
         if launcher_only and has_nested_signal:
@@ -601,11 +604,21 @@ def summarize_dashboard_run(
     *,
     stale_after_seconds: float = 90.0,
     detailed: bool = False,
+    include_telemetry: bool = True,
+    include_errors: bool = True,
+    include_artifacts: bool = True,
     now: float | None = None,
 ) -> dict[str, Any]:
     now = time.time() if now is None else now
-    base = monitor.summarize_run(run_dir, root, now=now)
-    records = load_dashboard_records(run_dir, limit=500 if detailed else 1)
+    base = monitor.summarize_run(
+        run_dir,
+        root,
+        now=now,
+        include_telemetry=include_telemetry,
+        include_errors=include_errors,
+        include_artifacts=include_artifacts,
+    )
+    records = load_dashboard_records(run_dir, limit=500 if detailed else 1) if include_telemetry else []
     latest = records[-1] if records else None
     status_file = run_status_path(run_dir, root)
     status = _json(status_file) or base.get("status") or {}
@@ -650,6 +663,13 @@ def list_dashboard_summaries(
     root: Path, *, stale_after_seconds: float = 90.0
 ) -> list[dict[str, Any]]:
     return [
-        summarize_dashboard_run(ref.path, root, stale_after_seconds=stale_after_seconds)
+        summarize_dashboard_run(
+            ref.path,
+            root,
+            stale_after_seconds=stale_after_seconds,
+            include_telemetry=False,
+            include_errors=False,
+            include_artifacts=False,
+        )
         for ref in discover_dashboard_runs(root)
     ]

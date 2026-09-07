@@ -9,7 +9,11 @@ import {
   YAxis,
 } from 'recharts'
 
-const POLL_MS = 5000
+const POLL_MS = 15000
+const TELEMETRY_LIMIT = 750
+const LOG_TAIL_LIMIT = 400
+const LOG_DISPLAY_LIMIT = 600
+const LOG_FLUSH_MS = 500
 const CANONICAL_CHARTS = [
   { key: 'reward', label: 'Reward trend' },
   { key: 'episode_length', label: 'Episode length trend' },
@@ -125,6 +129,11 @@ function App() {
   const [autoScroll, setAutoScroll] = useState(true)
   const [copyState, setCopyState] = useState('')
   const terminalRef = useRef(null)
+  const healthRefreshInFlight = useRef(false)
+  const runsRefreshInFlight = useRef(false)
+  const selectedRefreshInFlight = useRef(false)
+  const pendingLogLines = useRef([])
+  const logFlushTimer = useRef(null)
 
   async function fetchJson(url, options) {
     const response = await fetch(url, options)
@@ -136,15 +145,21 @@ function App() {
   }
 
   async function refreshHealth() {
+    if (healthRefreshInFlight.current) return
+    healthRefreshInFlight.current = true
     try {
       const data = await fetchJson('/api/health')
       setHealth(data)
     } catch (error) {
       setHealth({ ok: false, problems: [error.message] })
+    } finally {
+      healthRefreshInFlight.current = false
     }
   }
 
   async function refreshRuns() {
+    if (runsRefreshInFlight.current) return
+    runsRefreshInFlight.current = true
     try {
       const data = await fetchJson('/api/runs')
       const nextRuns = data.runs || []
@@ -156,6 +171,8 @@ function App() {
       setApiError('')
     } catch (error) {
       setApiError(error.message)
+    } finally {
+      runsRefreshInFlight.current = false
     }
   }
 
@@ -165,16 +182,20 @@ function App() {
       setTelemetry([])
       return
     }
+    if (selectedRefreshInFlight.current) return
+    selectedRefreshInFlight.current = true
     try {
       const [run, points] = await Promise.all([
         fetchJson(`/api/runs/${id}`),
-        fetchJson(`/api/runs/${id}/telemetry?limit=3000`),
+        fetchJson(`/api/runs/${id}/telemetry?limit=${TELEMETRY_LIMIT}`),
       ])
       setDetail(run)
       setTelemetry(points.records || [])
       setApiError('')
     } catch (error) {
       setApiError(error.message)
+    } finally {
+      selectedRefreshInFlight.current = false
     }
   }
 
@@ -203,15 +224,24 @@ function App() {
     if (!selectedId) return undefined
     let cancelled = false
     setLogs([])
-    fetchJson(`/api/runs/${selectedId}/logs?tail=800`)
-      .then((data) => !cancelled && setLogs(data.lines || []))
+    pendingLogLines.current = []
+    fetchJson(`/api/runs/${selectedId}/logs?tail=${LOG_TAIL_LIMIT}`)
+      .then((data) => !cancelled && setLogs((data.lines || []).slice(-LOG_DISPLAY_LIMIT)))
       .catch(() => {})
     const source = new EventSource(`/api/runs/${selectedId}/logs/stream`)
+    const flushLogLines = () => {
+      logFlushTimer.current = null
+      const lines = pendingLogLines.current.splice(0)
+      if (lines.length) setLogs((current) => [...current, ...lines].slice(-LOG_DISPLAY_LIMIT))
+    }
     source.onmessage = (event) => {
       try {
         const value = JSON.parse(event.data)
         if (typeof value.line === 'string') {
-          setLogs((current) => [...current, value.line].slice(-1500))
+          pendingLogLines.current.push(value.line)
+          if (logFlushTimer.current === null) {
+            logFlushTimer.current = setTimeout(flushLogLines, LOG_FLUSH_MS)
+          }
         }
       } catch (_) {
         // Ignore malformed log events; the stream will continue.
@@ -220,6 +250,9 @@ function App() {
     return () => {
       cancelled = true
       source.close()
+      pendingLogLines.current = []
+      if (logFlushTimer.current !== null) clearTimeout(logFlushTimer.current)
+      logFlushTimer.current = null
     }
   }, [selectedId])
 

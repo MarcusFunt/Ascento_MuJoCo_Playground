@@ -5,10 +5,65 @@ from dashboard.health import (
     _pid_namespace,
     decorate_records,
     discover_dashboard_runs,
+    list_dashboard_summaries,
     load_dashboard_records,
     process_status,
     summarize_dashboard_run,
 )
+from dashboard.monitor import load_log_records, tail_lines
+
+
+def test_tail_lines_reads_the_requested_suffix_without_changing_line_shape(tmp_path):
+    log = tmp_path / "training.log"
+    log.write_text("first\nsecond\nthird\nfourth", encoding="utf-8")
+
+    assert tail_lines(log, 2) == ["third\n", "fourth"]
+
+
+def test_log_records_supply_recent_rsl_rl_metrics_without_tensorboard(tmp_path):
+    log = tmp_path / "training.log"
+    log.write_text(
+        "\x1b[1m Learning iteration 41/100 \x1b[0m\n"
+        "Total steps: 503808\n"
+        "Steps per second: 12345\n"
+        "Mean surrogate loss: -0.0125\n"
+        "Mean reward: 18.25\n"
+        "Mean episode length: 75.5\n",
+        encoding="utf-8",
+    )
+
+    records = load_log_records(tmp_path)
+
+    assert records == [
+        {
+            "completed_steps": 41,
+            "total_steps": 100,
+            "metrics": {
+                "total_environment_steps": 503808.0,
+                "Perf/total_fps": 12345.0,
+                "Loss/surrogate": -0.0125,
+                "Train/mean_reward": 18.25,
+                "Train/mean_episode_length": 75.5,
+            },
+        }
+    ]
+
+
+def test_run_list_defers_tensorboard_loading_until_a_run_is_selected(monkeypatch, tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run_status.json").write_text('{"state": "finished"}', encoding="utf-8")
+    (run_dir / "events.out.tfevents.synthetic").write_bytes(b"not-read-by-the-list")
+
+    monkeypatch.setattr(
+        "dashboard.health.load_dashboard_records",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected telemetry read")),
+    )
+
+    summaries = list_dashboard_summaries(tmp_path)
+
+    assert len(summaries) == 1
+    assert summaries[0]["telemetry"] is None
 
 
 def test_canonical_metrics_and_non_finite_detection(tmp_path):
