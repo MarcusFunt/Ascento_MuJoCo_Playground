@@ -435,6 +435,18 @@ def _run_batch(
             if not bool(active.any().item()):
                 break
 
+            # Some mjlab releases expose a terminal slot one loop late. Clear
+            # any pending manual resets before asking the backend for the next
+            # observation so evaluation remains deterministic and bounded.
+            pending = getattr(base_env, "_manual_reset_pending", None)
+            if isinstance(pending, torch.Tensor) and bool(pending.any().item()):
+                pending_ids = pending.nonzero(as_tuple=False).squeeze(-1)
+                base_env.reset(env_ids=pending_ids)
+                pending[pending_ids] = False
+                active[pending_ids] = False
+                for env_id in pending_ids.detach().cpu().tolist():
+                    termination_reason[env_id] = termination_reason[env_id] or "backend_timeout"
+
             _apply_commands(base_env, scenarios, step)
             twist_target = (
                 _command_target(scenarios, step, name="twist", dim=3, device=dev)
