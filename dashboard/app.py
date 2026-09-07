@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 import time
 
 from fastapi import FastAPI, HTTPException, Request
@@ -34,6 +35,12 @@ ARTIFACT_ROOT = CONFIG.artifact_root
 FRONTEND_DIST = CONFIG.frontend_dist
 RUN_SERVICE = RunService(ARTIFACT_ROOT, stale_after_seconds=CONFIG.stale_after_seconds)
 SUPERVISOR = SupervisorClient()
+
+# Artifact discovery walks a mounted training directory.  Keeping the annotated
+# list briefly avoids making every UI poll repeat that full filesystem scan.
+_SUMMARY_CACHE_TTL_S = 25.0
+_SUMMARY_CACHE_LOCK = threading.Lock()
+_SUMMARY_CACHE: tuple[float, list[dict]] | None = None
 
 app = FastAPI(title="Ascento Training Monitor", version="2.1")
 
@@ -98,7 +105,32 @@ def _artifact_health() -> list[str]:
     return problems
 
 
+def _invalidate_summary_cache() -> None:
+    global _SUMMARY_CACHE
+    with _SUMMARY_CACHE_LOCK:
+        _SUMMARY_CACHE = None
+
+
+def _cached_summary_count() -> int | None:
+    with _SUMMARY_CACHE_LOCK:
+        if _SUMMARY_CACHE is None:
+            return None
+        cached_at, summaries = _SUMMARY_CACHE
+        if time.monotonic() - cached_at >= _SUMMARY_CACHE_TTL_S:
+            return None
+        return len(summaries)
+
+
 def _annotated_summaries() -> list[dict]:
+    global _SUMMARY_CACHE
+    with _SUMMARY_CACHE_LOCK:
+        if _SUMMARY_CACHE is not None:
+            cached_at, summaries = _SUMMARY_CACHE
+            if time.monotonic() - cached_at < _SUMMARY_CACHE_TTL_S:
+                return list(summaries)
+
+    # Keep the lock out of the filesystem walk so a health request is never
+    # held behind a slow network or mounted-drive scan.
     summaries = list_dashboard_summaries(
         ARTIFACT_ROOT,
         stale_after_seconds=CONFIG.stale_after_seconds,
@@ -108,17 +140,20 @@ def _annotated_summaries() -> list[dict]:
         ref = refs.get(summary.get("id"))
         if ref is not None:
             RUN_SERVICE.annotate(summary, ref.path)
-    return summaries
+
+    with _SUMMARY_CACHE_LOCK:
+        _SUMMARY_CACHE = (time.monotonic(), summaries)
+    return list(summaries)
 
 
 @app.get("/api/health")
 def health():
     problems = _artifact_health()
-    try:
-        run_count = len(_annotated_summaries())
-    except OSError as error:
-        problems.append(f"artifact scan failed: {error}")
-        run_count = None
+    # Health is polled alongside /api/runs.  Do not make it perform a second
+    # full artifact traversal just to produce an informational count.
+    run_count = _cached_summary_count()
+    if run_count is None and not ARTIFACT_ROOT.exists():
+        run_count = 0
     return {
         "ok": not problems,
         "status": "ok" if not problems else "error",
@@ -190,7 +225,9 @@ def runs():
 @app.post("/api/runs", status_code=202)
 def create_run(request: RunCreateRequest):
     try:
-        return RUN_SERVICE.create(request.model_dump())
+        created = RUN_SERVICE.create(request.model_dump())
+        _invalidate_summary_cache()
+        return created
     except KeyError as error:
         raise HTTPException(
             status_code=400, detail=f"parent run not found: {error.args[0]}"
@@ -223,7 +260,9 @@ def run_status(run_id: str):
 @app.patch("/api/runs/{run_id}")
 def update_run(run_id: str, request: RunUpdateRequest):
     try:
-        return RUN_SERVICE.update_metadata(run_id, request.model_dump(exclude_unset=True))
+        updated = RUN_SERVICE.update_metadata(run_id, request.model_dump(exclude_unset=True))
+        _invalidate_summary_cache()
+        return updated
     except KeyError as error:
         raise HTTPException(
             status_code=404, detail="training run or parent run not found"
@@ -235,7 +274,9 @@ def update_run(run_id: str, request: RunUpdateRequest):
 @app.post("/api/runs/{run_id}/stop", status_code=202)
 def stop_run(run_id: str, request: RunStopRequest):
     try:
-        return RUN_SERVICE.stop(run_id, reason=request.reason.strip() or "user_requested")
+        stopped = RUN_SERVICE.stop(run_id, reason=request.reason.strip() or "user_requested")
+        _invalidate_summary_cache()
+        return stopped
     except KeyError as error:
         raise HTTPException(status_code=404, detail="training run not found") from error
     except ProcessLookupError as error:
