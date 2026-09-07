@@ -190,6 +190,7 @@ function App() {
   const [detail, setDetail] = useState(null)
   const [telemetry, setTelemetry] = useState([])
   const [telemetrySourceCount, setTelemetrySourceCount] = useState(0)
+  const [telemetryLoading, setTelemetryLoading] = useState(false)
   const [logs, setLogs] = useState([])
   const [health, setHealth] = useState(null)
   const [apiError, setApiError] = useState('')
@@ -248,10 +249,12 @@ function App() {
       setDetail(null)
       setTelemetry([])
       setTelemetrySourceCount(0)
+      setTelemetryLoading(false)
       return
     }
     if (selectedRefreshInFlight.current) return
     selectedRefreshInFlight.current = true
+    setTelemetryLoading(true)
     try {
       const [run, points] = await Promise.all([
         fetchJson(`/api/runs/${id}`),
@@ -266,6 +269,7 @@ function App() {
       setApiError(error.message)
     } finally {
       selectedRefreshInFlight.current = false
+      setTelemetryLoading(false)
     }
   }
 
@@ -491,11 +495,22 @@ function App() {
                 <div className="history-summary">
                   <span>{fmtNumber(telemetrySourceCount, 0)} source points</span>
                   <strong>{fmtNumber(chartRecords.length, 0)} drawn</strong>
+                  {!selectedRunIsLive && (
+                    <button
+                      type="button"
+                      disabled={telemetryLoading}
+                      onClick={() => refreshSelected(selectedId)}
+                    >
+                      {telemetryLoading ? 'Loading history…' : 'Refresh history'}
+                    </button>
+                  )}
                 </div>
               </section>
-              {availableCharts.length ? availableCharts.map((chart) => (
+              {telemetryLoading && chartRecords.length === 0
+                ? <section className="panel empty-panel" role="status">Loading complete telemetry history…</section>
+                : availableCharts.length ? availableCharts.map((chart) => (
                 <MetricChart key={chart.key} records={chartRecords} metric={chart.key} {...chart} />
-              )) : <section className="panel empty-panel">Waiting for reward/PPO telemetry…</section>}
+                )) : <section className="panel empty-panel">Waiting for reward/PPO telemetry…</section>}
             </div>
 
             <aside className="side-column">

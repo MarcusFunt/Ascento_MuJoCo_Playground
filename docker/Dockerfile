@@ -1,7 +1,9 @@
+# syntax=docker/dockerfile:1.7
 FROM node:20-bookworm-slim AS dashboard-frontend
 WORKDIR /frontend
 COPY dashboard/frontend/package.json dashboard/frontend/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,id=ascento-npm,target=/root/.npm \
+    npm ci --prefer-offline
 COPY dashboard/frontend/ ./
 RUN npm run build
 
@@ -30,7 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libosmesa6 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}"
+RUN --mount=type=cache,id=ascento-pip,target=/root/.cache/pip \
+    python -m pip install "uv==${UV_VERSION}"
 
 WORKDIR /workspace
 COPY pyproject.toml uv.lock README.md ./
@@ -43,7 +46,8 @@ COPY --from=dashboard-frontend /frontend/dist ./dashboard/frontend/dist
 
 # Install every optional extra that is compatible with the selected compute
 # backend, plus every dependency group. cpu/cu128 are mutually exclusive.
-RUN set -eu; \
+RUN --mount=type=cache,id=ascento-uv,target=/root/.cache/uv \
+    set -eu; \
     EXTRAS="$(python -c 'import sys,tomllib; data=tomllib.load(open("pyproject.toml","rb")); names=[name for name in (data.get("project",{}).get("optional-dependencies",{}) or {}) if name not in {"cpu","cu128"}]; names.append(sys.argv[1]); print(" ".join("--extra "+name for name in names))' "$COMPUTE_EXTRA")"; \
     uv sync --frozen --all-groups $EXTRAS
 
