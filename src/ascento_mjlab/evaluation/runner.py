@@ -696,7 +696,15 @@ def _run_batch(
                 _reset_finished_slots(base_env, policy, finish)
 
         if bool(active.any().item()):
-            raise RuntimeError("Evaluation loop ended with unfinished scenarios")
+            # The suite loop is bounded by the largest requested horizon. If
+            # a backend fails to emit a timeout exactly on that boundary,
+            # close those slots as explicit unsuccessful evaluations rather
+            # than leaving an ambiguous partial result or crashing the suite.
+            final_xy_snapshot[active] = prev_xy[active]
+            for env_id in active.nonzero(as_tuple=False).squeeze(-1).detach().cpu().tolist():
+                termination_reason[env_id] = termination_reason[env_id] or "evaluation_horizon"
+            _reset_finished_slots(base_env, policy, active)
+            active = torch.zeros_like(active)
 
         denom = episode_steps.clamp(min=1).float()
         net_displacement = torch.linalg.vector_norm(final_xy_snapshot - initial_xy, dim=1)
