@@ -15,6 +15,19 @@ ERROR_PATTERN = re.compile(
     r"(traceback|\berror\b|exception|floatingpointerror|non-finite|cuda.*fail|out of memory|oom)",
     re.IGNORECASE,
 )
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+LOG_ITERATION_RE = re.compile(r"Learning iteration\s+(\d+)/(\d+)")
+LOG_METRIC_PATTERNS = {
+    "Total steps": "total_environment_steps",
+    "Steps per second": "Perf/total_fps",
+    "Mean value loss": "Loss/value",
+    "Mean surrogate loss": "Loss/surrogate",
+    "Mean entropy loss": "Loss/entropy",
+    "Mean kl loss": "Loss/kl",
+    "Mean clip_fraction loss": "Loss/clip_fraction",
+    "Mean reward": "Train/mean_reward",
+    "Mean episode length": "Train/mean_episode_length",
+}
 RUN_MARKERS = (
     "telemetry.jsonl",
     "training.log",
@@ -26,6 +39,9 @@ _TENSORBOARD_RECORD_CACHE: dict[
     Path, tuple[tuple[tuple[str, int, int], ...], int | None, list[dict[str, Any]]]
 ] = {}
 _TENSORBOARD_LOCK = threading.Lock()
+_DISCOVERY_CACHE: dict[Path, tuple[float, list["RunRef"]]] = {}
+_DISCOVERY_LOCK = threading.Lock()
+_DISCOVERY_CACHE_TTL_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -159,8 +175,11 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
 
 
 def load_training_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
-    """Read legacy JSON telemetry or native RSL-RL TensorBoard telemetry."""
+    """Read JSON telemetry, lightweight console telemetry, or TensorBoard data."""
     records = load_jsonl(run_dir / "telemetry.jsonl", limit=limit)
+    if records:
+        return records
+    records = load_log_records(run_dir, limit=limit)
     return records if records else load_tensorboard_records(run_dir, limit=limit)
 
 
@@ -178,13 +197,66 @@ def training_log_path(run_dir: Path, root: Path | None = None) -> Path:
 
 
 def tail_lines(path: Path, count: int = 400) -> list[str]:
+    """Read only the requested tail instead of loading an entire training log."""
     if count <= 0 or not path.is_file():
         return []
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            return handle.readlines()[-count:]
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            position = handle.tell()
+            chunks: list[bytes] = []
+            newline_count = 0
+            while position > 0 and newline_count <= count:
+                start = max(0, position - 64 * 1024)
+                handle.seek(start)
+                chunk = handle.read(position - start)
+                chunks.append(chunk)
+                newline_count += chunk.count(b"\n")
+                position = start
     except OSError:
         return []
+    return b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines(keepends=True)[-count:]
+
+
+def load_log_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
+    """Extract recent trainer metrics from the bounded console tail.
+
+    RSL-RL writes every training statistic to stdout. Parsing that small tail
+    keeps the dashboard responsive while a TensorBoard file grows to hundreds of
+    megabytes on a mounted workspace. TensorBoard remains the fallback for runs
+    without the standard trainer output.
+    """
+    log_path = training_log_path(run_dir)
+    lines = tail_lines(log_path, 8000)
+    if not lines:
+        return []
+    records: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for raw_line in lines:
+        line = ANSI_ESCAPE_RE.sub("", raw_line).strip()
+        iteration = LOG_ITERATION_RE.search(line)
+        if iteration:
+            if current is not None:
+                records.append(current)
+            current = {
+                "completed_steps": int(iteration.group(1)),
+                "total_steps": int(iteration.group(2)),
+                "metrics": {},
+            }
+            continue
+        if current is None or ":" not in line:
+            continue
+        label, raw_value = (part.strip() for part in line.split(":", 1))
+        metric = LOG_METRIC_PATTERNS.get(label)
+        if metric is None:
+            continue
+        try:
+            current["metrics"][metric] = float(raw_value)
+        except ValueError:
+            continue
+    if current is not None:
+        records.append(current)
+    return records[-limit:] if limit is not None else records
 
 
 def error_excerpt(path: Path, max_lines: int = 80) -> list[str]:
@@ -203,22 +275,30 @@ def discover_runs(root: Path) -> list[RunRef]:
     root = root.expanduser().resolve()
     if not root.exists():
         return []
-    candidates: set[Path] = set()
-    if any((root / marker).exists() for marker in RUN_MARKERS):
-        candidates.add(root)
-    for marker in RUN_MARKERS:
-        for path in root.rglob(marker):
-            candidates.add(path.parent.resolve())
-    for pattern in ("events.out.tfevents.*", "model_*.pt"):
-        for path in root.rglob(pattern):
-            candidates.add(path.parent.resolve())
-    refs = []
-    for path in candidates:
-        if not _inside(path, root):
-            continue
-        relative = "." if path == root else path.relative_to(root).as_posix()
-        refs.append(RunRef(sha1(relative.encode("utf-8")).hexdigest()[:12], path, relative))
-    return sorted(refs, key=lambda ref: run_modified_time(ref.path), reverse=True)
+    now = time.monotonic()
+    with _DISCOVERY_LOCK:
+        cached = _DISCOVERY_CACHE.get(root)
+        if cached and now - cached[0] < _DISCOVERY_CACHE_TTL_S:
+            return list(cached[1])
+
+        candidates: set[Path] = set()
+        if any((root / marker).exists() for marker in RUN_MARKERS):
+            candidates.add(root)
+        for marker in RUN_MARKERS:
+            for path in root.rglob(marker):
+                candidates.add(path.parent.resolve())
+        for pattern in ("events.out.tfevents.*", "model_*.pt"):
+            for path in root.rglob(pattern):
+                candidates.add(path.parent.resolve())
+        refs = []
+        for path in candidates:
+            if not _inside(path, root):
+                continue
+            relative = "." if path == root else path.relative_to(root).as_posix()
+            refs.append(RunRef(sha1(relative.encode("utf-8")).hexdigest()[:12], path, relative))
+        result = sorted(refs, key=lambda ref: run_modified_time(ref.path), reverse=True)
+        _DISCOVERY_CACHE[root] = (time.monotonic(), result)
+        return list(result)
 
 
 def resolve_run(root: Path, run_id: str) -> RunRef:
@@ -229,6 +309,7 @@ def resolve_run(root: Path, run_id: str) -> RunRef:
 
 
 def run_modified_time(run_dir: Path) -> float:
+    """Use direct run markers; enumerating every checkpoint stalls mounted drives."""
     mtimes = []
     for marker in RUN_MARKERS:
         path = run_dir / marker
@@ -236,13 +317,17 @@ def run_modified_time(run_dir: Path) -> float:
             mtimes.append(path.stat().st_mtime)
         except OSError:
             pass
-    for pattern in ("events.out.tfevents.*", "model_*.pt"):
-        for path in run_dir.glob(pattern):
-            try:
-                mtimes.append(path.stat().st_mtime)
-            except OSError:
-                pass
-    return max(mtimes, default=run_dir.stat().st_mtime if run_dir.exists() else 0.0)
+    for path in run_dir.glob("events.out.tfevents.*"):
+        try:
+            mtimes.append(path.stat().st_mtime)
+        except OSError:
+            pass
+    if mtimes:
+        return max(mtimes)
+    try:
+        return run_dir.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _stage_name(
@@ -297,14 +382,22 @@ def latest_render(run_dir: Path) -> dict[str, Any] | None:
     return {"filename": path.name, "relative_path": path.relative_to(run_dir).as_posix()}
 
 
-def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[str, Any]:
+def summarize_run(
+    run_dir: Path,
+    root: Path,
+    now: float | None = None,
+    *,
+    include_telemetry: bool = True,
+    include_errors: bool = True,
+    include_artifacts: bool = True,
+) -> dict[str, Any]:
     now = time.time() if now is None else now
-    telemetry_records = load_training_records(run_dir, limit=1)
+    telemetry_records = load_training_records(run_dir, limit=1) if include_telemetry else []
     telemetry = telemetry_records[-1] if telemetry_records else None
     manifest = load_json(run_dir / "training_manifest.json")
     status = load_json(run_dir / "run_status.json") or {}
     log_path = training_log_path(run_dir, root)
-    errors = error_excerpt(log_path)
+    errors = error_excerpt(log_path) if include_errors else []
 
     state = status.get("state")
     if not state:
@@ -314,7 +407,9 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
             state = "error"
         elif telemetry and now - run_modified_time(run_dir) < 30:
             state = "running"
-        elif telemetry or (run_dir / "params" / "agent.yaml").is_file():
+        elif telemetry or (run_dir / "params" / "agent.yaml").is_file() or next(
+            run_dir.glob("model_*.pt"), None
+        ) is not None:
             state = "finished"
         else:
             state = "unknown"
@@ -333,10 +428,10 @@ def summarize_run(run_dir: Path, root: Path, now: float | None = None) -> dict[s
         "status": status,
         "telemetry": telemetry,
         "errors": errors,
-        "latest_render": latest_render(run_dir),
+        "latest_render": latest_render(run_dir) if include_artifacts else None,
         "has_log": log_path.is_file(),
-        "has_checkpoint": (run_dir / "checkpoint").is_dir()
-        or bool(list(run_dir.glob("model_*.pt"))),
+        "has_checkpoint": include_artifacts
+        and ((run_dir / "checkpoint").is_dir() or next(run_dir.glob("model_*.pt"), None) is not None),
     }
 
 
