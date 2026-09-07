@@ -8,6 +8,8 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from ascento_mjlab.geometry import projected_gravity_tilt
+
 
 @dataclass(frozen=True)
 class RecoveryEnvelope:
@@ -35,11 +37,7 @@ def recovery_condition(
     """Return whether each environment is presently inside the recovery envelope."""
     envelope = RecoveryEnvelope() if envelope is None else envelope
     asset: Entity = env.scene[asset_cfg.name]
-    gravity_xy = torch.linalg.vector_norm(asset.data.projected_gravity_b[:, :2], dim=1)
-    tilt = torch.atan2(
-        gravity_xy,
-        -asset.data.projected_gravity_b[:, 2].clamp(max=-1.0e-6),
-    )
+    tilt = projected_gravity_tilt(asset.data.projected_gravity_b)
     linear_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_b, dim=1)
     angular_speed = torch.linalg.vector_norm(asset.data.root_link_ang_vel_b, dim=1)
     supported = _sensor_contact(env, "left_wheel_contact") & _sensor_contact(
@@ -78,13 +76,24 @@ class RecoverySuccess:
 
 def recovery_progress(
     env,
+    envelope: RecoveryEnvelope | None = None,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """Smooth shaping toward an upright, low-velocity recovery state."""
+    envelope = RecoveryEnvelope() if envelope is None else envelope
     asset: Entity = env.scene[asset_cfg.name]
     upright = torch.exp(
-        -torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1) / 0.35**2
+        -torch.square(projected_gravity_tilt(asset.data.projected_gravity_b))
+        / envelope.max_tilt_radians**2
     )
     height = torch.exp(-torch.square(asset.data.root_link_pos_w[:, 2] - 0.75) / 0.10**2)
-    speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_b, dim=1)
-    return upright * height * torch.exp(-torch.square(speed) / 2.0**2)
+    linear_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_b, dim=1)
+    angular_speed = torch.linalg.vector_norm(asset.data.root_link_ang_vel_b, dim=1)
+    supported = _sensor_contact(env, "left_wheel_contact") & _sensor_contact(env, "right_wheel_contact")
+    return (
+        upright
+        * height
+        * torch.exp(-torch.square(linear_speed) / envelope.max_linear_speed**2)
+        * torch.exp(-torch.square(angular_speed) / envelope.max_angular_speed**2)
+        * supported.float()
+    )

@@ -232,8 +232,11 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
             ),
             "effort": RewardTermCfg(
                 func=ascento_mdp.rewards.effort_penalty,
-                weight=-0.0005,
-                params={"asset_cfg": ROBOT_CFG},
+                weight=-0.8,
+                params={
+                    "peak_effort_nm": PHYSICS_PROFILE.peak_effort_nm,
+                    "asset_cfg": ROBOT_CFG,
+                },
             ),
             "action_rate": RewardTermCfg(
                 func=ascento_mdp.rewards.action_rate_penalty, weight=-0.02

@@ -50,17 +50,18 @@ def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
     # rewards otherwise see the previous contact sample/phase on a transition.
     base_rewards = dict(cfg.rewards)
     base_rewards["height"] = RewardTermCfg(
-        func=ascento_mdp.rewards.jump_nominal_height_tracking,
+        func=ascento_mdp.rewards.jump_commanded_height_tracking,
         weight=1.0,
-        params={"target": 0.75, "std": 0.08, "asset_cfg": ROBOT_CFG},
+        params={"command_name": "motion", "std": 0.08, "asset_cfg": ROBOT_CFG},
     )
     base_rewards["angular_rate"] = RewardTermCfg(
         func=ascento_mdp.rewards.jump_angular_rate_penalty,
         weight=-0.04,
         params={"asset_cfg": ROBOT_CFG},
     )
-    base_rewards["planar_speed"] = RewardTermCfg(
-        func=ascento_mdp.rewards.jump_planar_speed_penalty,
+    base_rewards.pop("planar_speed", None)
+    base_rewards["lateral_speed"] = RewardTermCfg(
+        func=ascento_mdp.rewards.lateral_speed_penalty,
         weight=-0.2,
         params={"asset_cfg": ROBOT_CFG},
     )
@@ -78,10 +79,24 @@ def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
         "thrust": RewardTermCfg(
             func=ascento_mdp.rewards.jump_thrust,
             weight=1.2,
-            params={"asset_cfg": ROBOT_CFG},
+            params={"command_name": "motion", "asset_cfg": ROBOT_CFG},
+        ),
+        "track_forward_velocity": RewardTermCfg(
+            func=ascento_mdp.rewards.track_motion_forward_velocity,
+            weight=1.0,
+            params={"command_name": "motion", "std": 0.35, "asset_cfg": ROBOT_CFG},
+        ),
+        "track_yaw_rate": RewardTermCfg(
+            func=ascento_mdp.rewards.track_motion_yaw_rate,
+            weight=0.5,
+            params={"command_name": "motion", "std": 0.40, "asset_cfg": ROBOT_CFG},
         ),
         "takeoff": RewardTermCfg(func=ascento_mdp.rewards.jump_takeoff, weight=2.0),
         "landing": RewardTermCfg(func=ascento_mdp.rewards.jump_landing, weight=2.0),
+        "recovered_landing": RewardTermCfg(
+            func=ascento_mdp.rewards.jump_recovered_landing,
+            weight=1.0,
+        ),
         "landing_softness": RewardTermCfg(
             func=ascento_mdp.rewards.jump_landing_softness,
             weight=1.0,

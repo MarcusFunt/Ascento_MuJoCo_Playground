@@ -36,6 +36,7 @@ def initialize_jump_state(env, env_ids: torch.Tensor | None = None) -> None:
             "airborne": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
             "takeoff": torch.zeros(env.num_envs, device=env.device),
             "landing": torch.zeros(env.num_envs, device=env.device),
+            "recovered_landing": torch.zeros(env.num_envs, device=env.device),
             "air_time": torch.zeros(env.num_envs, device=env.device),
             "phase": torch.zeros(env.num_envs, dtype=torch.long, device=env.device),
             "phase_time": torch.zeros(env.num_envs, device=env.device),
@@ -51,12 +52,14 @@ def initialize_jump_state(env, env_ids: torch.Tensor | None = None) -> None:
             "takeoff_height": torch.zeros(env.num_envs, device=env.device),
             "last_airborne_vz": torch.zeros(env.num_envs, device=env.device),
             "landing_preimpact_vz": torch.zeros(env.num_envs, device=env.device),
+            "recovery_stable_time": torch.zeros(env.num_envs, device=env.device),
         }
     state = env.ascento_jump_state
     state["supported"][ids] = True
     state["airborne"][ids] = False
     state["takeoff"][ids] = 0.0
     state["landing"][ids] = 0.0
+    state["recovered_landing"][ids] = 0.0
     state["air_time"][ids] = 0.0
     state["phase"][ids] = PHASE_IDLE
     state["phase_time"][ids] = 0.0
@@ -80,6 +83,7 @@ def initialize_jump_state(env, env_ids: torch.Tensor | None = None) -> None:
     state["takeoff_height"][ids] = 0.0
     state["last_airborne_vz"][ids] = 0.0
     state["landing_preimpact_vz"][ids] = 0.0
+    state["recovery_stable_time"][ids] = 0.0
 
 
 def _wheel_contacts(env) -> tuple[torch.Tensor, torch.Tensor]:
@@ -141,18 +145,18 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
         )
         new_request = ids & request & ~state["attempt_active"]
 
-    if bool(new_request.any().item()):
-        state["attempt_active"][new_request] = True
-        state["has_taken_off"][new_request] = False
-        state["phase"][new_request] = PHASE_CROUCH
-        state["phase_time"][new_request] = 0.0
-        state["air_time"][new_request] = 0.0
-        state["limiting_wheel_clearance"][new_request] = 0.0
-        state["landing_preimpact_vz"][new_request] = 0.0
-        state["landing_distance_error"][new_request] = 1.0
-        if command is not None:
-            state["target_distance"][new_request] = command[new_request, 5]
-            state["remaining_distance"][new_request] = command[new_request, 5]
+    state["attempt_active"][new_request] = True
+    state["has_taken_off"][new_request] = False
+    state["phase"][new_request] = PHASE_CROUCH
+    state["phase_time"][new_request] = 0.0
+    state["air_time"][new_request] = 0.0
+    state["limiting_wheel_clearance"][new_request] = 0.0
+    state["landing_preimpact_vz"][new_request] = 0.0
+    state["landing_distance_error"][new_request] = 1.0
+    state["recovery_stable_time"][new_request] = 0.0
+    if command is not None:
+        state["target_distance"][new_request] = command[new_request, 5]
+        state["remaining_distance"][new_request] = command[new_request, 5]
 
     ticking = ids & state["attempt_active"] & ~new_request
     state["phase_time"][ticking] += dt
@@ -173,6 +177,7 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
 
     state["takeoff"][ids] = 0.0
     state["landing"][ids] = 0.0
+    state["recovered_landing"][ids] = 0.0
     state["takeoff"][takeoff] = 1.0
     state["landing"][landing] = 1.0
 
@@ -181,37 +186,33 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
     )
     state["air_time"][takeoff] = dt
 
-    if bool(takeoff.any().item()):
-        state["has_taken_off"][takeoff] = True
-        state["phase"][takeoff] = PHASE_FLIGHT
-        state["phase_time"][takeoff] = 0.0
-        state["takeoff_height"][takeoff] = root_pos[takeoff, 2]
-        state["takeoff_xy"][takeoff] = root_pos[takeoff, :2]
-        state["takeoff_forward_xy"][takeoff] = _forward_xy_from_quat(root_quat[takeoff])
+    state["has_taken_off"][takeoff] = True
+    state["phase"][takeoff] = PHASE_FLIGHT
+    state["phase_time"][takeoff] = 0.0
+    state["takeoff_height"][takeoff] = root_pos[takeoff, 2]
+    state["takeoff_xy"][takeoff] = root_pos[takeoff, :2]
+    state["takeoff_forward_xy"][takeoff] = _forward_xy_from_quat(root_quat[takeoff])
 
     has_reference = ids & state["attempt_active"] & state["has_taken_off"]
-    if bool(has_reference.any().item()):
-        displacement = root_pos[:, :2] - state["takeoff_xy"]
-        forward_distance = torch.sum(displacement * state["takeoff_forward_xy"], dim=1)
-        state["remaining_distance"][has_reference] = (
-            state["target_distance"][has_reference] - forward_distance[has_reference]
-        )
+    displacement = root_pos[:, :2] - state["takeoff_xy"]
+    forward_distance = torch.sum(displacement * state["takeoff_forward_xy"], dim=1)
+    state["remaining_distance"][has_reference] = (
+        state["target_distance"][has_reference] - forward_distance[has_reference]
+    )
 
     active_airborne = ids & state["attempt_active"] & airborne
-    if bool(active_airborne.any().item()):
-        # Share the tilt-aware cylinder-support calculation used for reset
-        # alignment. Centre-Z minus radius is only correct for an upright wheel.
-        limiting_now = flat_ground_wheel_bottom_heights(env).amin(dim=1)
-        state["limiting_wheel_clearance"][active_airborne] = torch.maximum(
-            state["limiting_wheel_clearance"][active_airborne], limiting_now[active_airborne]
-        )
-        state["last_airborne_vz"][active_airborne] = root_vz[active_airborne]
+    # Share the tilt-aware cylinder-support calculation used for reset
+    # alignment. Centre-Z minus radius is only correct for an upright wheel.
+    limiting_now = flat_ground_wheel_bottom_heights(env).amin(dim=1)
+    state["limiting_wheel_clearance"][active_airborne] = torch.maximum(
+        state["limiting_wheel_clearance"][active_airborne], limiting_now[active_airborne]
+    )
+    state["last_airborne_vz"][active_airborne] = root_vz[active_airborne]
 
-    if bool(landing.any().item()):
-        state["landing_preimpact_vz"][landing] = state["last_airborne_vz"][landing]
-        state["landing_distance_error"][landing] = -state["remaining_distance"][landing]
-        state["phase"][landing] = PHASE_LANDING
-        state["phase_time"][landing] = 0.0
+    state["landing_preimpact_vz"][landing] = state["last_airborne_vz"][landing]
+    state["landing_distance_error"][landing] = -state["remaining_distance"][landing]
+    state["phase"][landing] = PHASE_LANDING
+    state["phase_time"][landing] = 0.0
 
     landing_to_recovery = (
         ids
@@ -222,12 +223,19 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
     state["phase"][landing_to_recovery] = PHASE_RECOVERY
     state["phase_time"][landing_to_recovery] = 0.0
 
-    recovery_to_idle = (
-        ids
-        & state["attempt_active"]
-        & (state["phase"] == PHASE_RECOVERY)
-        & (state["phase_time"] >= RECOVERY_HOLD_S)
+    from .recovery import recovery_condition
+
+    recovery_stable = recovery_condition(env)
+    in_recovery = ids & state["attempt_active"] & (state["phase"] == PHASE_RECOVERY)
+    state["recovery_stable_time"][ids] = torch.where(
+        in_recovery[ids] & recovery_stable[ids],
+        state["recovery_stable_time"][ids] + dt,
+        torch.zeros_like(state["recovery_stable_time"][ids]),
     )
+    recovery_to_idle = (
+        in_recovery & (state["recovery_stable_time"] >= RECOVERY_HOLD_S)
+    )
+    state["recovered_landing"][recovery_to_idle] = 1.0
     failed_attempt = (
         ids
         & state["attempt_active"]
@@ -283,6 +291,7 @@ class JumpSemantics:
     takeoff_requires_both_wheels_airborne: bool = True
     landing_is_first_subsequent_wheel_contact: bool = True
     landing_impact_uses_precontact_vertical_speed: bool = True
+    recovered_landing_requires_stable_recovery: bool = True
     jump_distance_is_takeoff_heading_relative: bool = True
     clearance_uses_simultaneous_limiting_wheel: bool = True
     terrain_enabled: bool = False

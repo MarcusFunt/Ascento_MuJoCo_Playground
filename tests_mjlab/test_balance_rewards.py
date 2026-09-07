@@ -4,11 +4,17 @@ import pytest
 import torch
 
 from ascento_mjlab.mdp.events import OneShotPlanarVelocityPush, initialize_balance_origin
-from ascento_mjlab.mdp.rewards import leg_pose_symmetry_penalty, position_hold, settled_balance
+from ascento_mjlab.mdp.rewards import (
+    leg_pose_symmetry_penalty,
+    position_hold,
+    settled_balance,
+    upright,
+)
 
 
 def _env():
     robot = SimpleNamespace(
+        joint_names=("left_hip", "left_knee", "left_wheel", "right_hip", "right_knee", "right_wheel"),
         data=SimpleNamespace(
             root_link_pos_w=torch.tensor([[0.02, -0.01, 0.75]]),
             projected_gravity_b=torch.tensor([[0.0, 0.0, -1.0]]),
@@ -54,6 +60,25 @@ def test_soft_leg_symmetry_penalty_distinguishes_a_persistent_knee_offset():
     assert asymmetric.item() > 0.20
 
 
+def test_leg_symmetry_resolves_joint_pairs_by_name_not_model_order():
+    env = _env()
+    asset_cfg = SimpleNamespace(name="robot")
+    robot = env.scene["robot"]
+    robot.joint_names = (
+        "right_knee",
+        "left_wheel",
+        "right_hip",
+        "left_hip",
+        "right_wheel",
+        "left_knee",
+    )
+    robot.data.joint_pos[0] = torch.tensor([0.4, 0.0, 0.2, 0.2, 0.0, 0.4])
+
+    assert leg_pose_symmetry_penalty(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0)
+    robot.data.joint_pos[0, 0] += 0.55
+    assert leg_pose_symmetry_penalty(env, asset_cfg=asset_cfg).item() > 0.20
+
+
 def test_settled_balance_requires_both_wheels_and_gate_quality_motion():
     env = _env()
     asset_cfg = SimpleNamespace(name="robot")
@@ -61,6 +86,20 @@ def test_settled_balance_requires_both_wheels_and_gate_quality_motion():
     assert settled_balance(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
     env.scene["right_wheel_contact"].data.found.zero_()
     assert settled_balance(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0)
+
+
+def test_signed_tilt_rewards_reject_an_inverted_robot():
+    env = _env()
+    asset_cfg = SimpleNamespace(name="robot")
+
+    upright_score = upright(env, asset_cfg=asset_cfg)
+    settled_score = settled_balance(env, asset_cfg=asset_cfg)
+    env.scene["robot"].data.projected_gravity_b[0] = torch.tensor([0.0, 0.0, 1.0])
+
+    assert upright_score.item() == pytest.approx(1.0)
+    assert settled_score.item() == pytest.approx(1.0)
+    assert upright(env, asset_cfg=asset_cfg).item() < 1.0e-12
+    assert settled_balance(env, asset_cfg=asset_cfg).item() < 1.0e-12
 
 
 def test_one_shot_planar_push_matches_the_gate_disturbance_shape():

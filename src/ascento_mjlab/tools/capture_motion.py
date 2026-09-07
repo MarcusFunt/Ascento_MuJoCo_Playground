@@ -17,7 +17,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.wrappers import VideoRecorder
 
 import ascento_mjlab.tasks  # noqa: F401
-from ascento_mjlab.physics import PHYSICS_PROFILE
+from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
 
 
 def _jump_state_array(state: dict[str, torch.Tensor]) -> np.ndarray:
@@ -91,6 +91,14 @@ class MotionRecorder(RecorderTerm):
             if "landing_preimpact_vz" in env.ascento_jump_state:
                 frame["landing_preimpact_vz"] = (
                     env.ascento_jump_state["landing_preimpact_vz"][0].detach().cpu().numpy().copy()
+                )
+            if "recovered_landing" in env.ascento_jump_state:
+                frame["recovered_landing"] = (
+                    env.ascento_jump_state["recovered_landing"][0]
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    .copy()
                 )
         for command_name in ("motion", "twist"):
             try:
@@ -189,6 +197,7 @@ def main() -> None:
                 "checkpoint": str(args.checkpoint) if args.checkpoint is not None else "",
                 "model_sha256": checkpoint_hash,
                 "physics_profile": PHYSICS_PROFILE.name,
+                "reward_schema": REWARD_SCHEMA_VERSION,
                 "captured_steps": str(captured_steps),
                 "ended_on_done": str(ended_on_done).lower(),
             },

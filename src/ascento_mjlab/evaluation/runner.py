@@ -16,6 +16,7 @@ from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul
 
 import ascento_mjlab.tasks  # noqa: F401
 from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights, initialize_balance_origin
+from ascento_mjlab.physics import REWARD_SCHEMA_VERSION
 
 from .policy import RslRlPolicyAdapter
 from .schema import EpisodeResult, ScenarioSpec
@@ -723,6 +724,7 @@ def _run_batch(
             "num_envs": count,
             "robot_total_mass_kg": mass,
             "policy": asdict(policy.metadata()),
+            "reward_schema": REWARD_SCHEMA_VERSION,
         }
         return results, metadata
     finally:

@@ -7,6 +7,7 @@ from ascento_mjlab.mdp.commands import AscentoMotionCommandCfg
 from ascento_mjlab.mdp.jump import (
     PHASE_CROUCH,
     PHASE_FLIGHT,
+    PHASE_RECOVERY,
     JumpSemantics,
     initialize_jump_state,
     update_jump_state,
@@ -35,7 +36,10 @@ def _jump_env(*, step_dt: float = 0.01):
     robot_data = SimpleNamespace(
         root_link_pos_w=torch.tensor([[0.0, 0.0, 0.75]]),
         root_link_lin_vel_w=torch.zeros((1, 3)),
+        root_link_lin_vel_b=torch.zeros((1, 3)),
+        root_link_ang_vel_b=torch.zeros((1, 3)),
         root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        projected_gravity_b=torch.tensor([[0.0, 0.0, -1.0]]),
         body_link_pos_w=torch.tensor([[[0.0, 0.1, 0.25], [0.0, -0.1, 0.25]]]),
         body_link_quat_w=torch.tensor([[[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]]),
     )
@@ -69,6 +73,7 @@ def test_jump_semantics_keeps_terrain_behind_flat_ground_gate():
     assert semantics.takeoff_requires_both_wheels_airborne
     assert semantics.landing_is_first_subsequent_wheel_contact
     assert semantics.landing_impact_uses_precontact_vertical_speed
+    assert semantics.recovered_landing_requires_stable_recovery
     assert semantics.jump_distance_is_takeoff_heading_relative
     assert semantics.clearance_uses_simultaneous_limiting_wheel
     assert semantics.terrain_enabled is False
@@ -223,3 +228,17 @@ def test_clearance_uses_tilt_aware_cylinder_extent():
     assert env.ascento_jump_state["limiting_wheel_clearance"].item() == pytest.approx(
         0.2975, abs=1.0e-4
     )
+
+
+def test_recovered_landing_requires_the_full_stable_recovery_hold():
+    env, _, _, _, _ = _jump_env()
+    state = env.ascento_jump_state
+    state["attempt_active"][0] = True
+    state["has_taken_off"][0] = True
+    state["phase"][0] = PHASE_RECOVERY
+    state["recovery_stable_time"][0] = 0.49
+
+    update_jump_state(env)
+
+    assert state["recovered_landing"].item() == pytest.approx(1.0)
+    assert not state["attempt_active"].item()
