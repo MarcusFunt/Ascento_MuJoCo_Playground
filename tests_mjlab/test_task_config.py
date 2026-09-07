@@ -32,7 +32,7 @@ def test_balance_action_contract_reaches_40_nm_and_penalizes_drift():
     assert action_cfg.scale == 40.0
     assert action_cfg.clip == {".*": (-40.0, 40.0)}
     assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.2)
-    assert cfg.rewards["position_hold"].weight == pytest.approx(2.0)
+    assert cfg.rewards["position_hold"].weight == pytest.approx(4.0)
     assert cfg.rewards["settled_balance"].weight == pytest.approx(1.0)
     assert cfg.rewards["leg_pose_symmetry"].weight == pytest.approx(-2.0)
     assert "initialize_balance_origin" in cfg.events

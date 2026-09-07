@@ -58,6 +58,11 @@ ascento-evaluate-checkpoints 'logs/rsl_rl/.../model_*.pt' \
   --suite balance_dev_v1 --top 3
 ```
 
+For a balance run, include `model_best_long_horizon.pt` in the development
+screen, then run `balance_gate_v2` on the selected checkpoint. The curriculum
+retains this file after sustained 300-second training survival, but it is only a
+candidate until the deterministic gate passes.
+
 Compare two completed evaluations using paired scenario IDs:
 
 ```bash

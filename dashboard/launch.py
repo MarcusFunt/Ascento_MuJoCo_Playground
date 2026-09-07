@@ -23,8 +23,12 @@ GPU_WORLD_RE = re.compile(r"Launching training with\s+(\d+)\s+GPUs?", re.IGNOREC
 HORIZON_CURRICULUM_RE = re.compile(
     r"HORIZON_CURRICULUM\s+horizon_s=(?P<horizon>\S+)\s+stage=(?P<stage>\d+)"
     r"\s+qualified_windows=(?P<qualified>\d+)"
-    r"(?:\s+failed_windows=(?P<failed>\d+)\s+transition=(?P<transition>\S+))?"
+    r"(?:\s+failed_windows=(?P<failed>\d+))?"
+    r"(?:\s+stage_windows=(?P<stage_windows>\d+))?"
+    r"(?:\s+top_horizon_windows=(?P<top_windows>\d+))?"
+    r"(?:\s+transition=(?P<transition>\S+))?"
     r"(?:\s+timeout_fraction=(?P<timeout>\S+))?"
+    r"(?:\s+candidate_checkpoint=(?P<candidate>\S+))?"
 )
 
 
@@ -150,9 +154,16 @@ def _runtime_status_from_line(line: str) -> dict[str, Any]:
         values["horizon_qualified_windows"] = int(horizon.group("qualified"))
         if horizon.group("failed") is not None:
             values["horizon_failed_windows"] = int(horizon.group("failed"))
+        if horizon.group("stage_windows") is not None:
+            values["horizon_stage_windows"] = int(horizon.group("stage_windows"))
+        if horizon.group("top_windows") is not None:
+            values["horizon_top_windows"] = int(horizon.group("top_windows"))
+        if horizon.group("transition") is not None:
             values["horizon_transition"] = horizon.group("transition")
         if horizon.group("timeout") is not None:
             values["horizon_timeout_fraction"] = float(horizon.group("timeout"))
+        if horizon.group("candidate") is not None:
+            values["long_horizon_candidate_checkpoint"] = horizon.group("candidate")
     return values
 
 

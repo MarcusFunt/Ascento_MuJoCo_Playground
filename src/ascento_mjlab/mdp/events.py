@@ -131,11 +131,61 @@ def initialize_balance_origin(
     origin_xy[ids] = asset.data.root_link_pos_w[ids, :2]
 
 
+class OneShotPlanarVelocityPush:
+    """Apply one gate-shaped planar velocity kick per episode.
+
+    The built-in interval push samples all six root-velocity components every
+    few seconds. That makes a 300-second training episode a qualitatively
+    different task from the balance gate, which applies one cardinal planar
+    disturbance. This class uses EventManager's interval scheduling for the
+    first trigger, then ignores subsequent triggers until reset.
+    """
+
+    def __init__(self, cfg, env) -> None:
+        del cfg
+        self._pushed = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+        if env_ids is None:
+            self._pushed.fill_(False)
+        else:
+            self._pushed[env_ids] = False
+
+    def __call__(
+        self,
+        env,
+        env_ids: torch.Tensor | None,
+        *,
+        min_delta_v: float = 0.15,
+        max_delta_v: float = 0.45,
+        asset_cfg: SceneEntityCfg,
+    ) -> None:
+        if not (0.0 < min_delta_v <= max_delta_v):
+            raise ValueError("planar push requires 0 < min_delta_v <= max_delta_v")
+        ids = _resolved_env_ids(env, env_ids)
+        ids = ids[~self._pushed[ids]]
+        if ids.numel() == 0:
+            return
+
+        asset = env.scene[asset_cfg.name]
+        velocity = asset.data.root_link_vel_w[ids].clone()
+        magnitudes = torch.empty(ids.numel(), device=env.device).uniform_(min_delta_v, max_delta_v)
+        directions = torch.randint(0, 4, (ids.numel(),), device=env.device)
+        delta = torch.zeros((ids.numel(), 3), dtype=velocity.dtype, device=env.device)
+        axes = directions.remainder(2)
+        signs = torch.where(directions < 2, 1.0, -1.0).to(dtype=velocity.dtype)
+        delta[torch.arange(ids.numel(), device=env.device), axes] = magnitudes * signs
+        velocity[:, :3] += delta
+        asset.write_root_link_velocity_to_sim(velocity, env_ids=ids)
+        self._pushed[ids] = True
+
+
 __all__ = [
     "DEFAULT_WHEEL_HALF_WIDTH_M",
     "DEFAULT_WHEEL_RADIUS_M",
     "flat_ground_wheel_bottom_heights",
     "initialize_balance_origin",
+    "OneShotPlanarVelocityPush",
     "reset_root_state_supported",
     "reset_root_state_uniform",
 ]

@@ -167,22 +167,18 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
         ),
     }
     if not play:
-        # The authoritative balance gate applies lateral impulses after the
-        # policy has settled.  Train the same recovery behavior without adding
-        # disturbances to deterministic play/evaluation environments.
+        # The authoritative balance gate applies one cardinal planar impulse
+        # after the policy has settled. Keep training aligned with that contract;
+        # a repeating six-axis interval push makes 300-second episodes a
+        # different task from the evaluator.
         events["balance_push"] = EventTermCfg(
-            func=mdp.push_by_setting_velocity,
+            func=ascento_mdp.events.OneShotPlanarVelocityPush,
             mode="interval",
-            interval_range_s=(3.0, 6.0),
+            interval_range_s=(4.0, 6.0),
             params={
-                "velocity_range": {
-                    "x": (-0.45, 0.45),
-                    "y": (-0.45, 0.45),
-                    "z": (0.0, 0.0),
-                    "roll": (-0.25, 0.25),
-                    "pitch": (-0.35, 0.35),
-                    "yaw": (-0.20, 0.20),
-                }
+                "min_delta_v": 0.15,
+                "max_delta_v": 0.45,
+                "asset_cfg": ROBOT_CFG,
             },
         )
     cfg = ManagerBasedRlEnvCfg(
@@ -221,7 +217,7 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
             ),
             "position_hold": RewardTermCfg(
                 func=ascento_mdp.rewards.position_hold,
-                weight=2.0,
+                weight=4.0,
                 params={"std": 0.50, "asset_cfg": ROBOT_CFG},
             ),
             "settled_balance": RewardTermCfg(

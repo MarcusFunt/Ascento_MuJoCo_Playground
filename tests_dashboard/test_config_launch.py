@@ -71,15 +71,19 @@ def test_launcher_extracts_runtime_device_seed_and_world_size():
         "horizon_timeout_fraction": 0.9219,
     }
     assert _runtime_status_from_line(
-        "HORIZON_CURRICULUM horizon_s=60.0 stage=2 qualified_windows=0 "
-        "failed_windows=1 transition=held timeout_fraction=0.4219"
+        "HORIZON_CURRICULUM horizon_s=300.0 stage=4 qualified_windows=0 "
+        "failed_windows=0 stage_windows=4 top_horizon_windows=3 transition=protected "
+        "timeout_fraction=0.4219 candidate_checkpoint=model_best_long_horizon.pt"
     ) == {
-        "episode_horizon_s": 60.0,
-        "horizon_stage": 2,
+        "episode_horizon_s": 300.0,
+        "horizon_stage": 4,
         "horizon_qualified_windows": 0,
-        "horizon_failed_windows": 1,
-        "horizon_transition": "held",
+        "horizon_failed_windows": 0,
+        "horizon_stage_windows": 4,
+        "horizon_top_windows": 3,
+        "horizon_transition": "protected",
         "horizon_timeout_fraction": 0.4219,
+        "long_horizon_candidate_checkpoint": "model_best_long_horizon.pt",
     }
 
 

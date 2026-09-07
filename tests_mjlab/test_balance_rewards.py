@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from ascento_mjlab.mdp.events import initialize_balance_origin
+from ascento_mjlab.mdp.events import OneShotPlanarVelocityPush, initialize_balance_origin
 from ascento_mjlab.mdp.rewards import leg_pose_symmetry_penalty, position_hold, settled_balance
 
 
@@ -61,3 +61,41 @@ def test_settled_balance_requires_both_wheels_and_gate_quality_motion():
     assert settled_balance(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
     env.scene["right_wheel_contact"].data.found.zero_()
     assert settled_balance(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0)
+
+
+def test_one_shot_planar_push_matches_the_gate_disturbance_shape():
+    root_velocity = torch.zeros((4, 6))
+    writes = []
+
+    def write_root_link_velocity_to_sim(velocity, env_ids):
+        root_velocity[env_ids] = velocity
+        writes.append(env_ids.clone())
+
+    env = SimpleNamespace(
+        num_envs=4,
+        device="cpu",
+        scene={
+            "robot": SimpleNamespace(
+                data=SimpleNamespace(root_link_vel_w=root_velocity),
+                write_root_link_velocity_to_sim=write_root_link_velocity_to_sim,
+            )
+        },
+    )
+    push = OneShotPlanarVelocityPush(SimpleNamespace(), env)
+    asset_cfg = SimpleNamespace(name="robot")
+    torch.manual_seed(7)
+
+    push(env, torch.arange(4), min_delta_v=0.15, max_delta_v=0.45, asset_cfg=asset_cfg)
+
+    planar = root_velocity[:, :2]
+    assert torch.all((planar != 0).sum(dim=1) == 1)
+    assert torch.all((planar.abs().sum(dim=1) >= 0.15) & (planar.abs().sum(dim=1) <= 0.45))
+    assert torch.equal(root_velocity[:, 2:], torch.zeros((4, 4)))
+    assert len(writes) == 1
+
+    push(env, torch.arange(4), min_delta_v=0.15, max_delta_v=0.45, asset_cfg=asset_cfg)
+    assert len(writes) == 1
+
+    push.reset(torch.tensor([1, 3]))
+    push(env, torch.arange(4), min_delta_v=0.15, max_delta_v=0.45, asset_cfg=asset_cfg)
+    assert torch.equal(writes[-1], torch.tensor([1, 3]))
