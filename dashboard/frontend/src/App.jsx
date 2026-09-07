@@ -10,17 +10,47 @@ import {
 } from 'recharts'
 
 const POLL_MS = 15000
-const TELEMETRY_LIMIT = 750
+const CHART_RENDER_POINTS = 1200
 const LOG_TAIL_LIMIT = 400
 const LOG_DISPLAY_LIMIT = 600
 const LOG_FLUSH_MS = 500
 const CANONICAL_CHARTS = [
-  { key: 'reward', label: 'Reward trend' },
-  { key: 'episode_length', label: 'Episode length trend' },
-  { key: 'ppo_loss', label: 'PPO / surrogate loss' },
-  { key: 'entropy', label: 'Entropy' },
-  { key: 'kl', label: 'KL divergence' },
-  { key: 'clip_fraction', label: 'Clip fraction' },
+  {
+    key: 'reward',
+    label: 'Reward',
+    description: 'The task score the policy is optimizing. Read the trend over many iterations, not individual spikes.',
+    interpretation: 'Up is usually good. A sustained fall means the policy is performing worse under the current reward definition.',
+  },
+  {
+    key: 'episode_length',
+    label: 'Episode length',
+    description: 'How long episodes last before termination or timeout. For balance and survival tasks this is a useful stability signal.',
+    interpretation: 'Up usually means the robot survives longer; down usually means earlier failures. A flat ceiling can simply mean episodes hit the configured horizon.',
+  },
+  {
+    key: 'ppo_loss',
+    label: 'PPO / surrogate loss',
+    description: 'The policy optimization objective used by PPO. Its absolute value is not a score and should not be minimized visually.',
+    interpretation: 'Neither direction is automatically better. Smooth, bounded movement is normal; large persistent jumps can indicate unstable updates.',
+  },
+  {
+    key: 'entropy',
+    label: 'Entropy',
+    description: 'How random or exploratory the policy is. Higher entropy means actions remain less deterministic.',
+    interpretation: 'A gradual decline is common as the policy settles. A sudden collapse can mean exploration disappeared too early; sustained growth can mean the policy is not settling.',
+  },
+  {
+    key: 'kl',
+    label: 'KL divergence',
+    description: 'How far the updated policy moved from the previous policy during PPO optimization.',
+    interpretation: 'Up means larger policy changes. Repeated spikes can signal overly aggressive updates; values near zero mean updates are very small.',
+  },
+  {
+    key: 'clip_fraction',
+    label: 'Clip fraction',
+    description: 'The fraction of PPO samples whose policy-ratio update hit the clipping boundary.',
+    interpretation: 'Up means more updates are being clipped. Persistently high values can mean policy steps are too aggressive; very low values mean updates are more conservative.',
+  },
 ]
 
 function fmtNumber(value, digits = 1) {
@@ -53,6 +83,14 @@ function shortCommit(value) {
   return String(value).slice(0, 10)
 }
 
+function sampleRecords(records, maxPoints) {
+  if (records.length <= maxPoints) return records
+  const lastIndex = records.length - 1
+  return Array.from({ length: maxPoints }, (_, index) => (
+    records[Math.round(index * lastIndex / (maxPoints - 1))]
+  ))
+}
+
 function StateBadge({ state }) {
   return <span className={`state-badge state-${state || 'unknown'}`}>{state || 'unknown'}</span>
 }
@@ -63,16 +101,37 @@ function ApiBadge({ health }) {
   return <span className={`api-badge ${health.ok ? 'api-ok' : 'api-bad'}`}>{label}</span>
 }
 
-function MetricChart({ records, metric, label }) {
+function MetricChart({ records, metric, label, description, interpretation }) {
+  const latestRecord = [...records].reverse().find((record) => Number.isFinite(Number(record[metric])))
+  const latestValue = latestRecord?.[metric]
+
   return (
     <section className="panel metric-panel">
-      <div className="panel-title">{label}</div>
+      <div className="metric-header">
+        <div>
+          <div className="panel-title metric-title">{label}</div>
+          <div className="metric-copy">{description}</div>
+        </div>
+        <div className="metric-latest">
+          <span>Latest</span>
+          <strong>{fmtNumber(latestValue, 5)}</strong>
+        </div>
+      </div>
       <div className="chart-wrap">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={records} margin={{ top: 8, right: 14, left: -8, bottom: 0 }}>
+          <LineChart data={records} margin={{ top: 8, right: 12, left: -4, bottom: 2 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="iteration" tickFormatter={(value) => fmtNumber(value, 0)} minTickGap={24} />
-            <YAxis width={58} tickFormatter={(value) => fmtNumber(value, 3)} domain={['auto', 'auto']} />
+            <XAxis
+              dataKey="iteration"
+              type="number"
+              scale="linear"
+              domain={['dataMin', 'dataMax']}
+              allowDataOverflow={false}
+              tickFormatter={(value) => fmtNumber(value, 0)}
+              minTickGap={36}
+              tickCount={6}
+            />
+            <YAxis width={62} tickFormatter={(value) => fmtNumber(value, 3)} domain={['auto', 'auto']} />
             <Tooltip
               formatter={(value) => fmtNumber(value, 6)}
               labelFormatter={(iteration) => `Iteration ${fmtNumber(iteration, 0)}`}
@@ -82,11 +141,16 @@ function MetricChart({ records, metric, label }) {
               dataKey={metric}
               dot={false}
               isAnimationActive={false}
-              strokeWidth={2}
+              stroke="var(--chart-line)"
+              strokeWidth={2.25}
               connectNulls
             />
           </LineChart>
         </ResponsiveContainer>
+      </div>
+      <div className="metric-guidance">
+        <span>How to read movement</span>
+        <p>{interpretation}</p>
       </div>
     </section>
   )
@@ -123,6 +187,7 @@ function App() {
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [telemetry, setTelemetry] = useState([])
+  const [telemetrySourceCount, setTelemetrySourceCount] = useState(0)
   const [logs, setLogs] = useState([])
   const [health, setHealth] = useState(null)
   const [apiError, setApiError] = useState('')
@@ -180,6 +245,7 @@ function App() {
     if (!id) {
       setDetail(null)
       setTelemetry([])
+      setTelemetrySourceCount(0)
       return
     }
     if (selectedRefreshInFlight.current) return
@@ -187,10 +253,12 @@ function App() {
     try {
       const [run, points] = await Promise.all([
         fetchJson(`/api/runs/${id}`),
-        fetchJson(`/api/runs/${id}/telemetry?limit=${TELEMETRY_LIMIT}`),
+        fetchJson(`/api/runs/${id}/telemetry?max_points=${CHART_RENDER_POINTS}`),
       ])
+      const records = points.records || []
       setDetail(run)
-      setTelemetry(points.records || [])
+      setTelemetry(records)
+      setTelemetrySourceCount(points.source_records ?? records.length)
       setApiError('')
     } catch (error) {
       setApiError(error.message)
@@ -262,14 +330,14 @@ function App() {
     }
   }, [logs, autoScroll])
 
-  const chartRecords = useMemo(
-    () => telemetry.map((record) => ({
+  const chartRecords = useMemo(() => {
+    const records = telemetry.map((record) => ({
       iteration: record.iteration ?? record.completed_steps,
       ...(record.metrics || {}),
       ...(record.canonical_metrics || {}),
-    })),
-    [telemetry],
-  )
+    })).filter((record) => Number.isFinite(Number(record.iteration)))
+    return sampleRecords(records, CHART_RENDER_POINTS)
+  }, [telemetry])
 
   const availableCharts = useMemo(
     () => CANONICAL_CHARTS.filter(({ key }) => (
@@ -403,8 +471,22 @@ function App() {
 
           <section className="content-grid">
             <div className="charts-grid">
-              {availableCharts.length ? availableCharts.map(({ key, label }) => (
-                <MetricChart key={key} records={chartRecords} metric={key} label={label} />
+              <section className="panel charts-intro">
+                <div>
+                  <div className="section-kicker">Learning curves</div>
+                  <div className="charts-intro-title">Read the whole run, not just the latest window</div>
+                  <p>
+                    The x-axis spans the oldest to newest available iteration and compresses as training grows.
+                    Long runs are sampled evenly for display, so early training does not roll off the left side.
+                  </p>
+                </div>
+                <div className="history-summary">
+                  <span>{fmtNumber(telemetrySourceCount, 0)} source points</span>
+                  <strong>{fmtNumber(chartRecords.length, 0)} drawn</strong>
+                </div>
+              </section>
+              {availableCharts.length ? availableCharts.map((chart) => (
+                <MetricChart key={chart.key} records={chartRecords} metric={chart.key} {...chart} />
               )) : <section className="panel empty-panel">Waiting for reward/PPO telemetry…</section>}
             </div>
 
