@@ -194,6 +194,7 @@ Read/monitor endpoints:
 - `GET /api/system`
 - `GET /api/runs`
 - `GET /api/runs/<id>`
+- `GET /api/runs/<id>/progress` — cheap latest live snapshot for polling
 - `GET /api/runs/<id>/summary.json`
 - `GET /api/runs/<id>/telemetry`
 - `GET /api/runs/<id>/logs`
