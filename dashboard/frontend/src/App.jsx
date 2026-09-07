@@ -10,7 +10,9 @@ import {
 } from 'recharts'
 
 const POLL_MS = 15000
-const CHART_RENDER_POINTS = 1200
+// Six SVG charts redraw together.  This cap keeps interactions responsive
+// while even sampling retains the full oldest-to-newest history span.
+const CHART_RENDER_POINTS = 400
 const LOG_TAIL_LIMIT = 400
 const LOG_DISPLAY_LIMIT = 600
 const LOG_FLUSH_MS = 500
@@ -267,6 +269,9 @@ function App() {
     }
   }
 
+  const selectedRunState = runs.find((run) => run.id === selectedId)?.state
+  const selectedRunIsLive = ['starting', 'running', 'stopping'].includes(selectedRunState)
+
   useEffect(() => {
     refreshHealth()
     refreshRuns()
@@ -284,9 +289,12 @@ function App() {
     }
     setCopyState('')
     refreshSelected(selectedId)
+    // Archived runs have immutable telemetry. Re-reading their logs every
+    // poll is expensive on a mounted workspace without yielding newer data.
+    if (!selectedRunIsLive) return undefined
     const timer = setInterval(() => refreshSelected(selectedId), POLL_MS)
     return () => clearInterval(timer)
-  }, [selectedId])
+  }, [selectedId, selectedRunIsLive])
 
   useEffect(() => {
     if (!selectedId) return undefined

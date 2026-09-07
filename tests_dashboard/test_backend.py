@@ -40,6 +40,20 @@ def test_dashboard_starts_before_read_only_artifact_root_exists(monkeypatch, tmp
     assert module.runs() == {"runs": []}
 
 
+def test_health_does_not_trigger_an_expensive_run_summary_scan(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        module,
+        "_annotated_summaries",
+        lambda: (_ for _ in ()).throw(AssertionError("health should not scan runs")),
+    )
+
+    health = module.health()
+
+    assert health["ok"] is True
+    assert health["run_count"] is None
+
+
 def test_run_summary_download_is_json_safe(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
     run_dir = tmp_path / "run"
