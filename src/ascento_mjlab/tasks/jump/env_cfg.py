@@ -97,6 +97,10 @@ def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
             func=ascento_mdp.rewards.jump_recovered_landing,
             weight=1.0,
         ),
+        "post_landing_stability": RewardTermCfg(
+            func=ascento_mdp.rewards.jump_post_landing_stability,
+            weight=1.5,
+        ),
         "landing_softness": RewardTermCfg(
             func=ascento_mdp.rewards.jump_landing_softness,
             weight=1.0,

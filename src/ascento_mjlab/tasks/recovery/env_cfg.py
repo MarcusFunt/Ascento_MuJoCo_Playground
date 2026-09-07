@@ -54,6 +54,10 @@ def ascento_recovery_env_cfg(play: bool = False, num_envs: int = 512):
         func=ascento_mdp.recovery.recovery_progress,
         weight=2.0,
     )
+    cfg.rewards["recovery_dwell"] = RewardTermCfg(
+        func=ascento_mdp.recovery.recovery_dwell,
+        weight=1.0,
+    )
     cfg.metrics["recovery_success"] = MetricsTermCfg(
         func=ascento_mdp.recovery.RecoverySuccess,
     )

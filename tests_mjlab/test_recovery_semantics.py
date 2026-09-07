@@ -1,9 +1,16 @@
 from math import cos, sin
 from types import SimpleNamespace
 
+import pytest
 import torch
 
-from ascento_mjlab.mdp.recovery import RecoveryEnvelope, RecoverySuccess, recovery_condition
+from ascento_mjlab.mdp.recovery import (
+    RecoveryEnvelope,
+    RecoverySuccess,
+    recovery_condition,
+    recovery_dwell,
+    recovery_progress,
+)
 
 
 def _recovery_env(*, step_dt: float = 0.01):
@@ -94,3 +101,14 @@ def test_recovery_success_uses_an_overridden_envelope_duration():
     assert metric(env, short).item() == 0.0
     assert metric(env, short).item() == 0.0
     assert metric(env, short).item() == 1.0
+
+
+def test_recovery_shaping_is_dense_and_dwell_only_inside_strict_envelope():
+    env, robot, left, right = _recovery_env()
+
+    assert recovery_progress(env).item() == pytest.approx(1.0)
+    assert recovery_dwell(env).item() == pytest.approx(1.0)
+
+    robot.root_link_pos_w[0, 2] = RecoveryEnvelope().min_height - 0.01
+    assert recovery_progress(env).item() > 0.0
+    assert recovery_dwell(env).item() == pytest.approx(0.0)

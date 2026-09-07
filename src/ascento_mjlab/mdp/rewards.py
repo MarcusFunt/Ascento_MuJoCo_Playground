@@ -378,6 +378,26 @@ def jump_recovered_landing(env: ManagerBasedRlEnv) -> torch.Tensor:
     return _event_impulse(env, env.ascento_jump_state["recovered_landing"])
 
 
+def jump_post_landing_stability(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Dense proximity/dwell shaping while completing post-landing recovery.
+
+    The strict ``recovered_landing`` event remains the only binary success
+    signal.  This reward only supplies per-step credit during the recovery
+    phase, increasing as the continuous stable hold progresses.
+    """
+    from .jump import PHASE_RECOVERY, RECOVERY_HOLD_S
+    from .recovery import recovery_proximity
+
+    state = env.ascento_jump_state
+    in_recovery = (state["phase"] == PHASE_RECOVERY).float()
+    proximity = recovery_proximity(env, asset_cfg=asset_cfg)
+    hold_progress = (state["recovery_stable_time"] / RECOVERY_HOLD_S).clamp(0.0, 1.0)
+    return in_recovery * proximity * (0.25 + 0.75 * hold_progress)
+
+
 def jump_distance_tracking(env: ManagerBasedRlEnv, std: float = 0.08) -> torch.Tensor:
     """Score heading-relative landing displacement against the requested distance."""
     if std <= 0.0:

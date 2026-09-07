@@ -74,12 +74,12 @@ class RecoverySuccess:
         self._stable_steps[ids] = 0
 
 
-def recovery_progress(
+def recovery_proximity(
     env,
     envelope: RecoveryEnvelope | None = None,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """Smooth shaping toward an upright, low-velocity recovery state."""
+    """Dense proximity shaping toward the recovery envelope."""
     envelope = RecoveryEnvelope() if envelope is None else envelope
     asset: Entity = env.scene[asset_cfg.name]
     upright = torch.exp(
@@ -97,3 +97,29 @@ def recovery_progress(
         * torch.exp(-torch.square(angular_speed) / envelope.max_angular_speed**2)
         * supported.float()
     )
+
+
+def recovery_progress(
+    env,
+    envelope: RecoveryEnvelope | None = None,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Backward-compatible name for the dense recovery proximity score."""
+    return recovery_proximity(env, envelope=envelope, asset_cfg=asset_cfg)
+
+
+def recovery_dwell(
+    env,
+    envelope: RecoveryEnvelope | None = None,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Reward every stable step inside the strict recovery envelope.
+
+    This is intentionally a per-step shaping term, not the binary success
+    metric.  Accumulating it over consecutive stable transitions gives PPO a
+    temporal credit signal for dwelling in the envelope while
+    :class:`RecoverySuccess` remains unchanged for evaluation.
+    """
+    envelope = RecoveryEnvelope() if envelope is None else envelope
+    proximity = recovery_proximity(env, envelope=envelope, asset_cfg=asset_cfg)
+    return proximity * recovery_condition(env, envelope, asset_cfg=asset_cfg).float()
