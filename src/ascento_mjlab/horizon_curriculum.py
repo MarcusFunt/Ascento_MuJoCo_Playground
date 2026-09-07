@@ -53,6 +53,7 @@ class HorizonCurriculumRunner(MjlabOnPolicyRunner):
         self._stage_windows = 0
         self._top_horizon_success_windows = 0
         self._best_top_horizon_timeout_fraction = -1.0
+        self._pending_completion_outcomes: list[bool] = []
         self._base_step: Callable[[torch.Tensor], tuple[Any, torch.Tensor, torch.Tensor, dict]] = env.step
         env.step = self._step  # type: ignore[method-assign]
         self._emit_status(timeout_fraction=None)
@@ -74,11 +75,25 @@ class HorizonCurriculumRunner(MjlabOnPolicyRunner):
         timeouts = self.env.unwrapped.reset_time_outs
         completed = int(dones.sum().item())
         if completed:
-            self._completed_in_window += completed
-            self._timeouts_in_window += int((timeouts & dones.bool()).sum().item())
-            if self._completed_in_window >= self.completion_window_episodes:
-                self._evaluate_completion_window()
+            timeout_count = int((timeouts & dones.bool()).sum().item())
+            self._record_completion_batch(completed, timeout_count)
         return observations, rewards, dones, extras
+
+    def _record_completion_batch(self, completed: int, timeout_count: int) -> None:
+        """Queue aggregate completions and evaluate only complete windows."""
+        if completed < 0 or timeout_count < 0 or timeout_count > completed:
+            raise ValueError("completion counts must satisfy 0 <= timeouts <= completed")
+        # The simulator exposes aggregate counts rather than completion order;
+        # timeout outcomes are queued first, deterministically, while preserving
+        # both totals and every remainder across vectorized-step boundaries.
+        self._pending_completion_outcomes.extend([True] * timeout_count)
+        self._pending_completion_outcomes.extend([False] * (completed - timeout_count))
+        while len(self._pending_completion_outcomes) >= self.completion_window_episodes:
+            window = self._pending_completion_outcomes[: self.completion_window_episodes]
+            del self._pending_completion_outcomes[: self.completion_window_episodes]
+            self._completed_in_window = self.completion_window_episodes
+            self._timeouts_in_window = sum(window)
+            self._evaluate_completion_window()
 
     def _evaluate_completion_window(self) -> None:
         timeout_fraction = self._timeouts_in_window / self._completed_in_window

@@ -22,13 +22,27 @@ def _capture() -> dict[str, np.ndarray]:
     }
 
 
-def test_detect_events_uses_two_wheel_contact_transitions():
+def test_detect_events_uses_first_wheel_contact_transitions():
     events = detect_events(_capture())
     assert [(event["name"], event["frame"]) for event in events] == [
         ("start", 0),
         ("end", 9),
         ("takeoff", 3),
         ("landing", 7),
+    ]
+
+
+def test_detect_events_fallback_accepts_a_one_wheel_landing():
+    capture = {
+        "time": np.asarray([0.0, 0.1, 0.2, 0.3]),
+        "contacts": np.asarray([[1, 0], [0, 0], [1, 0], [1, 1]], dtype=np.float32),
+    }
+    events = detect_events(capture)
+    assert [(event["name"], event["frame"]) for event in events] == [
+        ("start", 0),
+        ("end", 3),
+        ("takeoff", 1),
+        ("landing", 2),
     ]
 
 

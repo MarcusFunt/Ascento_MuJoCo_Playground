@@ -32,6 +32,7 @@ def _runner(horizon_s=20.0, log_dir=None):
     runner._stage_windows = 0
     runner._top_horizon_success_windows = 0
     runner._best_top_horizon_timeout_fraction = -1.0
+    runner._pending_completion_outcomes = []
     runner.current_learning_iteration = 123
     runner.logger = SimpleNamespace(log_dir=str(log_dir) if log_dir is not None else None)
     return runner
@@ -71,6 +72,27 @@ def test_horizon_resets_the_streak_after_a_failing_window(monkeypatch):
 
     assert runner._successful_windows == 0
     assert runner.env.unwrapped.cfg.episode_length_s == HORIZON_SCHEDULE_S[0]
+
+
+def test_horizon_rollover_preserves_surplus_completions(monkeypatch):
+    runner = _runner()
+    monkeypatch.setattr(runner, "_emit_status", lambda **_: None)
+    windows = []
+
+    def evaluate_window():
+        windows.append((runner._completed_in_window, runner._timeouts_in_window))
+
+    monkeypatch.setattr(runner, "_evaluate_completion_window", evaluate_window)
+
+    runner._record_completion_batch(510, 510)
+    runner._record_completion_batch(4, 2)
+
+    assert windows == [(512, 512)]
+    assert len(runner._pending_completion_outcomes) == 2
+
+    runner._record_completion_batch(510, 510)
+    assert windows == [(512, 512), (512, 510)]
+    assert len(runner._pending_completion_outcomes) == 0
 
 
 def test_horizon_demotes_after_sustained_severe_regression(monkeypatch):

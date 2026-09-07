@@ -39,7 +39,10 @@ def _event_indices(capture: dict[str, np.ndarray]) -> dict[str, list[int]]:
             events["landing"] = landing
     contacts = capture.get("contacts")
     if contacts is not None and contacts.ndim == 2 and contacts.shape[1] >= 2:
-        supported = np.all(contacts[:, :2] > 0.5, axis=1)
+        # Match jump semantics: the first subsequent wheel contact is the
+        # landing event.  Requiring both wheels here can miss a brief valid
+        # one-wheel touchdown in captures without a jump-state channel.
+        supported = np.any(contacts[:, :2] > 0.5, axis=1)
         takeoff = (np.flatnonzero(supported[:-1] & ~supported[1:]) + 1).tolist()
         landing = (np.flatnonzero(~supported[:-1] & supported[1:]) + 1).tolist()
         # Jump-state event pulses are authoritative when present. Contacts fill only
