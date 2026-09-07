@@ -21,6 +21,7 @@ from .runner import (
     _disturbance_wrench,
     _exact_reset,
     _robot_total_mass,
+    physics_timestep,
 )
 from .schema import CommandPoint, DisturbanceSpec, ScenarioSpec
 
@@ -103,7 +104,7 @@ def replay(
     cfg.scene.num_envs = 1
     cfg.auto_reset = False
     cfg.episode_length_s = (scenario.horizon_steps + 2) * (
-        float(cfg.sim.timestep) * int(cfg.decimation)
+        physics_timestep(cfg) * int(cfg.decimation)
     )
     base_env = ManagerBasedRlEnv(cfg, device=device, render_mode=None)
     agent_cfg = load_rl_cfg(scenario.task)

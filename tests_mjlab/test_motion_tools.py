@@ -83,6 +83,10 @@ def test_motion_quality_reports_smoothness_separately_from_success():
     assert report["finite"] is True
     assert report["duration_s"] == 0.9
     assert report["contact_toggle_count"] == 2
+    assert report["leg_hip_mismatch_p95_abs_rad"] == 0.0
+    assert report["leg_knee_mismatch_p95_abs_rad"] == 0.0
+    assert report["both_supported_fraction"] == 0.6
+    assert report["max_tilt_rad"] == 0.0
     assert 0.0 < report["quality_score"] <= 1.0
 
 

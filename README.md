@@ -173,10 +173,18 @@ uv run --extra cu128 play Ascento-Balance-Flat --agent zero
 ```
 
 Gate D is mjlab-native: the validated plant must learn robust, visually
-plausible balance with sensible control. The balance objective mildly penalizes
-horizontal root speed so recovery motion remains available without rewarding
-persistent drift. Old-stack policy behavior is a diagnostic reference only,
-never the acceptance target.
+plausible balance with sensible control. Balance rewards hold the root near its
+supported reset position, reward the same settled state measured by the gate,
+and softly prefer equal mirrored hip/knee coordinates without coupling their
+actions. Training applies one cardinal planar recovery push per episode between
+4 and 6 seconds, matching the gate's disturbance envelope; exact evaluator
+pushes are still provided only by the immutable scenario suite. The balance and
+velocity curriculum progresses through 20, 60, 120, and 300 seconds. It protects
+the final 300-second phase from stochastic training-rollout demotions and writes
+`model_best_long_horizon.pt` after sustained top-stage survival. That file is a
+candidate, not a passing result: screen it and regular checkpoints with the
+deterministic `balance_gate_v2` suite before selecting a model. Old-stack policy
+behavior is a diagnostic reference only, never the acceptance target.
 
 ## Tasks and sequencing
 

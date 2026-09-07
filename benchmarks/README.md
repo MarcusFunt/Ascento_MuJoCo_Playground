@@ -29,9 +29,11 @@ Result states:
 ## Current suites
 
 - `balance_dev_v1`: smaller, faster development screen.
-- `balance_gate_v1`: authoritative Gate D benchmark with nominal resets,
-  expanded resets, deterministic corners, physical force disturbances, and
-  60-second endurance.
+- `balance_gate_v1`: immutable authoritative Gate D performance baseline with
+  nominal resets, expanded resets, deterministic corners, physical force
+  disturbances, and 60-second endurance.
+- `balance_gate_v2`: v1 performance checks plus nominal mirrored-hip and
+  mirrored-knee RMS mismatch gates.
 - `velocity_gate_v1`: deterministic command-timeline tracking benchmark.
 - `recovery_gate_v1`: wide-reset recovery benchmark using the canonical
   `RecoveryEnvelope` fields plus continuous stable duration.
@@ -55,6 +57,11 @@ Screen checkpoints:
 ascento-evaluate-checkpoints 'logs/rsl_rl/.../model_*.pt' \
   --suite balance_dev_v1 --top 3
 ```
+
+For a balance run, include `model_best_long_horizon.pt` in the development
+screen, then run `balance_gate_v2` on the selected checkpoint. The curriculum
+retains this file after sustained 300-second training survival, but it is only a
+candidate until the deterministic gate passes.
 
 Compare two completed evaluations using paired scenario IDs:
 

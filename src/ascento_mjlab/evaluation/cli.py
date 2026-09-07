@@ -19,6 +19,7 @@ from .gates import evaluate_gates
 from .report import render_html, select_worst_scenarios, summarize_results
 from .runner import (
     checkpoint_sha256,
+    physics_timestep,
     run_scenarios,
     task_capabilities,
     task_step_dt,
@@ -138,7 +139,7 @@ def _manifest(
     if repository_branch == "unknown":
         repository_branch = os.environ.get("ASCENTO_REPOSITORY_BRANCH", "unknown")
     env_cfg = load_env_cfg(suite.task, play=False)
-    physics_timestep = float(env_cfg.sim.timestep)
+    timestep = physics_timestep(env_cfg)
     decimation = int(env_cfg.decimation)
     model_path = repo_root / "src/ascento_mjlab/assets/ascento_guard2/robot.xml"
     return {
@@ -161,7 +162,7 @@ def _manifest(
         else None,
         "batch_size": batch_size,
         "step_dt": step_dt,
-        "physics_timestep": physics_timestep,
+        "physics_timestep": timestep,
         "decimation": decimation,
         "robot_mjcf_sha256": _sha256_file(model_path),
         "packages": _package_versions(),

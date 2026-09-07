@@ -15,12 +15,17 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul
 
 import ascento_mjlab.tasks  # noqa: F401
-from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights
+from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights, initialize_balance_origin
 
 from .policy import RslRlPolicyAdapter
 from .schema import EpisodeResult, ScenarioSpec
 
 DEFAULT_PHYSICAL_EFFORT_LIMIT = 40.0
+
+
+def physics_timestep(cfg: Any) -> float:
+    """Return the MuJoCo physics timestep from an mjlab environment config."""
+    return float(cfg.sim.mujoco.timestep)
 
 
 def task_capabilities(task: str) -> set[str]:
@@ -68,7 +73,7 @@ def checkpoint_sha256(path: str | Path) -> str:
 
 def task_step_dt(task: str) -> float:
     cfg = load_env_cfg(task, play=False)
-    return float(cfg.sim.timestep) * int(cfg.decimation)
+    return physics_timestep(cfg) * int(cfg.decimation)
 
 
 def _exact_reset(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec]) -> torch.Tensor:
@@ -155,6 +160,8 @@ def _exact_reset(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec]) -> 
         positions = corrected_pose[:, :3]
         base_env.sim.forward()
         base_env.sim.sense()
+
+    initialize_balance_origin(base_env, env_ids, asset_name="robot")
 
     return positions[:, :2].clone()
 
@@ -309,10 +316,13 @@ def _run_batch(
     if not scenarios:
         return [], {}
     cfg = load_env_cfg(task, play=False)
+    # Training-only interval pushes are part of the balance curriculum.  Gate
+    # disturbances are supplied explicitly from the immutable scenario suite.
+    cfg.events.pop("balance_push", None)
     cfg.scene.num_envs = len(scenarios)
     cfg.auto_reset = False
     cfg.seed = 0
-    step_dt = float(cfg.sim.timestep) * int(cfg.decimation)
+    step_dt = physics_timestep(cfg) * int(cfg.decimation)
     max_horizon = max(scenario.horizon_steps for scenario in scenarios)
     cfg.episode_length_s = (max_horizon + 2) * step_dt
 
@@ -369,6 +379,8 @@ def _run_batch(
     path_length = torch.zeros(count, device=dev)
     sum_velocity_tracking_sq = torch.zeros(count, device=dev)
     sum_height_tracking_sq = torch.zeros(count, device=dev)
+    sum_hip_mismatch_sq = torch.zeros(count, device=dev)
+    sum_knee_mismatch_sq = torch.zeros(count, device=dev)
     recovery_stable_count = torch.zeros(count, dtype=torch.long, device=dev)
     recovery_success = torch.zeros(count, dtype=torch.bool, device=dev)
     recovery_from_start_s = torch.full((count,), float("nan"), device=dev)
@@ -399,6 +411,11 @@ def _run_batch(
     )
 
     mass = _robot_total_mass(base_env)
+    robot = base_env.scene["robot"]
+    joint_indices = {
+        name: robot.joint_names.index(name)
+        for name in ("left_hip", "left_knee", "right_hip", "right_knee")
+    }
     all_env_ids = torch.arange(count, device=dev, dtype=torch.long)
     last_wrench_active = torch.zeros(count, dtype=torch.bool, device=dev)
 
@@ -462,6 +479,12 @@ def _run_batch(
             request_sat = torch.mean(
                 (torch.abs(request) >= physical_effort_limit - 1.0e-4).float(), dim=1
             )
+            hip_mismatch = robot.data.joint_pos[:, joint_indices["left_hip"]] - robot.data.joint_pos[
+                :, joint_indices["right_hip"]
+            ]
+            knee_mismatch = robot.data.joint_pos[:, joint_indices["left_knee"]] - robot.data.joint_pos[
+                :, joint_indices["right_knee"]
+            ]
             xy = robot.data.root_link_pos_w[:, :2]
             segment = torch.linalg.vector_norm(xy - prev_xy, dim=1)
             prev_xy = xy.clone()
@@ -498,6 +521,8 @@ def _run_batch(
             support_count += both_supported.float() * weight
             airborne_count += airborne.float() * weight
             path_length += segment * weight
+            sum_hip_mismatch_sq += hip_mismatch.square() * weight
+            sum_knee_mismatch_sq += knee_mismatch.square() * weight
             if twist_target is not None:
                 actual_twist = torch.stack(
                     [
@@ -644,6 +669,8 @@ def _run_batch(
             "airborne_fraction": airborne_count / denom,
             "path_length": path_length,
             "net_displacement": net_displacement,
+            "leg_hip_mismatch_rms": torch.sqrt(sum_hip_mismatch_sq / denom),
+            "leg_knee_mismatch_rms": torch.sqrt(sum_knee_mismatch_sq / denom),
             "recovered": recovered.float(),
             "recovery_time_s": recovery_time,
         }

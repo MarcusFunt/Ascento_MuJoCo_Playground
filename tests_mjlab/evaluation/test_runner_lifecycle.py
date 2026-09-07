@@ -5,6 +5,7 @@ import torch
 from ascento_mjlab.evaluation.runner import (
     _refresh_exact_observation_history,
     _reset_finished_slots,
+    physics_timestep,
 )
 
 
@@ -59,3 +60,9 @@ def test_no_finished_slots_do_not_trigger_reset():
     policy = SimpleNamespace(reset=lambda *args: (_ for _ in ()).throw(AssertionError(args)))
 
     _reset_finished_slots(env, policy, torch.zeros(4, dtype=torch.bool))
+
+
+def test_physics_timestep_uses_mjlab_mujoco_config():
+    cfg = SimpleNamespace(sim=SimpleNamespace(mujoco=SimpleNamespace(timestep=0.002)))
+
+    assert physics_timestep(cfg) == 0.002

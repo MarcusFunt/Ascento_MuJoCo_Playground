@@ -555,7 +555,14 @@ def build_run_info(run_dir: Path, root: Path, stage: str) -> dict[str, Any]:
         ),
         "horizon_stage": _first((status, manifest), "horizon_stage"),
         "horizon_qualified_windows": _first((status, manifest), "horizon_qualified_windows"),
+        "horizon_failed_windows": _first((status, manifest), "horizon_failed_windows"),
+        "horizon_stage_windows": _first((status, manifest), "horizon_stage_windows"),
+        "horizon_top_windows": _first((status, manifest), "horizon_top_windows"),
+        "horizon_transition": _first((status, manifest), "horizon_transition"),
         "horizon_timeout_fraction": _first((status, manifest), "horizon_timeout_fraction"),
+        "long_horizon_candidate_checkpoint": _first(
+            (status, manifest), "long_horizon_candidate_checkpoint"
+        ),
         "device": device,
         "gpu_world_size": _first((status, manifest, runtime), "gpu_world_size"),
         "checkpoint_path": _first((status, manifest), "checkpoint_path", "model_path")

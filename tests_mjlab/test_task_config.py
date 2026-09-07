@@ -32,6 +32,11 @@ def test_balance_action_contract_reaches_40_nm_and_penalizes_drift():
     assert action_cfg.scale == 40.0
     assert action_cfg.clip == {".*": (-40.0, 40.0)}
     assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.2)
+    assert cfg.rewards["position_hold"].weight == pytest.approx(4.0)
+    assert cfg.rewards["settled_balance"].weight == pytest.approx(1.0)
+    assert cfg.rewards["leg_pose_symmetry"].weight == pytest.approx(-2.0)
+    assert "initialize_balance_origin" in cfg.events
+    assert "balance_push" in cfg.events
 
     env = ManagerBasedRlEnv(cfg, device="cpu")
     env.action_manager.process_action(torch.ones((1, 6)))
@@ -53,6 +58,10 @@ def test_velocity_stage_has_no_reward_that_penalizes_its_commands():
     assert set(cfg.commands) == {"twist", "height"}
     assert "height" not in cfg.rewards
     assert "planar_speed" not in cfg.rewards
+    assert "position_hold" not in cfg.rewards
+    assert "settled_balance" not in cfg.rewards
+    assert "leg_pose_symmetry" in cfg.rewards
+    assert "balance_push" not in cfg.events
     assert "track_velocity" in cfg.rewards
     assert "track_height" in cfg.rewards
     assert "twist_command" in cfg.observations["actor"].terms
@@ -65,6 +74,8 @@ def test_recovery_stage_exports_executable_success_metric_and_training_pushes():
 
     assert "recovery_success" in cfg.metrics
     assert "recovery_push" in cfg.events
+    assert "balance_push" not in cfg.events
+    assert "leg_pose_symmetry" in cfg.rewards
     assert cfg.events["recovery_push"].mode == "interval"
     assert "recovery_push" not in play_cfg.events
 
@@ -99,6 +110,10 @@ def test_jump_state_sync_is_first_and_base_rewards_are_phase_aware():
     assert cfg.rewards["height"].func.__name__ == "jump_nominal_height_tracking"
     assert cfg.rewards["angular_rate"].func.__name__ == "jump_angular_rate_penalty"
     assert cfg.rewards["planar_speed"].func.__name__ == "jump_planar_speed_penalty"
+    assert "position_hold" not in cfg.rewards
+    assert "settled_balance" not in cfg.rewards
+    assert "leg_pose_symmetry" in cfg.rewards
+    assert "balance_push" not in cfg.events
     assert cfg.rewards["crouch"].func.__name__ == "jump_crouch"
     assert cfg.rewards["thrust"].func.__name__ == "jump_thrust"
     assert cfg.rewards["distance_tracking"].func.__name__ == "jump_distance_tracking"
