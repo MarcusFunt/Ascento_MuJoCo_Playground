@@ -134,6 +134,19 @@ class RunService:
         )
         return self.annotate(summary, ref.path)
 
+    def progress(self, run_id: str) -> dict[str, Any]:
+        """Return a cheap live snapshot without rebuilding detailed history."""
+        ref = self.resolve(run_id)
+        summary = summarize_dashboard_run(
+            ref.path,
+            self.artifact_root,
+            stale_after_seconds=self.stale_after_seconds,
+            detailed=False,
+            include_errors=False,
+            include_artifacts=False,
+        )
+        return self.annotate(summary, ref.path)
+
     def update_metadata(self, run_id: str, changes: dict[str, Any]) -> dict[str, Any]:
         ref = self.resolve(run_id)
         path = self.metadata_path(ref.path)

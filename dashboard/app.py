@@ -257,6 +257,15 @@ def run_status(run_id: str):
         raise HTTPException(status_code=404, detail="training run not found") from error
 
 
+@app.get("/api/runs/{run_id}/progress")
+def run_progress(run_id: str):
+    """Return the latest live snapshot without scanning detailed run history."""
+    try:
+        return RUN_SERVICE.progress(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="training run not found") from error
+
+
 @app.patch("/api/runs/{run_id}")
 def update_run(run_id: str, request: RunUpdateRequest):
     try:

@@ -244,7 +244,7 @@ function App() {
     }
   }
 
-  async function refreshSelected(id) {
+  async function refreshSelected(id, { includeHistory = true } = {}) {
     if (!id) {
       setDetail(null)
       setTelemetry([])
@@ -256,14 +256,33 @@ function App() {
     selectedRefreshInFlight.current = true
     setTelemetryLoading(true)
     try {
-      const [run, points] = await Promise.all([
-        fetchJson(`/api/runs/${id}`),
-        fetchJson(`/api/runs/${id}/telemetry?max_points=${CHART_RENDER_POINTS}`),
-      ])
-      const records = points.records || []
-      setDetail(run)
-      setTelemetry(records)
-      setTelemetrySourceCount(points.source_records ?? records.length)
+      const runRequest = includeHistory
+        ? fetchJson(`/api/runs/${id}`)
+        : fetchJson(`/api/runs/${id}/progress`)
+      const pointsRequest = includeHistory
+        ? fetchJson(`/api/runs/${id}/telemetry?max_points=${CHART_RENDER_POINTS}`)
+        : Promise.resolve(null)
+      const [run, points] = await Promise.all([runRequest, pointsRequest])
+      setDetail((current) => {
+        if (includeHistory || !current) return run
+        // Progress snapshots intentionally omit expensive detail fields.
+        // Preserve the last full snapshot while replacing live state/telemetry.
+        return { ...current, ...run }
+      })
+      if (points) {
+        const records = points.records || []
+        setTelemetry(records)
+        setTelemetrySourceCount(points.source_records ?? records.length)
+      } else if (run.telemetry) {
+        setTelemetry((current) => {
+          const next = [...current]
+          const iteration = run.telemetry.iteration
+          const index = next.findIndex((record) => record.iteration === iteration)
+          if (index >= 0) next[index] = run.telemetry
+          else next.push(run.telemetry)
+          return next.slice(-CHART_RENDER_POINTS)
+        })
+      }
       setApiError('')
     } catch (error) {
       setApiError(error.message)
@@ -292,11 +311,14 @@ function App() {
       return undefined
     }
     setCopyState('')
-    refreshSelected(selectedId)
+    refreshSelected(selectedId, { includeHistory: true })
     // Archived runs have immutable telemetry. Re-reading their logs every
     // poll is expensive on a mounted workspace without yielding newer data.
     if (!selectedRunIsLive) return undefined
-    const timer = setInterval(() => refreshSelected(selectedId), POLL_MS)
+    const timer = setInterval(
+      () => refreshSelected(selectedId, { includeHistory: false }),
+      POLL_MS,
+    )
     return () => clearInterval(timer)
   }, [selectedId, selectedRunIsLive])
 

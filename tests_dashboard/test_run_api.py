@@ -20,6 +20,7 @@ def test_run_management_routes_are_registered(monkeypatch, tmp_path):
 
     assert ("/api/runs", "POST") in methods
     assert ("/api/runs/{run_id}", "PATCH") in methods
+    assert ("/api/runs/{run_id}/progress", "GET") in methods
     assert ("/api/runs/{run_id}/stop", "POST") in methods
     assert ("/api/runs/compare", "GET") in methods
 
