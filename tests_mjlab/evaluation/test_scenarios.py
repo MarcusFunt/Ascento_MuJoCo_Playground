@@ -51,3 +51,20 @@ def test_balance_gate_v2_preserves_v1_and_adds_symmetry_gates():
         "nominal_p95_leg_hip_mismatch_rms",
         "nominal_p95_leg_knee_mismatch_rms",
     }
+
+
+def test_specialist_suites_cover_binary_hold_and_shaping_metrics():
+    recovery = load_suite(Path("benchmarks/suites/recovery_gate_v1.toml"))
+    jump = load_suite(Path("benchmarks/suites/jump_gate_v1.toml"))
+
+    recovery_metrics = {gate.metric for gate in recovery.gates}
+    jump_metrics = {gate.metric for gate in jump.gates}
+    assert {"recovery_success", "recovery_from_start_s", "max_recovery_hold_s"} <= recovery_metrics
+    assert {
+        "jump_takeoff",
+        "jump_landing",
+        "jump_recovered_landing",
+        "post_landing_hold_s",
+    } <= jump_metrics
+    assert "shaping_reward_abs_mean" in recovery_metrics
+    assert "shaping_reward_abs_mean" in jump_metrics

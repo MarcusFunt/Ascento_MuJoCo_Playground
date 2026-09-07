@@ -385,12 +385,18 @@ def _run_batch(
     recovery_stable_count = torch.zeros(count, dtype=torch.long, device=dev)
     recovery_success = torch.zeros(count, dtype=torch.bool, device=dev)
     recovery_from_start_s = torch.full((count,), float("nan"), device=dev)
+    max_recovery_hold_s = torch.zeros(count, device=dev)
+    sum_reward = torch.zeros(count, device=dev)
+    sum_shaping_abs = torch.zeros(count, device=dev)
+    sum_shaping_signed = torch.zeros(count, device=dev)
 
     jump_takeoff_seen = torch.zeros(count, dtype=torch.bool, device=dev)
     jump_landing_seen = torch.zeros(count, dtype=torch.bool, device=dev)
+    jump_recovered_seen = torch.zeros(count, dtype=torch.bool, device=dev)
     jump_distance_abs_error = torch.ones(count, device=dev)
     landing_preimpact_speed = torch.full((count,), 10.0, device=dev)
     limiting_wheel_clearance = torch.zeros(count, device=dev)
+    max_post_landing_hold_s = torch.zeros(count, device=dev)
 
     prev_xy = initial_xy.clone()
     final_xy_snapshot = initial_xy.clone()
@@ -459,7 +465,7 @@ def _run_batch(
             action_count += active.float()
 
             action = torch.where(active[:, None], raw_action, torch.zeros_like(raw_action))
-            _, _, dones, _ = env.step(action)
+            _, step_rewards, dones, _ = env.step(action)
 
             robot = base_env.scene["robot"]
             gravity_xy = torch.linalg.vector_norm(robot.data.projected_gravity_b[:, :2], dim=1)
@@ -499,6 +505,19 @@ def _run_batch(
             airborne = ~left & ~right
 
             weight = active.float()
+            sum_reward += step_rewards * weight
+            reward_step_values = getattr(base_env.reward_manager, "_step_reward", None)
+            if isinstance(reward_step_values, torch.Tensor):
+                term_names = list(base_env.reward_manager.active_terms)
+                shaping_mask = [
+                    index
+                    for index, name in enumerate(term_names)
+                    if name in {"recovery_dwell", "post_landing_stability"}
+                ]
+                if shaping_mask:
+                    shaping_values = reward_step_values[:, shaping_mask].sum(dim=1)
+                    sum_shaping_signed += shaping_values * weight
+                    sum_shaping_abs += shaping_values.abs() * weight
             sum_tilt += tilt * weight
             sum_tilt_sq += tilt.square() * weight
             max_tilt = torch.maximum(max_tilt, torch.where(active, tilt, torch.zeros_like(tilt)))
@@ -546,6 +565,7 @@ def _run_batch(
                 landing_now = state["landing"] > 0.5
                 jump_takeoff_seen |= active & takeoff_now
                 jump_landing_seen |= active & landing_now
+                jump_recovered_seen |= active & (state["recovered_landing"] > 0.5)
                 landing_mask = active & landing_now
                 jump_distance_abs_error = torch.where(
                     landing_mask,
@@ -586,6 +606,21 @@ def _run_batch(
                     first_stable_step = step - required + 1
                     recovery_from_start_s[newly_recovered_from_start] = first_stable_step * step_dt
                     recovery_success |= newly_recovered_from_start
+                max_recovery_hold_s = torch.maximum(
+                    max_recovery_hold_s,
+                    recovery_stable_count.float() * step_dt,
+                )
+
+            if is_jump_task:
+                state = base_env.ascento_jump_state
+                max_post_landing_hold_s = torch.maximum(
+                    max_post_landing_hold_s,
+                    torch.where(
+                        state["phase"] == 5,
+                        state["recovery_stable_time"],
+                        torch.zeros_like(max_post_landing_hold_s),
+                    ),
+                )
 
             after_disturbance = active & (disturbance_end >= 0) & (step >= disturbance_end)
             stable_now = (
@@ -674,6 +709,12 @@ def _run_batch(
             "leg_knee_mismatch_rms": torch.sqrt(sum_knee_mismatch_sq / denom),
             "recovered": recovered.float(),
             "recovery_time_s": recovery_time,
+            "max_recovery_hold_s": max_recovery_hold_s,
+            "episode_reward": sum_reward / denom,
+            "shaping_reward_signed_mean": sum_shaping_signed / denom,
+            "shaping_reward_abs_mean": sum_shaping_abs / denom,
+            "shaping_reward_abs_ratio": sum_shaping_abs / sum_reward.abs().clamp(min=1.0e-6),
+            "post_landing_hold_s": max_post_landing_hold_s,
         }
         if is_velocity_task:
             arrays["velocity_tracking_rmse"] = torch.sqrt(sum_velocity_tracking_sq / denom)
@@ -684,6 +725,7 @@ def _run_batch(
         if is_jump_task:
             arrays["jump_takeoff"] = jump_takeoff_seen.float()
             arrays["jump_landing"] = jump_landing_seen.float()
+            arrays["jump_recovered_landing"] = jump_recovered_seen.float()
             arrays["jump_distance_abs_error"] = jump_distance_abs_error
             arrays["landing_preimpact_speed"] = landing_preimpact_speed
             arrays["limiting_wheel_clearance"] = limiting_wheel_clearance

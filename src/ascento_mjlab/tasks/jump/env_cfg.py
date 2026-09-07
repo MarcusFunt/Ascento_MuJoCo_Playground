@@ -4,6 +4,8 @@ Terrain remains intentionally disabled until flat-ground takeoff, flight,
 landing, distance tracking, and recovery are all quantitatively sound.
 """
 
+import os
+
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
@@ -97,9 +99,15 @@ def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
             func=ascento_mdp.rewards.jump_recovered_landing,
             weight=1.0,
         ),
-        "post_landing_stability": RewardTermCfg(
-            func=ascento_mdp.rewards.jump_post_landing_stability,
-            weight=1.5,
+        **(
+            {
+                "post_landing_stability": RewardTermCfg(
+                    func=ascento_mdp.rewards.jump_post_landing_stability,
+                    weight=1.5,
+                )
+            }
+            if os.environ.get("ASCENTO_DISABLE_DENSE_SHAPING", "").strip() != "1"
+            else {}
         ),
         "landing_softness": RewardTermCfg(
             func=ascento_mdp.rewards.jump_landing_softness,
@@ -115,5 +123,7 @@ def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
             params={"command_name": "motion"},
         ),
     }
+    if os.environ.get("ASCENTO_DISABLE_DENSE_SHAPING", "").strip() == "1":
+        cfg.rewards.pop("post_landing_stability", None)
     cfg.episode_length_s = 8.0 if not play else 10000.0
     return cfg

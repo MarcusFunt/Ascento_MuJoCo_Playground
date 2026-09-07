@@ -122,6 +122,7 @@ class RunService:
             "parent_run_id": metadata.get("parent_run_id"),
             "parent_checkpoint": metadata.get("parent_checkpoint"),
         }
+        summary["experiment_manifest"] = self._experiment_manifest(run_dir)
         return annotate_run_summary(summary, run_dir, self.artifact_root)
 
     def detail(self, run_id: str) -> dict[str, Any]:
@@ -378,6 +379,28 @@ class RunService:
         runs = [self.detail(run_id) for run_id in unique]
         metric_names = ("reward", "episode_length", "ppo_loss", "entropy", "kl", "clip_fraction")
         baseline_latest = (runs[0].get("training_health") or {}).get("latest") or {}
+        baseline_manifest = self._experiment_manifest(self.resolve(unique[0]).path)
+
+        def configuration_delta(manifest: dict[str, Any]) -> dict[str, Any]:
+            fields = (
+                "task_config_id",
+                "seed",
+                "environment_count",
+                "simulation_timestep",
+                "device",
+                "dense_shaping_enabled",
+                "reward_terms",
+                "evaluation",
+            )
+            return {
+                field: {
+                    "baseline": baseline_manifest.get(field),
+                    "value": manifest.get(field),
+                    "match": baseline_manifest.get(field) == manifest.get(field),
+                }
+                for field in fields
+            }
+
         comparison: list[dict[str, Any]] = []
         for run in runs:
             latest = (run.get("training_health") or {}).get("latest") or {}
@@ -390,6 +413,7 @@ class RunService:
                 else:
                     deltas[metric] = None
             progress = run.get("telemetry") or {}
+            manifest = self._experiment_manifest(self.resolve(str(run.get("id"))).path)
             comparison.append(
                 {
                     "id": run.get("id"),
@@ -402,6 +426,14 @@ class RunService:
                     "percent_complete": progress.get("percent_complete"),
                     "latest_metrics": {name: latest.get(name) for name in metric_names},
                     "delta_from_baseline": deltas,
+                    "experiment_manifest": manifest,
+                    "configuration_delta": configuration_delta(manifest),
                 }
             )
         return {"baseline_id": unique[0], "runs": comparison}
+
+    def _experiment_manifest(self, run_dir: Path) -> dict[str, Any]:
+        path = run_dir / "experiment_manifest.json"
+        if not path.is_file():
+            path = self.metadata_path(run_dir).parent / "experiment_manifest.json"
+        return _load_json(path)

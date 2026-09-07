@@ -201,3 +201,31 @@ def test_compare_uses_normalized_metrics_and_baseline_deltas(tmp_path):
     assert result["baseline_id"] == by_name["first"]
     assert rows["first"]["latest_metrics"]["reward"] == 2.0
     assert rows["second"]["delta_from_baseline"]["reward"] == pytest.approx(1.5)
+
+
+def test_compare_includes_experiment_manifest_configuration(tmp_path):
+    first = _run(tmp_path, "first", reward=2.0)
+    second = _run(tmp_path, "second", reward=3.5)
+    manifest = {
+        "task_config_id": "Ascento-Balance-Flat",
+        "seed": 1,
+        "environment_count": 512,
+        "simulation_timestep": 0.002,
+        "device": "cuda:0",
+        "dense_shaping_enabled": True,
+        "reward_terms": {"position_hold": {"weight": 4.0}},
+        "evaluation": {"suite": "balance_gate_v2", "result": "FAIL"},
+    }
+    (first / "experiment_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    changed = {**manifest, "seed": 2}
+    (second / "experiment_manifest.json").write_text(json.dumps(changed), encoding="utf-8")
+
+    service = RunService(tmp_path)
+    ids = service_compare_ids(service, tmp_path)
+    by_name = {service.detail(run_id)["name"]: run_id for run_id in ids}
+    result = service.compare([by_name["first"], by_name["second"]])
+    rows = {row["display_name"]: row for row in result["runs"]}
+
+    assert rows["first"]["experiment_manifest"]["seed"] == 1
+    assert rows["second"]["configuration_delta"]["seed"]["match"] is False
+    assert rows["second"]["configuration_delta"]["environment_count"]["match"] is True

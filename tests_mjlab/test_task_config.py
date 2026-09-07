@@ -4,6 +4,8 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.tasks.jump.env_cfg import ascento_jump_env_cfg
+from ascento_mjlab.tasks.recovery.env_cfg import ascento_recovery_env_cfg
 
 
 def test_balance_env_is_six_effort_flat_ground():
@@ -133,6 +135,14 @@ def test_jump_state_sync_is_first_and_base_rewards_are_phase_aware():
     assert reward_names.index("jump_state_sync") < reward_names.index("takeoff")
     assert reward_names.index("jump_state_sync") < reward_names.index("landing")
     assert cfg.sim.mujoco.timestep * cfg.decimation == pytest.approx(0.01)
+
+
+def test_dense_specialist_shaping_can_be_disabled_for_ablation(monkeypatch):
+    monkeypatch.setenv("ASCENTO_DISABLE_DENSE_SHAPING", "1")
+    recovery = ascento_recovery_env_cfg()
+    jump = ascento_jump_env_cfg()
+    assert "recovery_dwell" not in recovery.rewards
+    assert "post_landing_stability" not in jump.rewards
 
 
 def test_jump_observation_contains_phase_and_remaining_distance():

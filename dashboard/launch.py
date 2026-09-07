@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -10,6 +11,7 @@ import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -188,6 +190,99 @@ def _latest_checkpoint(run_dir: Path) -> str | None:
     return latest.relative_to(run_dir).as_posix()
 
 
+def _file_sha256(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _package_versions() -> dict[str, str]:
+    names = ("mjlab", "mujoco", "mujoco-warp", "warp-lang", "torch", "rsl-rl")
+    values: dict[str, str] = {}
+    for name in names:
+        try:
+            values[name] = version(name)
+        except PackageNotFoundError:
+            values[name] = "unknown"
+    return values
+
+
+def _experiment_reward_terms(task: str) -> dict[str, dict[str, Any]]:
+    try:
+        from mjlab.tasks.registry import load_env_cfg
+
+        cfg = load_env_cfg(task, play=False)
+        return {
+            name: {
+                "weight": float(term.weight),
+                "params": {
+                    key: value
+                    for key, value in (term.params or {}).items()
+                    if isinstance(value, (str, int, float, bool, type(None)))
+                },
+            }
+            for name, term in cfg.rewards.items()
+        }
+    except Exception as error:  # pragma: no cover - defensive metadata path
+        return {"__error__": {"weight": 0.0, "error": str(error)}}
+
+
+def _training_arg_value(training_args: list[str], *names: str) -> str | None:
+    return _training_arg(training_args, *names)
+
+
+def _write_experiment_manifest(
+    path: Path,
+    *,
+    task: str,
+    training_args: list[str],
+    git: dict[str, Any],
+    run_dir: Path,
+    sim_timestep: int | float | str | None,
+    device: str | None,
+) -> None:
+    env_count = _training_arg_value(training_args, "--env.scene.num-envs", "--num-envs")
+    manifest = {
+        "schema_version": 1,
+        "task": task,
+        "task_config_id": task,
+        "reward_terms": _experiment_reward_terms(task),
+        "dense_shaping_enabled": os.environ.get("ASCENTO_DISABLE_DENSE_SHAPING", "") != "1",
+        "seed": _number(_training_arg_value(training_args, "--seed", "--agent.seed")),
+        "environment_count": _number(env_count),
+        "simulation_timestep": sim_timestep,
+        "device": device,
+        "packages": _package_versions(),
+        "git": git,
+        "checkpoint": {"path": None, "sha256": None},
+        "evaluation": {"suite": None, "result": None},
+        "run_directory": str(run_dir),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    write_metadata(path, **manifest)
+
+
+def _finalize_experiment_manifest(path: Path, run_dir: Path) -> None:
+    if not path.is_file():
+        return
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    checkpoint = _latest_checkpoint(run_dir)
+    if checkpoint:
+        checkpoint_path = run_dir / checkpoint
+        manifest["checkpoint"] = {
+            "path": checkpoint,
+            "sha256": _file_sha256(checkpoint_path),
+        }
+    write_metadata(path, **manifest)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run mjlab training while capturing console output for the dashboard."
@@ -325,6 +420,16 @@ def main() -> int:
         stop_requested_at=None,
         stop_reason=None,
     )
+    experiment_manifest_path = run_dir / "experiment_manifest.json"
+    _write_experiment_manifest(
+        experiment_manifest_path,
+        task=args.task,
+        training_args=training_args,
+        git=git,
+        run_dir=run_dir,
+        sim_timestep=sim_timestep,
+        device=device,
+    )
 
     exit_code = 127
     stop_requested = False
@@ -394,6 +499,7 @@ def main() -> int:
         )
         return 127
 
+    _finalize_experiment_manifest(experiment_manifest_path, run_dir)
     finished = datetime.now(timezone.utc).isoformat()
     state = "stopped" if stop_requested else ("finished" if exit_code == 0 else "error")
     write_status(

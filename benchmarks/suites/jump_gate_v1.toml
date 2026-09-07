@@ -42,6 +42,30 @@ op = ">="
 threshold = 0.85
 
 [[gates]]
+id = "recovered_landing_rate"
+family = "flat_jump"
+metric = "jump_recovered_landing"
+statistic = "success_rate"
+op = ">="
+threshold = 0.75
+
+[[gates]]
+id = "post_landing_hold_median"
+family = "flat_jump"
+metric = "post_landing_hold_s"
+statistic = "p50"
+op = ">="
+threshold = 0.50
+
+[[gates]]
+id = "shaping_is_finite"
+family = "flat_jump"
+metric = "shaping_reward_abs_mean"
+statistic = "p95"
+op = ">="
+threshold = 0.0
+
+[[gates]]
 id = "distance_error_p95"
 family = "flat_jump"
 metric = "jump_distance_abs_error"

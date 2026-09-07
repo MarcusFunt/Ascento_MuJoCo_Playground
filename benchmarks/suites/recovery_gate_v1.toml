@@ -53,6 +53,22 @@ op = "<="
 threshold = 2.0
 
 [[gates]]
+id = "recovery_hold_p05"
+family = "recovery_random"
+metric = "max_recovery_hold_s"
+statistic = "p05"
+op = ">="
+threshold = 0.50
+
+[[gates]]
+id = "recovery_shaping_is_finite"
+family = "recovery_random"
+metric = "shaping_reward_abs_mean"
+statistic = "p95"
+op = ">="
+threshold = 0.0
+
+[[gates]]
 id = "recovery_corner_success"
 family = "recovery_corners"
 metric = "recovery_success"

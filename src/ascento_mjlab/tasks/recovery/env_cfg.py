@@ -1,5 +1,7 @@
 """Recovery specialist configuration."""
 
+import os
+
 from mjlab.envs import mdp
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
@@ -54,10 +56,13 @@ def ascento_recovery_env_cfg(play: bool = False, num_envs: int = 512):
         func=ascento_mdp.recovery.recovery_progress,
         weight=2.0,
     )
-    cfg.rewards["recovery_dwell"] = RewardTermCfg(
-        func=ascento_mdp.recovery.recovery_dwell,
-        weight=1.0,
-    )
+    if os.environ.get("ASCENTO_DISABLE_DENSE_SHAPING", "").strip() != "1":
+        cfg.rewards["recovery_dwell"] = RewardTermCfg(
+            func=ascento_mdp.recovery.recovery_dwell,
+            weight=1.0,
+        )
+    else:
+        cfg.rewards.pop("recovery_dwell", None)
     cfg.metrics["recovery_success"] = MetricsTermCfg(
         func=ascento_mdp.recovery.RecoverySuccess,
     )

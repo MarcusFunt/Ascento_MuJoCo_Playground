@@ -11,7 +11,13 @@ from typing import Any
 from .schema import EpisodeResult
 from .statistics import summarize_binary, summarize_numeric
 
-BINARY_METRICS = {"recovered", "recovery_success", "jump_takeoff", "jump_landing"}
+BINARY_METRICS = {
+    "recovered",
+    "recovery_success",
+    "jump_takeoff",
+    "jump_landing",
+    "jump_recovered_landing",
+}
 
 
 def summarize_results(
