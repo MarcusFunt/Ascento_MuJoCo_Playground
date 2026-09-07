@@ -654,7 +654,13 @@ def _run_batch(
 
             failed = active_done & non_timeout_done
             succeeded = reached_horizon & ~failed
-            finish = failed | succeeded
+            # A vector environment can time out before the suite horizon when
+            # its configured episode length is shorter than the scenario's
+            # requested duration. Treat that as an explicit unsuccessful
+            # finish; otherwise auto_reset=False leaves a pending slot that
+            # raises on the next step.
+            early_timeout = active_done & ~non_timeout_done & ~reached_horizon
+            finish = failed | succeeded | early_timeout
 
             if bool(finish.any().item()):
                 final_xy_snapshot[finish] = xy[finish]
@@ -674,6 +680,10 @@ def _run_batch(
                         termination_reason[env_id] = (
                             timeout_names[0] if timeout_names else "horizon"
                         )
+                early_timeout_ids = early_timeout.nonzero(as_tuple=False).squeeze(-1)
+                for env_id in early_timeout_ids.detach().cpu().tolist():
+                    if not termination_reason[env_id]:
+                        termination_reason[env_id] = "early_timeout"
                 finished_success |= succeeded
                 active &= ~finish
                 _reset_finished_slots(base_env, policy, finish)
