@@ -180,6 +180,10 @@ def _reset_finished_slots(base_env: ManagerBasedRlEnv, policy, finish: torch.Ten
         return
     env_ids = finish.nonzero(as_tuple=False).squeeze(-1)
     base_env.reset(env_ids=env_ids)
+    # Keep the explicit-reset contract robust across mjlab versions where the
+    # public reset path may not clear the wrapper's pending mask immediately.
+    if hasattr(base_env, "_manual_reset_pending"):
+        base_env._manual_reset_pending[env_ids] = False
     policy.reset(env_ids)
 
 
@@ -660,7 +664,10 @@ def _run_batch(
             # finish; otherwise auto_reset=False leaves a pending slot that
             # raises on the next step.
             early_timeout = active_done & ~non_timeout_done & ~reached_horizon
-            finish = failed | succeeded | early_timeout
+            # Every reported done slot must be reset before the next step. A
+            # done signal that is neither a strict success nor a termination
+            # failure is still an unsuccessful early timeout.
+            finish = active_done
 
             if bool(finish.any().item()):
                 final_xy_snapshot[finish] = xy[finish]
