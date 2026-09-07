@@ -16,6 +16,7 @@ dependencies = [
 cu128 = ["torch>=2.7.0"]
 cpu = ["torch>=2.7.0"]
 dashboard = ["fastapi==0.141.1", "uvicorn[standard]==0.52.4"]
+mcp = ["mcp>=1.0,<2"]
 
 [project.scripts]
 clip-motion = "ascento_mjlab.tools.clip_motion:main"
@@ -26,6 +27,8 @@ ascento-compare-evaluations = "ascento_mjlab.evaluation.compare:main"
 ascento-replay-eval = "ascento_mjlab.evaluation.replay:main"
 ascento-preflight-evaluator = "ascento_mjlab.evaluation.preflight:main"
 ascento-reward-probe = "ascento_mjlab.tools.reward_probe:main"
+ascento = "ascento_mjlab.cli:main"
+ascento-mcp = "ascento_mjlab.mcp_server:main"
 
 [dependency-groups]
 dev = [

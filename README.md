@@ -137,6 +137,31 @@ The lockfile pins mjlab 1.6.0, MuJoCo 3.11, MuJoCo Warp, Warp, Torch, and
 RSL-RL. When using the CUDA environment, keep `--extra cu128` on `uv run`
 commands or use the environment created by `uv sync --extra cu128`.
 
+## Operations CLI and MCP
+
+The unified `ascento` CLI uses the same run service as the dashboard:
+
+```bash
+uv run --extra dashboard ascento run start --task Ascento-Balance-Flat \
+  --display-name "Balance baseline" --envs 512 --iterations 10000 --seed 123
+uv run --extra dashboard ascento run list --active
+uv run --extra dashboard ascento run monitor <run-id> --interval 30
+uv run --extra dashboard ascento run progress <run-id> --json
+uv run --extra dashboard ascento run stop <run-id>
+uv run ascento maintain --skip-system-install
+```
+
+Arguments after `--` are passed directly to the mjlab trainer. For agent
+workflows, start the stdio MCP server with:
+
+```bash
+uv run --extra dashboard --extra mcp ascento-mcp
+```
+
+The MCP server exposes run listing, cheap progress snapshots, detailed status,
+run start/stop, and normalized run comparison tools. Set
+`ASCENTO_ARTIFACT_ROOT` when runs are stored outside `logs/rsl_rl`.
+
 ## Validate the plant
 
 ```bash
