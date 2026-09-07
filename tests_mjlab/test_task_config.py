@@ -4,12 +4,13 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.tasks.balance.env_cfg import ascento_balance_env_cfg
 from ascento_mjlab.tasks.jump.env_cfg import ascento_jump_env_cfg
 from ascento_mjlab.tasks.recovery.env_cfg import ascento_recovery_env_cfg
 
 
 def test_balance_env_is_six_effort_flat_ground():
-    cfg = load_env_cfg("Ascento-Balance-Flat")
+    cfg = ascento_balance_env_cfg()
     assert cfg.decimation == 5
     assert cfg.sim.mujoco.timestep == 0.002
     assert cfg.scene.terrain is not None
@@ -143,6 +144,14 @@ def test_dense_specialist_shaping_can_be_disabled_for_ablation(monkeypatch):
     jump = ascento_jump_env_cfg()
     assert "recovery_dwell" not in recovery.rewards
     assert "post_landing_stability" not in jump.rewards
+
+
+def test_balance_experiment_overrides_change_reward_weights(monkeypatch):
+    monkeypatch.setenv("ASCENTO_BALANCE_DRIFT_PENALTY_SCALE", "2.5")
+    monkeypatch.setenv("ASCENTO_BALANCE_STABILIZATION_WEIGHT", "1.75")
+    cfg = ascento_balance_env_cfg()
+    assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.5)
+    assert cfg.rewards["settled_balance"].weight == pytest.approx(1.75)
 
 
 def test_jump_observation_contains_phase_and_remaining_distance():

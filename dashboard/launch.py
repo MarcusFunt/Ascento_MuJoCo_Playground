@@ -252,6 +252,13 @@ def _write_experiment_manifest(
         "task_config_id": task,
         "reward_terms": _experiment_reward_terms(task),
         "dense_shaping_enabled": os.environ.get("ASCENTO_DISABLE_DENSE_SHAPING", "") != "1",
+        "experiment_overrides": {
+            key: value
+            for key, value in sorted(os.environ.items())
+            if key.startswith("ASCENTO_")
+            and key
+            not in {"ASCENTO_ARTIFACT_ROOT", "ASCENTO_REPOSITORY_COMMIT", "ASCENTO_REPOSITORY_BRANCH"}
+        },
         "seed": _number(_training_arg_value(training_args, "--seed", "--agent.seed")),
         "environment_count": _number(env_count),
         "simulation_timestep": sim_timestep,

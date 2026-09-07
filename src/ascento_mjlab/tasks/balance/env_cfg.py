@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 
 from mjlab.envs import ManagerBasedRlEnvCfg, mdp
@@ -135,6 +136,12 @@ def _actions() -> dict[str, ActionTermCfg]:
 
 def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerBasedRlEnvCfg:
     """Build the validated flat-ground balance configuration."""
+    drift_scale = float(os.environ.get("ASCENTO_BALANCE_DRIFT_PENALTY_SCALE", "1.0"))
+    stabilization_scale = float(
+        os.environ.get("ASCENTO_BALANCE_STABILIZATION_WEIGHT", "1.0")
+    )
+    if drift_scale <= 0.0 or stabilization_scale <= 0.0:
+        raise ValueError("balance reward scales must be positive")
     events = {
         "reset_scene_to_default": EventTermCfg(func=mdp.reset_scene_to_default, mode="reset"),
         "reset_supported_pose": EventTermCfg(
@@ -174,7 +181,10 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
         events["balance_push"] = EventTermCfg(
             func=ascento_mdp.events.OneShotPlanarVelocityPush,
             mode="interval",
-            interval_range_s=(4.0, 6.0),
+            interval_range_s=(
+                float(os.environ.get("ASCENTO_BALANCE_PUSH_INTERVAL_MIN_S", "4.0")),
+                float(os.environ.get("ASCENTO_BALANCE_PUSH_INTERVAL_MAX_S", "6.0")),
+            ),
             params={
                 "min_delta_v": 0.15,
                 "max_delta_v": 0.45,
@@ -212,7 +222,7 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
             ),
             "planar_speed": RewardTermCfg(
                 func=ascento_mdp.rewards.planar_speed_penalty,
-                weight=-0.2,
+                weight=-0.2 * drift_scale,
                 params={"asset_cfg": ROBOT_CFG},
             ),
             "position_hold": RewardTermCfg(
@@ -222,7 +232,7 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
             ),
             "settled_balance": RewardTermCfg(
                 func=ascento_mdp.rewards.settled_balance,
-                weight=1.0,
+                weight=stabilization_scale,
                 params={"asset_cfg": ROBOT_CFG},
             ),
             "leg_pose_symmetry": RewardTermCfg(

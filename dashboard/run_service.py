@@ -389,6 +389,7 @@ class RunService:
                 "simulation_timestep",
                 "device",
                 "dense_shaping_enabled",
+                "experiment_overrides",
                 "reward_terms",
                 "evaluation",
             )
