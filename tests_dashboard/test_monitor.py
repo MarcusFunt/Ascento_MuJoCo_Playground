@@ -1,17 +1,16 @@
 import json
 import os
 
-from dashboard.monitor import tail_lines
-from dashboard.monitor import load_log_records
 from dashboard.health import (
     _pid_namespace,
     decorate_records,
     discover_dashboard_runs,
-    load_dashboard_records,
     list_dashboard_summaries,
+    load_dashboard_records,
     process_status,
     summarize_dashboard_run,
 )
+from dashboard.monitor import load_log_records, tail_lines
 
 
 def test_tail_lines_reads_the_requested_suffix_without_changing_line_shape(tmp_path):
