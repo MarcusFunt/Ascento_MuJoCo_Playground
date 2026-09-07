@@ -14,11 +14,12 @@ from pydantic import BaseModel, Field
 
 from dashboard.config import load_config, validate_startup
 from dashboard.health import (
+    decorate_records,
     discover_dashboard_runs,
     list_dashboard_summaries,
     load_dashboard_records,
 )
-from dashboard.monitor import tail_lines, training_log_path
+from dashboard.monitor import load_training_records, tail_lines, training_log_path
 from dashboard.run_service import RunService
 from dashboard.supervisor_client import (
     SupervisorClient,
@@ -72,6 +73,17 @@ def _run(run_id: str):
             status_code=500,
             detail=f"failed to scan artifact root {ARTIFACT_ROOT}: {error}",
         ) from error
+
+
+def _sample_records(records: list[dict], max_points: int) -> list[dict]:
+    """Keep the complete run span while bounding the payload sent to the browser."""
+    if len(records) <= max_points:
+        return records
+    last_index = len(records) - 1
+    return [
+        records[round(index * last_index / (max_points - 1))]
+        for index in range(max_points)
+    ]
 
 
 def _artifact_health() -> list[str]:
@@ -245,8 +257,18 @@ def run_summary(run_id: str):
 
 
 @app.get("/api/runs/{run_id}/telemetry")
-def telemetry(run_id: str, limit: int = 2000):
+def telemetry(run_id: str, limit: int = 2000, max_points: int | None = None):
     ref = _run(run_id)
+    if max_points is not None:
+        max_points = max(2, min(max_points, 5000))
+        raw_records = load_training_records(ref.path, limit=None)
+        source_records = len(raw_records)
+        records = decorate_records(_sample_records(raw_records, max_points), ref.path)
+        return {
+            "records": records,
+            "source_records": source_records,
+            "sampled": source_records > len(records),
+        }
     limit = max(1, min(limit, 20_000))
     return {"records": load_dashboard_records(ref.path, limit=limit)}
 
