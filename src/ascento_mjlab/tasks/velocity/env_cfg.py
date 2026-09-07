@@ -48,10 +48,15 @@ def ascento_velocity_env_cfg(play: bool = False, num_envs: int = 512):
     cfg.rewards.pop("position_hold", None)
     cfg.rewards.pop("settled_balance", None)
     cfg.events.pop("balance_push", None)
-    cfg.rewards["track_velocity"] = RewardTermCfg(
-        func=ascento_mdp.rewards.track_velocity,
-        weight=2.0,
-        params={"command_name": "twist", "std": 0.5},
+    cfg.rewards["track_linear_velocity"] = RewardTermCfg(
+        func=ascento_mdp.rewards.track_linear_velocity_xy,
+        weight=1.5,
+        params={"command_name": "twist", "std": 0.40},
+    )
+    cfg.rewards["track_yaw_rate"] = RewardTermCfg(
+        func=ascento_mdp.rewards.track_yaw_rate,
+        weight=0.5,
+        params={"command_name": "twist", "std": 0.50},
     )
     cfg.rewards["track_height"] = RewardTermCfg(
         func=ascento_mdp.rewards.commanded_height_tracking,

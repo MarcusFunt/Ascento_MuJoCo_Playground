@@ -61,6 +61,14 @@ def test_recovery_condition_rejects_each_failure_dimension_independently():
     assert not recovery_condition(env, envelope).item()
 
 
+def test_recovery_condition_rejects_an_inverted_robot():
+    env, robot, left, right = _recovery_env()
+
+    robot.projected_gravity_b[0] = torch.tensor([0.0, 0.0, 1.0])
+
+    assert not recovery_condition(env).item()
+
+
 def test_recovery_success_requires_the_full_continuous_duration_after_interruption():
     envelope = RecoveryEnvelope(stable_duration_s=0.25)
     env, robot, left, right = _recovery_env(step_dt=0.001)

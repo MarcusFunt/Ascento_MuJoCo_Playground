@@ -53,6 +53,12 @@ def nonfinite(
         asset.data.joint_vel,
         asset.data.root_link_pos_w,
         asset.data.root_link_quat_w,
+        asset.data.root_link_lin_vel_w,
+        asset.data.root_link_ang_vel_w,
+        asset.data.root_link_lin_vel_b,
+        asset.data.root_link_ang_vel_b,
+        asset.data.projected_gravity_b,
+        asset.data.actuator_force,
     )
     return torch.stack(
         [~torch.isfinite(value).all(dim=tuple(range(1, value.ndim))) for value in values], dim=0
