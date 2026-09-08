@@ -6,6 +6,12 @@ repository state, and can request a guarded update to the newest `origin/main`.
 PPO still belongs to mjlab/RSL-RL; the dashboard owns run lifecycle, provenance,
 console capture, health reporting, comparison, and the user-facing control flow.
 
+For the project-wide documentation map, see [../docs/README.md](../docs/README.md).
+The canonical dashboard/API guide is [../docs/dashboard.md](../docs/dashboard.md),
+and the shared CLI/MCP operations guides are
+[../docs/cli-reference.md](../docs/cli-reference.md) and
+[../docs/mcp-reference.md](../docs/mcp-reference.md).
+
 ## Run management
 
 The **Runs** page supports:

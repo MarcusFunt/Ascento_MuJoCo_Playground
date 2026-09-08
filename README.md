@@ -4,6 +4,27 @@ Simulation-only motion authoring for an Ascento Guard-2-like wheel-legged
 robot. The current migration target is mjlab 1.6.0, MuJoCo Warp, and RSL-RL;
 the project is not intended for physical-robot deployment.
 
+## Documentation
+
+The root README is the short operational entry point. The maintained
+documentation set is indexed in [docs/README.md](docs/README.md):
+
+- [architecture](docs/architecture.md) and the simulation/plant contract;
+- [training](docs/training.md), [evaluation](docs/evaluation.md), and the
+  task/gate workflow;
+- [operations](docs/operations.md), [dashboard](docs/dashboard.md), and
+  [troubleshooting](docs/troubleshooting.md);
+- the complete [CLI reference](docs/cli-reference.md) and
+  [MCP reference](docs/mcp-reference.md);
+- machine-readable inventories in
+  [docs/project-manifest.json](docs/project-manifest.json),
+  [docs/cli-reference.json](docs/cli-reference.json), and
+  [docs/mcp-tools.json](docs/mcp-tools.json).
+
+The project-local Codex skill at
+[.codex/skills/ascento-cli/SKILL.md](.codex/skills/ascento-cli/SKILL.md) is the
+agent-oriented guide for using the same CLI safely.
+
 ## Architecture
 
 ```text
@@ -150,21 +171,62 @@ uv run --extra dashboard ascento run progress <run-id> --json
 uv run --extra dashboard ascento run logs <run-id> --tail 100
 uv run --extra dashboard ascento run telemetry <run-id> --limit 50 --json
 uv run --extra dashboard ascento run compare <run-a> <run-b> --json
+uv run --extra dashboard ascento run annotate <run-id> --tag candidate --purpose validation
 uv run --extra dashboard ascento run stop <run-id>
 uv run --extra dashboard ascento dashboard status
 uv run ascento maintain --skip-system-install
 ```
 
 Arguments after `--` are passed directly to the mjlab trainer. For agent
-workflows, start the stdio MCP server with:
+workflows, the unified CLI also exposes the evaluator, report artifacts, policy
+clips, and specialist tools:
+
+```bash
+uv run --extra cu128 --extra dashboard ascento evaluate suites
+uv run --extra cu128 --extra dashboard ascento evaluate run \
+  --run-id <run-id> --suite balance_gate_v2 --render-clips
+uv run --extra dashboard ascento evaluate list
+uv run --extra dashboard ascento evaluate report <evaluation-id>
+uv run --extra dashboard ascento evaluate archive <evaluation-id>
+uv run --extra cu128 --extra dashboard ascento capture \
+  --run-id <run-id> --takes 3 --steps 900 --video-dir captures/balance/videos
+uv run --extra cu128 ascento tools clip-motion -- captures/balance/take_000.npz --fps 24
+uv run --extra cu128 ascento tools rank-motion -- captures/balance --top 5
+```
+
+`evaluate run` accepts either `--checkpoint` or `--run-id`; its report contains
+the immutable suite snapshot, gates, consistency checks, failure modes, SQLite
+results, and optional capture/video manifest. `evaluate archive` creates a ZIP
+of that complete evidence directory. `capture` infers the registered task when
+given a managed run ID.
+
+The stdio server can still be launched explicitly for a generic MCP client:
 
 ```bash
 uv run --extra dashboard --extra mcp ascento-mcp
+# equivalent: uv run --extra dashboard --extra mcp ascento mcp serve
 ```
 
-The MCP server exposes run listing, cheap progress snapshots, detailed status,
-run start/stop, and normalized run comparison tools. Set
-`ASCENTO_ARTIFACT_ROOT` when runs are stored outside `logs/rsl_rl`.
+For Codex Desktop on this Windows/WSL workstation, register the project server
+once from PowerShell:
+
+```powershell
+.\scripts\register_codex_mcp.ps1
+```
+
+That configures Codex to start `scripts/ascento_mcp_server.sh` inside the
+`Ubuntu` WSL distribution, so it uses the project's locked Linux runtime rather
+than a separate host Python environment. Use `-Distro <name>` for a different
+distribution, and `-Replace` only when intentionally replacing an existing
+`ascento` MCP registration. Open a new Codex Desktop task (or restart the app)
+after registration; a running task cannot acquire new tools mid-session.
+
+The MCP server exposes run listing/progress/details/logs/telemetry, run
+start/stop/metadata updates/comparison, checkpoint resolution, immutable suite
+listing, full evaluation, report inspection/comparison/ZIP export, policy
+capture, and deterministic evaluator preflight. Set `ASCENTO_ARTIFACT_ROOT`
+and `ASCENTO_EVALUATION_ROOT` when those artifacts live outside the default
+`logs/rsl_rl` and `evaluations` directories.
 
 ## Validate the plant
 

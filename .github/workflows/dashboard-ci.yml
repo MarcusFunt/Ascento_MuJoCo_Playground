@@ -15,9 +15,15 @@ on:
       - 'src/ascento_mjlab/robot_cfg.py'
       - 'src/ascento_mjlab/horizon_curriculum.py'
       - 'src/ascento_mjlab/physics.py'
+      - 'src/ascento_mjlab/cli.py'
+      - 'src/ascento_mjlab/mcp_server.py'
+      - 'src/ascento_mjlab/operations.py'
       - 'benchmarks/**'
       - 'tests_mjlab/**'
       - 'tests_dashboard/**'
+      - 'docs/**'
+      - '.codex/skills/**'
+      - 'README.md'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.gitignore'
@@ -39,9 +45,15 @@ on:
       - 'src/ascento_mjlab/robot_cfg.py'
       - 'src/ascento_mjlab/horizon_curriculum.py'
       - 'src/ascento_mjlab/physics.py'
+      - 'src/ascento_mjlab/cli.py'
+      - 'src/ascento_mjlab/mcp_server.py'
+      - 'src/ascento_mjlab/operations.py'
       - 'benchmarks/**'
       - 'tests_mjlab/**'
       - 'tests_dashboard/**'
+      - 'docs/**'
+      - '.codex/skills/**'
+      - 'README.md'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.gitignore'
@@ -76,7 +88,7 @@ jobs:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - run: uv run --frozen --extra cpu --extra dashboard ruff check .
-      - run: bash -n scripts/run_dashboard.sh scripts/maintain.sh scripts/install_supervisor.sh scripts/setup_tailscale.sh
+      - run: bash -n scripts/run_dashboard.sh scripts/maintain.sh scripts/install_supervisor.sh scripts/setup_tailscale.sh scripts/ascento_mcp_server.sh
       - run: bash scripts/maintain.sh --help
       - run: bash scripts/install_supervisor.sh --help
       - run: bash scripts/setup_tailscale.sh --help

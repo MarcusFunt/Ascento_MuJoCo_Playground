@@ -1,0 +1,460 @@
+{
+  "schema_version": 1,
+  "kind": "ascento-project-manifest",
+  "repository": {
+    "name": "Ascento MuJoCo Playground",
+    "default_branch": "main",
+    "purpose": "Simulation-only motion authoring for an Ascento Guard-2-like wheel-legged robot.",
+    "deployment_scope": "simulation_only",
+    "canonical_human_docs": "docs/README.md",
+    "canonical_cli_inventory": "docs/cli-reference.json",
+    "canonical_mcp_inventory": "docs/mcp-tools.json"
+  },
+  "runtime": {
+    "supported_host": {
+      "operating_system": "Linux or WSL2",
+      "architecture": "x86_64",
+      "python": ">=3.11,<3.14",
+      "package_manager": "uv"
+    },
+    "frameworks": {
+      "mjlab": "1.6.0",
+      "simulator": "MuJoCo Warp",
+      "optimizer": "RSL-RL PPO",
+      "dashboard": "FastAPI",
+      "frontend": "Vite/React",
+      "mcp_transport": "stdio"
+    },
+    "compute_extras": {
+      "cu128": "CUDA 12.8-compatible Torch environment",
+      "cpu": "CPU Torch environment",
+      "dashboard": "FastAPI and Uvicorn",
+      "mcp": "MCP SDK",
+      "mutually_exclusive": [
+        "cu128",
+        "cpu"
+      ]
+    },
+    "physics_profile": {
+      "name": "animation_high_authority",
+      "sim_dt_s": 0.002,
+      "decimation": 5,
+      "control_dt_s": 0.01,
+      "peak_effort_nm": 65.0,
+      "default_root_height_m": 0.75,
+      "enabled_models": [
+        "linear torque-speed envelope",
+        "controller speed protection",
+        "finite actuator response"
+      ],
+      "not_enabled": [
+        "communication delay",
+        "sensor noise",
+        "thermal model",
+        "physical robot safety model"
+      ],
+      "source": "src/ascento_mjlab/physics.py"
+    }
+  },
+  "tasks": [
+    {
+      "id": "Ascento-Balance-Flat",
+      "stage": 1,
+      "goal": "Supported, disturbance-tolerant flat-ground balance.",
+      "environment": "src/ascento_mjlab/tasks/balance/env_cfg.py",
+      "rl_config": "src/ascento_mjlab/tasks/balance/rl_cfg.py",
+      "evaluation_suites": [
+        "balance_dev_v1",
+        "balance_gate_v1",
+        "balance_gate_v2"
+      ],
+      "runner": "HorizonCurriculumRunner"
+    },
+    {
+      "id": "Ascento-Velocity-Flat",
+      "stage": 2,
+      "goal": "Twist and height command tracking on the balance plant.",
+      "environment": "src/ascento_mjlab/tasks/velocity/env_cfg.py",
+      "rl_config": "src/ascento_mjlab/tasks/velocity/rl_cfg.py",
+      "evaluation_suites": [
+        "velocity_gate_v1"
+      ],
+      "runner": "HorizonCurriculumRunner"
+    },
+    {
+      "id": "Ascento-Recovery-Flat",
+      "stage": 3,
+      "goal": "Wide-reset and disturbed-state recovery with strict success/hold metrics.",
+      "environment": "src/ascento_mjlab/tasks/recovery/env_cfg.py",
+      "rl_config": "src/ascento_mjlab/tasks/recovery/rl_cfg.py",
+      "evaluation_suites": [
+        "recovery_gate_v1"
+      ],
+      "runner": "default mjlab runner"
+    },
+    {
+      "id": "Ascento-Jump-Flat",
+      "stage": 4,
+      "goal": "Flat-ground crouch, takeoff, landing, distance, and post-landing recovery.",
+      "environment": "src/ascento_mjlab/tasks/jump/env_cfg.py",
+      "rl_config": "src/ascento_mjlab/tasks/jump/rl_cfg.py",
+      "evaluation_suites": [
+        "jump_gate_v1"
+      ],
+      "runner": "default mjlab runner"
+    }
+  ],
+  "evaluation": {
+    "suite_directory": "benchmarks/suites",
+    "result_states": [
+      "PASS",
+      "FAIL",
+      "INCOMPLETE",
+      "INVALID"
+    ],
+    "suites": [
+      {
+        "id": "balance_dev_v1",
+        "task": "Ascento-Balance-Flat",
+        "policy_mode": "deterministic",
+        "scenario_count": 896,
+        "family_count": 5,
+        "gate_count": 6
+      },
+      {
+        "id": "balance_gate_v1",
+        "task": "Ascento-Balance-Flat",
+        "policy_mode": "deterministic",
+        "scenario_count": 3584,
+        "family_count": 5,
+        "gate_count": 12
+      },
+      {
+        "id": "balance_gate_v2",
+        "task": "Ascento-Balance-Flat",
+        "policy_mode": "deterministic",
+        "scenario_count": 3840,
+        "family_count": 6,
+        "gate_count": 15
+      },
+      {
+        "id": "velocity_gate_v1",
+        "task": "Ascento-Velocity-Flat",
+        "policy_mode": "deterministic",
+        "scenario_count": 1024,
+        "family_count": 2,
+        "gate_count": 6
+      },
+      {
+        "id": "recovery_gate_v1",
+        "task": "Ascento-Recovery-Flat",
+        "policy_mode": "deterministic",
+        "scenario_count": 2304,
+        "family_count": 2,
+        "gate_count": 6
+      },
+      {
+        "id": "jump_gate_v1",
+        "task": "Ascento-Jump-Flat",
+        "policy_mode": "deterministic",
+        "scenario_count": 1024,
+        "family_count": 1,
+        "gate_count": 8
+      }
+    ],
+    "artifact_root": {
+      "environment_variable": "ASCENTO_EVALUATION_ROOT",
+      "default": "evaluations",
+      "complete_files": [
+        "manifest.json",
+        "suite.json",
+        "resolved_scenarios.jsonl",
+        "results.sqlite",
+        "summary.json",
+        "consistency.json",
+        "gate.json",
+        "failures.json",
+        "report.html"
+      ],
+      "optional_files": [
+        "clips_manifest.json",
+        "clips/"
+      ],
+      "partial_artifact_rule": "A directory with suite.json and no manifest.json is listed as INCOMPLETE."
+    }
+  },
+  "artifacts": {
+    "managed_run_root": {
+      "environment_variable": "ASCENTO_ARTIFACT_ROOT",
+      "default": "logs/rsl_rl",
+      "metadata_file": "run_metadata.json",
+      "checkpoint_resolution": "Recorded checkpoint_path when valid, otherwise latest numbered model_*.pt or checkpoint_*.pt below the run."
+    },
+    "capture_root": {
+      "default": "captures",
+      "formats": [
+        "NPZ state channels",
+        "optional MP4 clips"
+      ]
+    },
+    "git_ignored_generated_roots": [
+      "logs",
+      "checkpoints",
+      "captures",
+      "evaluations"
+    ]
+  },
+  "environment_variables": [
+    {
+      "name": "ASCENTO_ARTIFACT_ROOT",
+      "default": "logs/rsl_rl",
+      "purpose": "Shared managed-training artifact root."
+    },
+    {
+      "name": "ASCENTO_EVALUATION_ROOT",
+      "default": "evaluations",
+      "purpose": "Shared immutable-evaluation artifact root."
+    },
+    {
+      "name": "ASCENTO_STALE_AFTER_SECONDS",
+      "default": "90",
+      "purpose": "Dashboard stale-run threshold."
+    },
+    {
+      "name": "ASCENTO_DASHBOARD_DIST",
+      "default": "dashboard/frontend/dist",
+      "purpose": "Dashboard static frontend directory."
+    },
+    {
+      "name": "ASCENTO_DASHBOARD_HOST",
+      "default": "127.0.0.1",
+      "purpose": "Host used by scripts/run_dashboard.sh."
+    },
+    {
+      "name": "ASCENTO_DASHBOARD_PORT",
+      "default": "8000",
+      "purpose": "Local dashboard port in maintained Docker/launcher paths."
+    },
+    {
+      "name": "ASCENTO_SUPERVISOR_SOCKET",
+      "default": "/run/ascento-supervisor/supervisor.sock",
+      "purpose": "Restricted host-supervisor Unix socket location."
+    },
+    {
+      "name": "ASCENTO_COMPUTE",
+      "default": "auto",
+      "purpose": "Maintenance-script compute selection: auto, cu128, or cpu."
+    },
+    {
+      "name": "ASCENTO_COMPUTE_EXTRA",
+      "default": "context-specific",
+      "purpose": "Selected uv/Docker compute extra used by preflight and maintained image."
+    },
+    {
+      "name": "ASCENTO_BRANCH",
+      "default": "main",
+      "purpose": "Maintenance-script target branch."
+    },
+    {
+      "name": "ASCENTO_INSTALL_DIR",
+      "default": "current checkout or ~/Ascento_MuJoCo_Playground",
+      "purpose": "Maintenance-script checkout location."
+    },
+    {
+      "name": "ASCENTO_REPOSITORY_COMMIT",
+      "default": "unknown",
+      "purpose": "Image/launcher source commit when Git is unavailable."
+    },
+    {
+      "name": "ASCENTO_REPOSITORY_BRANCH",
+      "default": "unknown",
+      "purpose": "Image/launcher source branch when Git is unavailable."
+    },
+    {
+      "name": "ASCENTO_DISABLE_DENSE_SHAPING",
+      "default": "unset",
+      "purpose": "Set to 1 for recovery/jump dense-shaping ablations without changing strict evaluator metrics."
+    },
+    {
+      "name": "ASCENTO_BALANCE_DRIFT_PENALTY_SCALE",
+      "default": "1.0",
+      "purpose": "Balance-training drift penalty experiment multiplier."
+    },
+    {
+      "name": "ASCENTO_BALANCE_STABILIZATION_WEIGHT",
+      "default": "1.0",
+      "purpose": "Balance-training settled-stabilization experiment multiplier."
+    },
+    {
+      "name": "ASCENTO_BALANCE_PUSH_INTERVAL_MIN_S",
+      "default": "4.0",
+      "purpose": "Minimum balance-training push interval in seconds."
+    },
+    {
+      "name": "ASCENTO_BALANCE_PUSH_INTERVAL_MAX_S",
+      "default": "6.0",
+      "purpose": "Maximum balance-training push interval in seconds."
+    },
+    {
+      "name": "ASCENTO_TAILSCALE_HOSTNAME",
+      "default": "ascento-dashboard",
+      "purpose": "Private Tailscale dashboard node hostname."
+    },
+    {
+      "name": "ASCENTO_TAILSCALE_EXTRA_ARGS",
+      "default": "",
+      "purpose": "Additional tailscaled login arguments."
+    },
+    {
+      "name": "ASCENTO_MUJOCO_GL",
+      "default": "disable in base compose; egl in GPU overlay",
+      "purpose": "MuJoCo OpenGL backend."
+    },
+    {
+      "name": "ASCENTO_BALANCE_CHECKPOINT",
+      "default": null,
+      "purpose": "Balance checkpoint input for scripts/preflight_long_run.sh."
+    },
+    {
+      "name": "ASCENTO_VELOCITY_CHECKPOINT",
+      "default": null,
+      "purpose": "Velocity checkpoint input for scripts/preflight_long_run.sh."
+    },
+    {
+      "name": "ASCENTO_RECOVERY_CHECKPOINT",
+      "default": null,
+      "purpose": "Recovery checkpoint input for scripts/preflight_long_run.sh."
+    }
+  ],
+  "interfaces": {
+    "cli": {
+      "entrypoint": "ascento",
+      "source": "src/ascento_mjlab/cli.py",
+      "machine_reference": "docs/cli-reference.json",
+      "human_reference": "docs/cli-reference.md"
+    },
+    "mcp": {
+      "entrypoint": "ascento-mcp",
+      "source": "src/ascento_mjlab/mcp_server.py",
+      "machine_reference": "docs/mcp-tools.json",
+      "human_reference": "docs/mcp-reference.md",
+      "codex_windows_registration": "scripts/register_codex_mcp.ps1",
+      "wsl_launcher": "scripts/ascento_mcp_server.sh"
+    },
+    "dashboard": {
+      "backend": "dashboard/app.py",
+      "default_bind": "127.0.0.1:8000",
+      "openapi_path": "/openapi.json",
+      "human_reference": "docs/dashboard.md",
+      "api": [
+        {
+          "method": "GET",
+          "path": "/api/health",
+          "operation": "read"
+        },
+        {
+          "method": "GET",
+          "path": "/api/config",
+          "operation": "read"
+        },
+        {
+          "method": "GET",
+          "path": "/api/system",
+          "operation": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/api/system/update",
+          "operation": "guarded_mutation"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs",
+          "operation": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/api/runs",
+          "operation": "mutation"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/compare",
+          "operation": "read"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{run_id}",
+          "operation": "read"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{run_id}/progress",
+          "operation": "read"
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/runs/{run_id}",
+          "operation": "mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/runs/{run_id}/stop",
+          "operation": "mutation"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{run_id}/summary.json",
+          "operation": "read"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{run_id}/telemetry",
+          "operation": "read"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{run_id}/logs",
+          "operation": "read"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{run_id}/logs/stream",
+          "operation": "read_stream"
+        }
+      ]
+    }
+  },
+  "scripts": [
+    {
+      "path": "scripts/maintain.sh",
+      "purpose": "Bootstrap/update locked runtime, build Docker/frontend, and start dashboard."
+    },
+    {
+      "path": "scripts/preflight_long_run.sh",
+      "purpose": "Run production-style plant, test, PPO, and deterministic evaluator preflight."
+    },
+    {
+      "path": "scripts/install_supervisor.sh",
+      "purpose": "Install guarded host-side dashboard update supervisor."
+    },
+    {
+      "path": "scripts/setup_tailscale.sh",
+      "purpose": "Enroll private Tailscale dashboard sidecar."
+    },
+    {
+      "path": "scripts/register_codex_mcp.ps1",
+      "purpose": "Register project MCP server for Codex through WSL."
+    }
+  ],
+  "source_of_truth": {
+    "dependencies_and_entrypoints": "pyproject.toml",
+    "registered_tasks": "src/ascento_mjlab/tasks/__init__.py",
+    "physical_constants": "src/ascento_mjlab/physics.py",
+    "cli_parser": "src/ascento_mjlab/cli.py",
+    "mcp_tools": "src/ascento_mjlab/mcp_server.py",
+    "dashboard_http_api": "dashboard/app.py",
+    "evaluation_suites": "benchmarks/suites/*.toml",
+    "ci": ".github/workflows/dashboard-ci.yml"
+  }
+}

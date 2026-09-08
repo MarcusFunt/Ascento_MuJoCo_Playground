@@ -1,0 +1,522 @@
+{
+  "schema_version": 1,
+  "kind": "ascento-mcp-tool-inventory",
+  "server": {
+    "name": "ascento",
+    "transport": "stdio",
+    "entrypoint": "ascento-mcp",
+    "source": "src/ascento_mjlab/mcp_server.py",
+    "stdout_contract": "Reserved for MCP JSON-RPC.",
+    "artifact_root": {
+      "environment_variable": "ASCENTO_ARTIFACT_ROOT",
+      "default": "logs/rsl_rl"
+    },
+    "evaluation_root": {
+      "environment_variable": "ASCENTO_EVALUATION_ROOT",
+      "default": "evaluations"
+    }
+  },
+  "tools": [
+    {
+      "name": "list_runs",
+      "operation": "read",
+      "cost": "low",
+      "inputs": [
+        {
+          "name": "active_only",
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "returns": "Run summaries with state, task, progress, and health."
+    },
+    {
+      "name": "get_run_progress",
+      "operation": "read",
+      "cost": "low",
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "returns": "Cheap latest progress snapshot."
+    },
+    {
+      "name": "get_run_details",
+      "operation": "read",
+      "cost": "medium",
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "returns": "Run detail including telemetry, health, provenance, and artifact metadata."
+    },
+    {
+      "name": "get_run_logs",
+      "operation": "read",
+      "cost": "low",
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "tail",
+          "type": "integer",
+          "default": 200,
+          "minimum": 1,
+          "maximum": 5000
+        }
+      ],
+      "returns": "Bounded training log tail."
+    },
+    {
+      "name": "get_run_telemetry",
+      "operation": "read",
+      "cost": "low",
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 2000
+        }
+      ],
+      "returns": "Bounded normalized telemetry history."
+    },
+    {
+      "name": "get_dashboard_health",
+      "operation": "read",
+      "cost": "low",
+      "inputs": [],
+      "returns": "Dashboard health, startup warnings, and repository-version status."
+    },
+    {
+      "name": "start_run",
+      "operation": "mutation",
+      "cost": "long_running",
+      "authorization_required": true,
+      "inputs": [
+        {
+          "name": "task",
+          "type": "string",
+          "default": "Ascento-Balance-Flat"
+        },
+        {
+          "name": "display_name",
+          "type": "string",
+          "default": "Ascento run"
+        },
+        {
+          "name": "purpose",
+          "type": "string",
+          "default": "exploratory"
+        },
+        {
+          "name": "tags",
+          "type": "string[]|null",
+          "default": null
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "name": "parent_run_id",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "parent_checkpoint",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "envs",
+          "type": "integer|null",
+          "default": null
+        },
+        {
+          "name": "iterations",
+          "type": "integer|null",
+          "default": null
+        },
+        {
+          "name": "seed",
+          "type": "integer|null",
+          "default": null
+        },
+        {
+          "name": "episode_horizon_s",
+          "type": "number|null",
+          "default": null
+        },
+        {
+          "name": "training_args",
+          "type": "string[]|null",
+          "default": null
+        }
+      ],
+      "returns": "Created managed-run metadata and stable run ID."
+    },
+    {
+      "name": "stop_run",
+      "operation": "mutation",
+      "cost": "medium",
+      "authorization_required": true,
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "default": "user_requested"
+        }
+      ],
+      "returns": "Graceful-stop request status."
+    },
+    {
+      "name": "update_run_metadata",
+      "operation": "mutation",
+      "cost": "low",
+      "authorization_required": true,
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "display_name",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "notes",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "purpose",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "tags",
+          "type": "string[]|null",
+          "default": null
+        },
+        {
+          "name": "parent_run_id",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "parent_checkpoint",
+          "type": "string|null",
+          "default": null
+        }
+      ],
+      "validation": "At least one field besides run_id is required.",
+      "returns": "Updated run metadata."
+    },
+    {
+      "name": "compare_runs",
+      "operation": "read",
+      "cost": "medium",
+      "inputs": [
+        {
+          "name": "run_ids",
+          "type": "string[]",
+          "required": true,
+          "minimum_items": 2,
+          "maximum_items": 8
+        }
+      ],
+      "returns": "Normalized latest metrics across runs."
+    },
+    {
+      "name": "get_run_checkpoint",
+      "operation": "read",
+      "cost": "low",
+      "inputs": [
+        {
+          "name": "run_id",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "returns": "Latest usable managed-run checkpoint path."
+    },
+    {
+      "name": "list_evaluation_suites",
+      "operation": "read",
+      "cost": "low",
+      "inputs": [],
+      "returns": "Immutable suite IDs with task, family/scenario/gate counts, and policy mode."
+    },
+    {
+      "name": "list_evaluation_reports",
+      "operation": "read",
+      "cost": "low",
+      "inputs": [
+        {
+          "name": "output_root",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 500
+        }
+      ],
+      "returns": "Completed and incomplete evaluation report summaries."
+    },
+    {
+      "name": "get_evaluation_report",
+      "operation": "read",
+      "cost": "low",
+      "inputs": [
+        {
+          "name": "evaluation",
+          "type": "evaluation_id_or_path",
+          "required": true
+        },
+        {
+          "name": "output_root",
+          "type": "string|null",
+          "default": null
+        }
+      ],
+      "returns": "Manifest, suite, gates, consistency checks, failures, and clips metadata."
+    },
+    {
+      "name": "evaluate_policy",
+      "operation": "mutation",
+      "cost": "long_running_synchronous",
+      "authorization_required": true,
+      "inputs": [
+        {
+          "name": "suite",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "checkpoint",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "run_id",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "batch_size",
+          "type": "integer",
+          "default": 512
+        },
+        {
+          "name": "device",
+          "type": "string",
+          "default": "auto"
+        },
+        {
+          "name": "output_root",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "render_clips",
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "name": "clip_takes",
+          "type": "integer",
+          "default": 3
+        },
+        {
+          "name": "clip_steps",
+          "type": "integer",
+          "default": 600
+        }
+      ],
+      "validation": "Supply exactly one of checkpoint and run_id.",
+      "returns": "Completed evaluation artifact details and gate status."
+    },
+    {
+      "name": "compare_evaluation_reports",
+      "operation": "read",
+      "cost": "medium",
+      "inputs": [
+        {
+          "name": "baseline",
+          "type": "evaluation_id_or_path",
+          "required": true
+        },
+        {
+          "name": "candidate",
+          "type": "evaluation_id_or_path",
+          "required": true
+        },
+        {
+          "name": "output_root",
+          "type": "string|null",
+          "default": null
+        }
+      ],
+      "returns": "Paired metric deltas for compatible stored scenarios."
+    },
+    {
+      "name": "archive_evaluation_report",
+      "operation": "mutation",
+      "cost": "medium",
+      "authorization_required": true,
+      "inputs": [
+        {
+          "name": "evaluation",
+          "type": "evaluation_id_or_path",
+          "required": true
+        },
+        {
+          "name": "output_root",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "output",
+          "type": "string|null",
+          "default": null
+        }
+      ],
+      "returns": "ZIP archive path."
+    },
+    {
+      "name": "capture_policy",
+      "operation": "mutation",
+      "cost": "long_running",
+      "authorization_required": true,
+      "inputs": [
+        {
+          "name": "checkpoint",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "run_id",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "task",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "takes",
+          "type": "integer",
+          "default": 3
+        },
+        {
+          "name": "steps",
+          "type": "integer",
+          "default": 1000
+        },
+        {
+          "name": "output_dir",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "video_dir",
+          "type": "string|null",
+          "default": null
+        },
+        {
+          "name": "device",
+          "type": "string",
+          "default": "auto"
+        }
+      ],
+      "validation": "Supply exactly one of checkpoint and run_id.",
+      "returns": "Capture manifest with NPZ and optional MP4 paths."
+    },
+    {
+      "name": "run_evaluator_preflight",
+      "operation": "mutation",
+      "cost": "long_running",
+      "authorization_required": true,
+      "inputs": [
+        {
+          "name": "balance_checkpoint",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "velocity_checkpoint",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "recovery_checkpoint",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "device",
+          "type": "string",
+          "default": "auto"
+        },
+        {
+          "name": "max_scenarios",
+          "type": "integer",
+          "default": 64
+        },
+        {
+          "name": "batch_size",
+          "type": "integer",
+          "default": 64
+        }
+      ],
+      "returns": "Deterministic preflight results for balance, velocity, and recovery."
+    }
+  ],
+  "monitoring_policy": {
+    "preferred_interval_seconds": [
+      30,
+      60
+    ],
+    "first_choice": [
+      "get_run_progress",
+      "get_dashboard_health"
+    ],
+    "bounded_detail": [
+      "get_run_telemetry",
+      "get_run_logs"
+    ],
+    "avoid_as_heartbeat": [
+      "evaluate_policy",
+      "capture_policy"
+    ]
+  }
+}

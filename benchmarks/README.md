@@ -4,6 +4,10 @@ This directory contains immutable, versioned evaluation suites for trained
 Ascento policies. Training rewards are diagnostics only; benchmark acceptance is
 defined by physical/task metrics and explicit gates.
 
+See [../docs/evaluation.md](../docs/evaluation.md) for the evaluator lifecycle,
+artifact contract, clips, replay, and command examples. The full project
+documentation map is [../docs/README.md](../docs/README.md).
+
 ## Rules
 
 1. A published suite is immutable. If a reset range, threshold, metric

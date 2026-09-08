@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
@@ -126,7 +127,116 @@ class MotionRecorder(RecorderTerm):
         np.savez_compressed(path, **arrays)
 
 
-def main() -> None:
+def capture(
+    *,
+    task: str,
+    checkpoint: Path | None,
+    takes: int,
+    steps: int,
+    output_dir: Path,
+    video_dir: Path | None,
+    device: str,
+) -> list[dict[str, Any]]:
+    """Capture named state channels and optional policy videos for one checkpoint.
+
+    Returning a small manifest makes capture useful to the operations CLI and
+    MCP server without requiring either caller to scrape command-line output.
+    """
+    if takes < 1 or steps < 1:
+        raise ValueError("takes and steps must be positive")
+    if checkpoint is not None:
+        checkpoint = checkpoint.expanduser().resolve()
+        if not checkpoint.is_file():
+            raise FileNotFoundError(f"checkpoint does not exist: {checkpoint}")
+    output_dir = output_dir.expanduser().resolve()
+    if video_dir is not None:
+        video_dir = video_dir.expanduser().resolve()
+        video_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_hash = ""
+    if checkpoint is not None:
+        checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+
+    captures: list[dict[str, Any]] = []
+    for take in range(takes):
+        cfg = _configure_capture_cfg(load_env_cfg(task, play=True), take=take)
+        base_env = ManagerBasedRlEnv(
+            cfg,
+            device=device,
+            render_mode="rgb_array" if video_dir is not None else None,
+        )
+        raw_env = (
+            VideoRecorder(
+                base_env,
+                video_folder=video_dir,
+                step_trigger=lambda step: step == 0,
+                video_length=steps,
+                name_prefix=f"take-{take:03d}",
+                disable_logger=True,
+            )
+            if video_dir is not None
+            else base_env
+        )
+        env = RslRlVecEnvWrapper(raw_env, clip_actions=load_rl_cfg(task).clip_actions)
+        try:
+            if checkpoint is None:
+
+                def policy(obs):
+                    del obs
+                    return torch.zeros((1, 6), device=device)
+
+            else:
+                agent_cfg = load_rl_cfg(task)
+                runner_cls = load_runner_cls(task) or MjlabOnPolicyRunner
+                runner = runner_cls(env, asdict(agent_cfg), device=device)
+                runner.load(
+                    str(checkpoint),
+                    load_cfg={"actor": True},
+                    strict=True,
+                    map_location=device,
+                )
+                policy = runner.get_inference_policy(device=device)
+            captured_steps, ended_on_done = _run_capture_steps(env, policy, steps=steps)
+            recorder = base_env.recorder_manager.get_term("motion")
+            capture_path = output_dir / f"take_{take:03d}.npz"
+            recorder.export(
+                capture_path,
+                metadata={
+                    "task": task,
+                    "seed": str(take),
+                    "fps": str(round(1.0 / base_env.step_dt)),
+                    "physics_timestep_s": str(float(base_env.cfg.sim.mujoco.timestep)),
+                    "policy_timestep_s": str(float(base_env.step_dt)),
+                    "checkpoint": str(checkpoint) if checkpoint is not None else "",
+                    "model_sha256": checkpoint_hash,
+                    "physics_profile": PHYSICS_PROFILE.name,
+                    "reward_schema": REWARD_SCHEMA_VERSION,
+                    "captured_steps": str(captured_steps),
+                    "ended_on_done": str(ended_on_done).lower(),
+                },
+            )
+        finally:
+            env.close()
+        video_paths = []
+        if video_dir is not None:
+            video_paths = [
+                str(path)
+                for path in sorted(video_dir.glob(f"take-{take:03d}*.mp4"))
+                if path.is_file()
+            ]
+        captures.append(
+            {
+                "take": take,
+                "capture_path": str(capture_path),
+                "captured_steps": captured_steps,
+                "ended_on_done": ended_on_done,
+                "video_paths": video_paths,
+            }
+        )
+    return captures
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", default="Ascento-Balance-Flat")
     parser.add_argument("--checkpoint", type=Path, default=None, help="RSL-RL checkpoint to play")
@@ -137,72 +247,25 @@ def main() -> None:
         "--video-dir", type=Path, default=None, help="Optional MP4 output directory"
     )
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
-    if args.takes < 1 or args.steps < 1:
-        parser.error("--takes and --steps must be positive")
-    if args.checkpoint is not None and not args.checkpoint.is_file():
-        parser.error(f"checkpoint does not exist: {args.checkpoint}")
-
-    checkpoint_hash = ""
-    if args.checkpoint is not None:
-        checkpoint_hash = hashlib.sha256(args.checkpoint.read_bytes()).hexdigest()
-
-    for take in range(args.takes):
-        cfg = _configure_capture_cfg(load_env_cfg(args.task, play=True), take=take)
-        base_env = ManagerBasedRlEnv(
-            cfg,
+    try:
+        captures = capture(
+            task=args.task,
+            checkpoint=args.checkpoint,
+            takes=args.takes,
+            steps=args.steps,
+            output_dir=args.output_dir,
+            video_dir=args.video_dir,
             device=args.device,
-            render_mode="rgb_array" if args.video_dir is not None else None,
         )
-        raw_env = (
-            VideoRecorder(
-                base_env,
-                video_folder=args.video_dir,
-                step_trigger=lambda step: step == 0,
-                video_length=args.steps,
-                name_prefix=f"take-{take:03d}",
-                disable_logger=True,
-            )
-            if args.video_dir is not None
-            else base_env
-        )
-        env = RslRlVecEnvWrapper(raw_env, clip_actions=load_rl_cfg(args.task).clip_actions)
-        if args.checkpoint is None:
-
-            def policy(obs):
-                del obs
-                return torch.zeros((1, 6), device=args.device)
-
-        else:
-            agent_cfg = load_rl_cfg(args.task)
-            runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner
-            runner = runner_cls(env, asdict(agent_cfg), device=args.device)
-            runner.load(
-                str(args.checkpoint),
-                load_cfg={"actor": True},
-                strict=True,
-                map_location=args.device,
-            )
-            policy = runner.get_inference_policy(device=args.device)
-        captured_steps, ended_on_done = _run_capture_steps(env, policy, steps=args.steps)
-        recorder = base_env.recorder_manager.get_term("motion")
-        recorder.export(
-            args.output_dir / f"take_{take:03d}.npz",
-            metadata={
-                "task": args.task,
-                "seed": str(take),
-                "fps": str(round(1.0 / base_env.step_dt)),
-                "physics_timestep_s": str(float(base_env.cfg.sim.mujoco.timestep)),
-                "policy_timestep_s": str(float(base_env.step_dt)),
-                "checkpoint": str(args.checkpoint) if args.checkpoint is not None else "",
-                "model_sha256": checkpoint_hash,
-                "physics_profile": PHYSICS_PROFILE.name,
-                "reward_schema": REWARD_SCHEMA_VERSION,
-                "captured_steps": str(captured_steps),
-                "ended_on_done": str(ended_on_done).lower(),
-            },
-        )
-        env.close()
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    print(json.dumps({"task": args.task, "captures": captures}, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

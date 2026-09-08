@@ -150,13 +150,12 @@ function MetricChart({ records, metric, label, description, interpretation }) {
               labelFormatter={(iteration) => `Iteration ${fmtNumber(iteration, 0)}`}
             />
             <Line
-              type="monotone"
+              type="linear"
               dataKey={metric}
               dot={false}
               isAnimationActive={false}
               stroke="var(--chart-line)"
               strokeWidth={2.25}
-              connectNulls
             />
           </LineChart>
         </ResponsiveContainer>
@@ -326,10 +325,10 @@ function App() {
     // Archived runs have immutable telemetry. Re-reading their logs every
     // poll is expensive on a mounted workspace without yielding newer data.
     if (!selectedRunIsLive) return undefined
-    const timer = setInterval(
-      () => refreshSelected(selectedId, { includeHistory: false }),
-      POLL_MS,
-    )
+    // Re-sample the complete history on each live refresh. Appending one
+    // snapshot per poll creates a sparse tail beside dense historical points,
+    // which makes chart shape depend on refresh cadence rather than training.
+    const timer = setInterval(() => refreshSelected(selectedId), POLL_MS)
     return () => clearInterval(timer)
   }, [selectedId, selectedRunIsLive])
 

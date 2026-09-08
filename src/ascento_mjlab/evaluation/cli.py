@@ -264,31 +264,33 @@ def evaluate(
         worst=worst,
     )
     if render_clips:
+        from ascento_mjlab.tools.capture_motion import capture
+
         clips_dir = output_dir / "clips"
-        command = [
-            sys.executable,
-            "-m",
-            "ascento_mjlab.tools.capture_motion",
-            "--task",
-            suite.task,
-            "--checkpoint",
-            str(checkpoint),
-            "--takes",
-            str(clip_takes),
-            "--steps",
-            str(clip_steps),
-            "--output-dir",
-            str(clips_dir),
-            "--video-dir",
-            str(clips_dir / "videos"),
-            "--device",
-            device,
-        ]
-        clip_payload: dict[str, object] = {"requested": True, "command": command}
+        clip_payload: dict[str, object] = {
+            "requested": True,
+            "task": suite.task,
+            "checkpoint": str(checkpoint),
+            "takes": clip_takes,
+            "steps": clip_steps,
+            "device": device,
+        }
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True)
-            clip_payload.update({"status": "ok", "stdout": completed.stdout[-4000:]})
-        except (OSError, subprocess.CalledProcessError) as error:
+            clip_payload.update(
+                {
+                    "status": "ok",
+                    "captures": capture(
+                        task=suite.task,
+                        checkpoint=checkpoint,
+                        takes=clip_takes,
+                        steps=clip_steps,
+                        output_dir=clips_dir,
+                        video_dir=clips_dir / "videos",
+                        device=device,
+                    ),
+                }
+            )
+        except (OSError, RuntimeError, ValueError) as error:
             clip_payload.update({"status": "error", "error": str(error)})
         write_json(output_dir / "clips_manifest.json", clip_payload)
     return status, output_dir

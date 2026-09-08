@@ -43,3 +43,30 @@ def test_unified_cli_exposes_logs_comparison_and_dashboard_commands():
     assert logs.tail == 25
     assert compare.run_ids == ["run123", "run456"]
     assert dashboard.port == 9000
+
+
+def test_unified_cli_exposes_evaluation_capture_and_metadata_operations():
+    parser = build_parser()
+
+    evaluation = parser.parse_args(
+        [
+            "evaluate",
+            "run",
+            "--run-id",
+            "run123",
+            "--suite",
+            "balance_gate_v2",
+            "--render-clips",
+        ]
+    )
+    report = parser.parse_args(["evaluate", "report", "example-evaluation"])
+    archive = parser.parse_args(["evaluate", "archive", "example-evaluation"])
+    capture = parser.parse_args(["capture", "--run-id", "run123", "--video-dir", "videos"])
+    annotate = parser.parse_args(["run", "annotate", "run123", "--tag", "baseline"])
+
+    assert evaluation.run_id == "run123"
+    assert evaluation.render_clips is True
+    assert report.evaluation == "example-evaluation"
+    assert archive.evaluation == "example-evaluation"
+    assert capture.video_dir == "videos"
+    assert annotate.tag == ["baseline"]

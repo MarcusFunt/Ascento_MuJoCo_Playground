@@ -1,0 +1,723 @@
+{
+  "schema_version": 1,
+  "kind": "ascento-cli-reference",
+  "program": "ascento",
+  "source": "src/ascento_mjlab/cli.py",
+  "description": "Unified Ascento operations CLI.",
+  "invocation": {
+    "repository_root_required": true,
+    "recommended": [
+      "uv run --frozen --extra dashboard ascento <command>",
+      "uv run --frozen --extra cu128 --extra dashboard ascento <command>"
+    ],
+    "json_flag": "--json",
+    "path_resolution": "Repository relative unless an operation documents a different root."
+  },
+  "commands": {
+    "run": {
+      "description": "Start and manage filesystem-backed training runs.",
+      "common_options": [
+        {
+          "name": "--artifact-root",
+          "type": "path",
+          "default": "ASCENTO_ARTIFACT_ROOT or logs/rsl_rl",
+          "description": "Managed training artifact root."
+        },
+        {
+          "name": "--json",
+          "type": "boolean",
+          "default": false,
+          "description": "Emit structured JSON."
+        }
+      ],
+      "subcommands": {
+        "start": {
+          "description": "Start a managed training run.",
+          "usage": "ascento run start [options] [-- training_args...]",
+          "options": [
+            {
+              "name": "--task",
+              "type": "string",
+              "default": "Ascento-Balance-Flat"
+            },
+            {
+              "name": "--name",
+              "type": "string",
+              "default": null,
+              "description": "Compatibility alias for display name."
+            },
+            {
+              "name": "--display-name",
+              "type": "string",
+              "default": null
+            },
+            {
+              "name": "--purpose",
+              "type": "string",
+              "default": "exploratory"
+            },
+            {
+              "name": "--tag",
+              "type": "string",
+              "repeatable": true,
+              "default": []
+            },
+            {
+              "name": "--notes",
+              "type": "string",
+              "default": ""
+            },
+            {
+              "name": "--parent-run-id",
+              "type": "string",
+              "default": null
+            },
+            {
+              "name": "--parent-checkpoint",
+              "type": "string",
+              "default": null
+            },
+            {
+              "name": "--envs",
+              "type": "integer",
+              "default": null,
+              "effect": "Appends --env.scene.num-envs to trainer arguments."
+            },
+            {
+              "name": "--iterations",
+              "type": "integer",
+              "default": null,
+              "effect": "Appends --agent.max-iterations to trainer arguments."
+            },
+            {
+              "name": "--seed",
+              "type": "integer",
+              "default": null,
+              "effect": "Appends --agent.seed to trainer arguments."
+            },
+            {
+              "name": "--episode-horizon-s",
+              "type": "number",
+              "default": null
+            },
+            {
+              "name": "--foreground",
+              "type": "boolean",
+              "default": false
+            },
+            {
+              "name": "--interval",
+              "type": "number",
+              "default": 15.0,
+              "description": "Foreground polling interval in seconds."
+            }
+          ],
+          "positional": [
+            {
+              "name": "training_args",
+              "type": "remainder",
+              "required": false,
+              "description": "Native trainer arguments; place after --."
+            }
+          ],
+          "mutates": [
+            "managed run artifacts",
+            "process state"
+          ]
+        },
+        "list": {
+          "description": "List discovered managed runs.",
+          "options": [
+            {
+              "name": "--active",
+              "type": "boolean",
+              "default": false,
+              "description": "Keep starting, running, and stopping runs only."
+            }
+          ]
+        },
+        "status": {
+          "description": "Show detailed run status.",
+          "positionals": [
+            {
+              "name": "run_id",
+              "type": "string",
+              "required": true
+            }
+          ]
+        },
+        "progress": {
+          "description": "Show cheap latest live progress.",
+          "positionals": [
+            {
+              "name": "run_id",
+              "type": "string",
+              "required": true
+            }
+          ]
+        },
+        "monitor": {
+          "description": "Print only changed progress snapshots until terminal state.",
+          "positionals": [
+            {
+              "name": "run_id",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "name": "--interval",
+              "type": "number",
+              "default": 30.0
+            },
+            {
+              "name": "--once",
+              "type": "boolean",
+              "default": false
+            }
+          ]
+        },
+        "stop": {
+          "description": "Request graceful stop of an active run.",
+          "positionals": [
+            {
+              "name": "run_id",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "name": "--reason",
+              "type": "string",
+              "default": "user_requested"
+            }
+          ],
+          "mutates": [
+            "managed run process state"
+          ]
+        },
+        "logs": {
+          "description": "Read bounded training log tail.",
+          "positionals": [
+            {
+              "name": "run_id",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "name": "--tail",
+              "type": "integer",
+              "default": 200
+            }
+          ]
+        },
+        "telemetry": {
+          "description": "Read bounded normalized telemetry.",
+          "positionals": [
+            {
+              "name": "run_id",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "name": "--limit",
+              "type": "integer",
+              "default": 50
+            }
+          ]
+        },
+        "compare": {
+          "description": "Compare normalized latest metrics.",
+          "positionals": [
+            {
+              "name": "run_ids",
+              "type": "string[]",
+              "required": true,
+              "minimum_items": 2,
+              "maximum_items": 8
+            }
+          ]
+        },
+        "annotate": {
+          "description": "Update display metadata and lineage without moving artifacts.",
+          "positionals": [
+            {
+              "name": "run_id",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "name": "--display-name",
+              "type": "string",
+              "default": null
+            },
+            {
+              "name": "--notes",
+              "type": "string",
+              "default": null
+            },
+            {
+              "name": "--purpose",
+              "type": "string",
+              "default": null
+            },
+            {
+              "name": "--tag",
+              "type": "string",
+              "repeatable": true,
+              "default": null,
+              "effect": "Replaces the tag list when supplied."
+            },
+            {
+              "name": "--parent-run-id",
+              "type": "string",
+              "default": null
+            },
+            {
+              "name": "--parent-checkpoint",
+              "type": "string",
+              "default": null
+            }
+          ],
+          "validation": "At least one metadata option is required.",
+          "mutates": [
+            "run_metadata.json"
+          ]
+        }
+      }
+    },
+    "evaluate": {
+      "description": "Run, screen, compare, inspect, and archive immutable evaluations.",
+      "common_options": [
+        {
+          "name": "--artifact-root",
+          "type": "path",
+          "default": "ASCENTO_ARTIFACT_ROOT or logs/rsl_rl"
+        },
+        {
+          "name": "--output-root",
+          "type": "path",
+          "default": "ASCENTO_EVALUATION_ROOT or evaluations"
+        },
+        {
+          "name": "--json",
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "subcommands": {
+        "run": {
+          "description": "Evaluate a checkpoint or managed run against one immutable suite.",
+          "source": {
+            "mutually_exclusive_required": [
+              "--checkpoint",
+              "--run-id"
+            ]
+          },
+          "options": [
+            {
+              "name": "--checkpoint",
+              "type": "path",
+              "default": null
+            },
+            {
+              "name": "--run-id",
+              "type": "string",
+              "default": null
+            },
+            {
+              "name": "--suite",
+              "type": "string",
+              "required": true,
+              "description": "Suite ID or TOML path."
+            },
+            {
+              "name": "--batch-size",
+              "type": "integer",
+              "default": 512,
+              "minimum": 1
+            },
+            {
+              "name": "--device",
+              "type": "string",
+              "default": "auto"
+            },
+            {
+              "name": "--render-clips",
+              "type": "boolean",
+              "default": false
+            },
+            {
+              "name": "--clip-takes",
+              "type": "integer",
+              "default": 3,
+              "minimum": 1
+            },
+            {
+              "name": "--clip-steps",
+              "type": "integer",
+              "default": 600,
+              "minimum": 1
+            }
+          ],
+          "exit_codes": {
+            "0": "PASS",
+            "2": "Valid non-PASS evaluator status"
+          },
+          "mutates": [
+            "evaluation evidence directory",
+            "optional capture/video artifacts"
+          ]
+        },
+        "screen": {
+          "description": "Rank matching checkpoints against one suite.",
+          "positionals": [
+            {
+              "name": "checkpoints",
+              "type": "path_or_glob[]",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "name": "--suite",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "--batch-size",
+              "type": "integer",
+              "default": 256,
+              "minimum": 1
+            },
+            {
+              "name": "--device",
+              "type": "string",
+              "default": "auto"
+            },
+            {
+              "name": "--top",
+              "type": "integer",
+              "default": 3,
+              "minimum": 1
+            }
+          ],
+          "mutates": [
+            "evaluation evidence directories"
+          ]
+        },
+        "compare": {
+          "description": "Compute paired metric deltas for two completed evaluations.",
+          "positionals": [
+            {
+              "name": "baseline",
+              "type": "evaluation_id_or_path",
+              "required": true
+            },
+            {
+              "name": "candidate",
+              "type": "evaluation_id_or_path",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "name": "--output",
+              "type": "path",
+              "default": null,
+              "description": "JSON output below evaluation root unless absolute."
+            }
+          ]
+        },
+        "list": {
+          "description": "List completed and incomplete saved evaluation reports.",
+          "options": [
+            {
+              "name": "--limit",
+              "type": "integer",
+              "default": 50
+            }
+          ]
+        },
+        "report": {
+          "description": "Read gates, consistency, failures, suite, and clips metadata.",
+          "positionals": [
+            {
+              "name": "evaluation",
+              "type": "evaluation_id_or_path",
+              "required": true
+            }
+          ]
+        },
+        "archive": {
+          "description": "Create ZIP evidence copy of one evaluation.",
+          "positionals": [
+            {
+              "name": "evaluation",
+              "type": "evaluation_id_or_path",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "name": "--output",
+              "type": "path",
+              "default": null,
+              "validation": "Must be a .zip path below output root."
+            }
+          ],
+          "mutates": [
+            "ZIP archive"
+          ]
+        },
+        "suites": {
+          "description": "List immutable suite IDs and coverage."
+        },
+        "preflight": {
+          "description": "Run bounded deterministic evaluator preflight for core tasks.",
+          "options": [
+            {
+              "name": "--balance-checkpoint",
+              "type": "path",
+              "required": true
+            },
+            {
+              "name": "--velocity-checkpoint",
+              "type": "path",
+              "required": true
+            },
+            {
+              "name": "--recovery-checkpoint",
+              "type": "path",
+              "required": true
+            },
+            {
+              "name": "--device",
+              "type": "string",
+              "default": "auto"
+            },
+            {
+              "name": "--max-scenarios",
+              "type": "integer",
+              "default": 64,
+              "minimum": 1
+            },
+            {
+              "name": "--batch-size",
+              "type": "integer",
+              "default": 64,
+              "minimum": 1
+            },
+            {
+              "name": "--output",
+              "type": "path",
+              "default": "preflight/evaluator.json",
+              "description": "Relative to repository root unless absolute."
+            }
+          ],
+          "mutates": [
+            "preflight JSON output"
+          ]
+        }
+      }
+    },
+    "capture": {
+      "description": "Capture policy state channels and optional MP4 clips.",
+      "source": {
+        "mutually_exclusive_required": [
+          "--checkpoint",
+          "--run-id"
+        ]
+      },
+      "options": [
+        {
+          "name": "--artifact-root",
+          "type": "path",
+          "default": "ASCENTO_ARTIFACT_ROOT or logs/rsl_rl"
+        },
+        {
+          "name": "--json",
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "name": "--checkpoint",
+          "type": "path",
+          "default": null
+        },
+        {
+          "name": "--run-id",
+          "type": "string",
+          "default": null
+        },
+        {
+          "name": "--task",
+          "type": "string",
+          "default": null,
+          "description": "Inferred from managed run; otherwise balance task."
+        },
+        {
+          "name": "--takes",
+          "type": "integer",
+          "default": 3
+        },
+        {
+          "name": "--steps",
+          "type": "integer",
+          "default": 1000
+        },
+        {
+          "name": "--output-dir",
+          "type": "path",
+          "default": null,
+          "description": "Timestamped captures directory when omitted."
+        },
+        {
+          "name": "--video-dir",
+          "type": "path",
+          "default": null
+        },
+        {
+          "name": "--device",
+          "type": "string",
+          "default": "auto"
+        }
+      ],
+      "mutates": [
+        "NPZ capture artifacts",
+        "optional MP4 clips"
+      ]
+    },
+    "tools": {
+      "description": "Delegate to specialist tools; outer parser forwards trailing arguments.",
+      "subcommands": {
+        "clip-motion": {
+          "module": "ascento_mjlab.tools.clip_motion",
+          "arguments": [
+            "INPUT.npz",
+            "--output PATH",
+            "--fps FLOAT",
+            "--event all|takeoff|landing",
+            "--pre-roll FLOAT",
+            "--post-roll FLOAT"
+          ]
+        },
+        "rank-motion": {
+          "module": "ascento_mjlab.tools.motion_quality",
+          "arguments": [
+            "INPUT_OR_DIRECTORY...",
+            "--top INTEGER",
+            "--output PATH"
+          ]
+        },
+        "reward-probe": {
+          "module": "ascento_mjlab.tools.reward_probe",
+          "arguments": []
+        },
+        "replay-evaluation": {
+          "module": "ascento_mjlab.evaluation.replay",
+          "arguments": [
+            "EVALUATION_DIRECTORY",
+            "--scenario ID (required)",
+            "--checkpoint PATH",
+            "--viewer native|viser",
+            "--device DEVICE"
+          ]
+        }
+      }
+    },
+    "mcp": {
+      "description": "Serve project MCP integration over stdio.",
+      "subcommands": {
+        "serve": {
+          "description": "Run the stdio MCP server.",
+          "stdout_contract": "MCP JSON-RPC only."
+        }
+      }
+    },
+    "maintain": {
+      "description": "Run scripts/maintain.sh from repository root.",
+      "positionals": [
+        {
+          "name": "maintain_args",
+          "type": "remainder",
+          "required": false,
+          "description": "Pass maintain.sh arguments after optional --."
+        }
+      ],
+      "mutates": [
+        "checkout",
+        "virtual environment",
+        "frontend dependencies",
+        "Docker image/services"
+      ]
+    },
+    "dashboard": {
+      "description": "Start or inspect the FastAPI dashboard.",
+      "common_options": [
+        {
+          "name": "--host",
+          "type": "string",
+          "default": "127.0.0.1"
+        },
+        {
+          "name": "--port",
+          "type": "integer",
+          "default": 8000
+        },
+        {
+          "name": "--json",
+          "type": "boolean",
+          "default": false
+        }
+      ],
+      "subcommands": {
+        "status": {
+          "description": "Read /api/health.",
+          "options": [
+            {
+              "name": "--timeout",
+              "type": "number",
+              "default": 5.0
+            }
+          ],
+          "exit_codes": {
+            "0": "Dashboard reachable",
+            "1": "Dashboard unreachable or invalid response"
+          }
+        },
+        "start": {
+          "description": "Run Uvicorn; detached by default.",
+          "options": [
+            {
+              "name": "--foreground",
+              "type": "boolean",
+              "default": false
+            },
+            {
+              "name": "--reload",
+              "type": "boolean",
+              "default": false
+            }
+          ],
+          "mutates": [
+            "dashboard process state"
+          ]
+        }
+      }
+    }
+  },
+  "safety_notes": [
+    "Use run progress, telemetry limits, and log tails for low-frequency monitoring.",
+    "Do not judge a checkpoint from training reward, episode length, or a partial evaluation artifact.",
+    "Do not use maintain --force to bypass unexplained dirty state."
+  ]
+}
