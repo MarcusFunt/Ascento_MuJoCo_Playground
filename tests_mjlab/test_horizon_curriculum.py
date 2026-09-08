@@ -44,10 +44,10 @@ def test_horizon_schedule_starts_at_the_requested_stage():
     assert HorizonCurriculumRunner._schedule_index_for(300.0) == 3
 
 
-def test_horizon_requires_three_qualified_completion_windows(monkeypatch):
+def test_horizon_requires_six_qualified_completion_windows(monkeypatch):
     runner = _runner()
     monkeypatch.setattr(runner, "_emit_status", lambda **_: None)
-    for _ in range(2):
+    for _ in range(HorizonCurriculumRunner.required_success_windows - 1):
         runner._completed_in_window = 512
         runner._timeouts_in_window = 461
         runner._evaluate_completion_window()

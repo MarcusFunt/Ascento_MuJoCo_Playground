@@ -29,7 +29,10 @@ class HorizonCurriculumRunner(MjlabOnPolicyRunner):
 
     env: RslRlVecEnvWrapper
     completion_window_episodes = 512
-    required_success_windows = 3
+    # Prevent the observed post-promotion collapse: a short-lived timeout
+    # streak is not enough evidence that the policy is ready for a longer
+    # horizon. Promotion requires six consecutive qualifying windows.
+    required_success_windows = 6
     timeout_success_threshold = 0.90
     required_failure_windows = 4
     timeout_failure_threshold = 0.50
