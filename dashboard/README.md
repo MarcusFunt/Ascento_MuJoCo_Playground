@@ -17,6 +17,9 @@ The **Runs** page supports:
 - graceful stop requests for dashboard-managed processes;
 - side-by-side comparison using normalized reward, episode-length, PPO-loss,
   entropy, KL and clip-fraction telemetry;
+- live advanced diagnostics when emitted by training/evaluation telemetry:
+  effort RMS/mean, command saturation, strict recovery success/time/hold, and
+  dense recovery/post-landing shaping terms;
 - explicit repository-version status for every run.
 
 Managed runs are launched through `python -m dashboard.launch`, so browser and
