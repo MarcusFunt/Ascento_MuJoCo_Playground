@@ -5,6 +5,7 @@ import torch
 
 from ascento_mjlab.mdp.events import OneShotPlanarVelocityPush, initialize_balance_origin
 from ascento_mjlab.mdp.rewards import (
+    leg_pose_hold_penalty,
     leg_pose_symmetry_penalty,
     position_hold,
     settled_balance,
@@ -58,6 +59,14 @@ def test_soft_leg_symmetry_penalty_distinguishes_a_persistent_knee_offset():
 
     assert symmetric.item() == pytest.approx(0.0)
     assert asymmetric.item() > 0.20
+
+
+def test_leg_pose_hold_penalty_rejects_synchronized_excursion():
+    env = _env()
+    asset_cfg = SimpleNamespace(name="robot")
+    assert leg_pose_hold_penalty(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0, abs=1.0e-8)
+    env.scene["robot"].data.joint_pos[:, [0, 1, 3, 4]] += 0.35
+    assert leg_pose_hold_penalty(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0, rel=2.0e-5)
 
 
 def test_leg_symmetry_resolves_joint_pairs_by_name_not_model_order():

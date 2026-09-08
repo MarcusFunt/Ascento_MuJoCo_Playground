@@ -124,6 +124,28 @@ def leg_pose_symmetry_penalty(
     return torch.mean(huber, dim=1)
 
 
+def leg_pose_hold_penalty(
+    env: ManagerBasedRlEnv,
+    target: float = -math.pi,
+    std: float = 0.35,
+    joint_names: tuple[str, ...] = ("left_hip", "left_knee", "right_hip", "right_knee"),
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Penalize synchronized leg excursions that make wheel centers orbit."""
+    if std <= 0.0:
+        raise ValueError("std must be positive")
+    asset: Entity = env.scene[asset_cfg.name]
+    names = getattr(asset, "joint_names", None)
+    if names is None:
+        raise RuntimeError("leg pose hold requires robot joint names")
+    try:
+        indices = [names.index(name) for name in joint_names]
+    except ValueError as error:
+        raise RuntimeError("leg pose hold joint is absent from the robot") from error
+    error = asset.data.joint_pos[:, indices] - float(target)
+    return torch.mean(torch.square(error) / (std * std), dim=1)
+
+
 def settled_balance(
     env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,

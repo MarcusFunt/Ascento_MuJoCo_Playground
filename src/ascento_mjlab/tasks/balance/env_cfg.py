@@ -240,6 +240,11 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
                 weight=-2.0,
                 params={"beta": 0.15, "asset_cfg": ROBOT_CFG},
             ),
+            "leg_pose_hold": RewardTermCfg(
+                func=ascento_mdp.rewards.leg_pose_hold_penalty,
+                weight=-0.15,
+                params={"target": -3.141592653589793, "std": 0.35, "asset_cfg": ROBOT_CFG},
+            ),
             "effort": RewardTermCfg(
                 func=ascento_mdp.rewards.effort_penalty,
                 weight=-0.8,
