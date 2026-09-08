@@ -56,9 +56,9 @@ const CANONICAL_CHARTS = [
 ]
 
 const ADVANCED_CHARTS = [
-  { key: 'effort_rms', label: 'Effort RMS', description: 'Root-mean-square actuator effort.', interpretation: 'Track alongside saturation; a rising value can explain sag or unstable motion.' },
-  { key: 'effort_mean_abs', label: 'Mean absolute effort', description: 'Average absolute actuator effort.', interpretation: 'Useful for distinguishing sustained load from brief torque spikes.' },
-  { key: 'physical_saturation_fraction', label: 'Command saturation', description: 'Fraction of control samples at the configured effort limit.', interpretation: 'Diagnostic only for this simulation; high values indicate the policy is using the available authority.' },
+  { key: 'effort_rms', label: 'Command effort RMS (Nm)', description: 'RMS of normalized policy commands mapped to the 65 Nm simulation authority.', interpretation: 'A command-demand diagnostic; it is not a measured actuator-force metric.' },
+  { key: 'effort_mean_abs', label: 'Mean command effort (Nm)', description: 'Mean absolute normalized policy command mapped to Nm.', interpretation: 'Useful for distinguishing sustained command demand from brief spikes.' },
+  { key: 'physical_saturation_fraction', label: 'Command saturation', description: 'Fraction of policy commands at the configured effort limit.', interpretation: 'Diagnostic only for this simulation; high values indicate the policy is using the available authority.' },
   { key: 'recovery_success', label: 'Recovery success', description: 'Strict binary recovery-success metric.', interpretation: 'This must improve independently of dense shaping rewards.' },
   { key: 'recovery_time_s', label: 'Recovery time', description: 'Time to satisfy the strict recovery condition.', interpretation: 'Lower is better; inspect together with hold duration.' },
   { key: 'max_recovery_hold_s', label: 'Recovery hold duration', description: 'Longest continuous interval satisfying recovery conditions.', interpretation: 'Shows whether recovery is stable or only a transient pose.' },

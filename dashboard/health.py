@@ -72,12 +72,14 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "throughput": ("Perf/total_fps", "perf/total_fps", "training/fps", "steps_per_second"),
     # Advanced control/evaluation diagnostics.  These remain optional so older
     # runs continue to render while newer trainers expose them live.
-    "effort_rms": ("effort_rms", "Eval/effort_rms", "evaluation/effort_rms"),
-    "effort_mean_abs": ("effort_mean_abs", "Eval/effort_mean_abs", "evaluation/effort_mean_abs"),
+    "effort_rms": ("effort_rms", "command_effort_rms", "Loss/command_effort_rms", "Eval/effort_rms", "evaluation/effort_rms"),
+    "effort_mean_abs": ("effort_mean_abs", "command_effort_mean_abs", "Loss/command_effort_mean_abs", "Eval/effort_mean_abs", "evaluation/effort_mean_abs"),
     "physical_saturation_fraction": (
         "physical_saturation_fraction",
         "Eval/physical_saturation_fraction",
         "evaluation/physical_saturation_fraction",
+        "command_saturation_fraction",
+        "Loss/command_saturation_fraction",
     ),
     "recovery_success": ("recovery_success", "Eval/recovery_success", "evaluation/recovery_success"),
     "recovery_time_s": ("recovery_time_s", "Eval/recovery_time_s", "evaluation/recovery_time_s"),

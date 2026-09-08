@@ -12,6 +12,8 @@ from __future__ import annotations
 import torch
 from rsl_rl.algorithms import PPO
 
+from .physics import PHYSICS_PROFILE
+
 
 class InstrumentedPPO(PPO):
     """PPO with post-update KL and clip-fraction telemetry."""
@@ -50,4 +52,14 @@ class InstrumentedPPO(PPO):
 
         loss_dict["kl"] = float(kl.item())
         loss_dict["clip_fraction"] = float(clip_fraction.item())
+
+        # Rollout actions are normalized policy commands. Expose effort-demand
+        # diagnostics during training without pretending they are measured
+        # actuator forces (those remain evaluation-only metrics).
+        commanded_effort = actions.clamp(-1.0, 1.0) * PHYSICS_PROFILE.peak_effort_nm
+        loss_dict["command_effort_rms"] = float(torch.sqrt(torch.mean(commanded_effort.square())).item())
+        loss_dict["command_effort_mean_abs"] = float(torch.mean(commanded_effort.abs()).item())
+        loss_dict["command_saturation_fraction"] = float(
+            torch.mean((actions.abs() >= 1.0 - 1.0e-4).float()).item()
+        )
         return loss_dict
