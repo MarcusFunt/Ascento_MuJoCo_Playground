@@ -25,9 +25,9 @@ const CANONICAL_CHARTS = [
   },
   {
     key: 'episode_length',
-    label: 'Episode length',
-    description: 'How long episodes last before termination or timeout. For balance and survival tasks this is a useful stability signal.',
-    interpretation: 'Up usually means the robot survives longer; down usually means earlier failures. A flat ceiling can simply mean episodes hit the configured horizon.',
+    label: 'Episode length (env steps)',
+    description: 'Mean episode duration reported in simulator steps, not seconds. Horizon curriculum stages create visible ceilings.',
+    interpretation: 'Plateaus near 2,000/6,000/12,000/30,000 steps correspond to 20/60/120/300-second horizons at 100 Hz. A drop below the active ceiling indicates earlier failures or a transition window.',
   },
   {
     key: 'ppo_loss',
