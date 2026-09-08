@@ -22,12 +22,19 @@ from ascento_mjlab.operations import (
     default_capture_dir,
     evaluation_details,
     evaluation_root,
+    ensure_checkout_import_path,
     list_evaluation_suites,
     list_evaluations,
     repo_root,
     resolve_checkpoint,
     resolve_evaluation_dir,
 )
+
+
+# The dashboard is a checkout-local companion package.  Console entry points
+# start with ``.venv/bin`` on sys.path, so establish the repository path before
+# any lazy dashboard import below.
+ensure_checkout_import_path()
 
 
 def _repo_root() -> Path:

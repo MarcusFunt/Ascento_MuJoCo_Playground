@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -97,3 +99,19 @@ def test_latest_checkpoint_prefers_the_highest_numbered_checkpoint(tmp_path):
     (tmp_path / "model_best_long_horizon.pt").write_bytes(b"candidate")
 
     assert latest_checkpoint(tmp_path) == newest.resolve()
+
+
+def test_cli_and_mcp_import_dashboard_from_outside_the_checkout(tmp_path):
+    """Installed entry points must not depend on the caller's current directory."""
+    for source in (
+        "import ascento_mjlab.cli; import dashboard; print(dashboard.__name__)",
+        "import ascento_mjlab.mcp_server; import dashboard; print(dashboard.__name__)",
+    ):
+        result = subprocess.run(
+            [sys.executable, "-c", source],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr

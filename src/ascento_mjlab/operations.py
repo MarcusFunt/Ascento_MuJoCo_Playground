@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,24 @@ def repo_root() -> Path:
         if (parent / "pyproject.toml").is_file():
             return parent
     return Path.cwd()
+
+
+def ensure_checkout_import_path() -> Path:
+    """Make checkout-local companion packages importable from console scripts.
+
+    ``ascento`` and ``ascento-mcp`` are installed console entry points, so
+    Python initializes ``sys.path[0]`` to ``.venv/bin`` rather than to the
+    caller's current directory.  The dashboard is deliberately a companion
+    package at the checkout root (it is also copied into the dashboard
+    container), not part of the ``src/ascento_mjlab`` distribution.  Add the
+    discovered checkout explicitly so the CLI and MCP server behave the same
+    whether they are invoked from the repository root or elsewhere.
+    """
+    root = repo_root().resolve()
+    root_text = str(root)
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
+    return root
 
 
 def artifact_root(value: str | Path | None = None) -> Path:
@@ -104,6 +123,7 @@ def resolve_checkpoint(
             raise FileNotFoundError(f"checkpoint does not exist: {path}")
         return path
 
+    ensure_checkout_import_path()
     from dashboard.run_service import RunService
 
     root = artifact_root(artifacts)

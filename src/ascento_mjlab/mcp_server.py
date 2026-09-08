@@ -6,15 +6,12 @@ import os
 from pathlib import Path
 from typing import Any
 
-from dashboard.health import list_dashboard_summaries, load_dashboard_records
-from dashboard.monitor import tail_lines, training_log_path
-from dashboard.run_service import RunService
-
 from ascento_mjlab.operations import (
     archive_evaluation,
     default_capture_dir,
     evaluation_details,
     evaluation_root,
+    ensure_checkout_import_path,
     list_evaluations,
     repo_root,
     resolve_checkpoint,
@@ -23,6 +20,15 @@ from ascento_mjlab.operations import (
 from ascento_mjlab.operations import (
     list_evaluation_suites as discover_evaluation_suites,
 )
+
+
+# See ``ensure_checkout_import_path``: MCP is also installed as a console
+# entry point, so it must not rely on the caller having cd'ed to the checkout.
+ensure_checkout_import_path()
+
+from dashboard.health import list_dashboard_summaries, load_dashboard_records  # noqa: E402
+from dashboard.monitor import tail_lines, training_log_path  # noqa: E402
+from dashboard.run_service import RunService  # noqa: E402
 
 try:
     from mcp.server.fastmcp import FastMCP
