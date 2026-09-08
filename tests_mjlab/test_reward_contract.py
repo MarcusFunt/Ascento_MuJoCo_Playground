@@ -8,6 +8,7 @@ from ascento_mjlab.mdp.recovery import recovery_progress
 from ascento_mjlab.mdp.rewards import (
     action_rate_penalty,
     effort_penalty,
+    effort_target_barrier,
     jump_commanded_height_tracking,
     jump_crouch,
     jump_thrust,
@@ -31,6 +32,7 @@ def _env(*, step_dt: float = 0.01):
             root_link_ang_vel_b=torch.tensor([[0.0, 0.0, 0.25]]),
             projected_gravity_b=torch.tensor([[0.0, 0.0, -1.0]]),
             actuator_force=torch.full((1, 6), 40.0),
+            joint_effort_target=torch.full((1, 6), 40.0),
             joint_pos=torch.zeros((1, 6)),
         ),
     )
@@ -91,6 +93,15 @@ def test_regularizers_preserve_100_hz_scale_and_are_frequency_aware():
     slower = _env(step_dt=0.02)
     slower.action_manager.action[0, 0] = 0.40
     assert action_rate_penalty(slower).item() == pytest.approx(0.04)
+
+
+def test_effort_target_barrier_is_zero_below_soft_limit_and_one_at_limit():
+    env = _env()
+    asset_cfg = SimpleNamespace(name="robot", actuator_ids=[0, 1, 2, 3, 4, 5])
+    env.scene["robot"].data.joint_effort_target[:] = 30.0
+    assert effort_target_barrier(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0)
+    env.scene["robot"].data.joint_effort_target[:] = 40.0
+    assert effort_target_barrier(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
 
 
 def test_recovery_progress_requires_support_and_accounts_for_angular_speed():

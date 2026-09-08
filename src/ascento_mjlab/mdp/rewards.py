@@ -157,6 +157,32 @@ def effort_penalty(
     return torch.mean(torch.square(utilisation), dim=1)
 
 
+def effort_target_barrier(
+    env: ManagerBasedRlEnv,
+    peak_effort_nm: float = 40.0,
+    soft_limit_fraction: float = 0.75,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Penalize commanded effort entering the actuator saturation region.
+
+    ``effort_penalty`` regularizes *applied* torque, which can remain moderate
+    while the policy repeatedly requests clipped commands.  This smooth hinge
+    exposes that hidden saturation to PPO without creating a discontinuity:
+    requests below ``soft_limit_fraction`` are free and a request at the hard
+    limit contributes one unit.
+    """
+    if peak_effort_nm <= 0.0:
+        raise ValueError("peak_effort_nm must be positive")
+    if not 0.0 < soft_limit_fraction < 1.0:
+        raise ValueError("soft_limit_fraction must lie strictly between 0 and 1")
+    asset: Entity = env.scene[asset_cfg.name]
+    request = asset.data.joint_effort_target[:, asset_cfg.actuator_ids]
+    utilisation = torch.abs(request) / peak_effort_nm
+    excess = torch.relu(utilisation - soft_limit_fraction)
+    normalized = excess / (1.0 - soft_limit_fraction)
+    return torch.mean(torch.square(normalized), dim=1)
+
+
 def action_rate_penalty(env: ManagerBasedRlEnv, reference_dt: float = 0.01) -> torch.Tensor:
     if reference_dt <= 0.0 or env.step_dt <= 0.0:
         raise ValueError("time steps must be positive")
