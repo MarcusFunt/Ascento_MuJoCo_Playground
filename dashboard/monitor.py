@@ -100,7 +100,9 @@ def _training_limit(run_dir: Path) -> int | None:
 
 def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
     """Convert native RSL-RL TensorBoard scalars to the dashboard schema."""
-    event_files = sorted(run_dir.glob("events.out.tfevents.*"))
+    # RSL-RL stores TensorBoard events inside its timestamped experiment
+    # directory, not necessarily at the managed run root.
+    event_files = sorted(run_dir.rglob("events.out.tfevents.*"))
     if not event_files:
         return []
     try:
@@ -175,12 +177,14 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
 
 
 def load_training_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
-    """Read JSON telemetry, lightweight console telemetry, or TensorBoard data."""
-    records = load_jsonl(run_dir / "telemetry.jsonl", limit=limit)
-    if records:
-        return records
-    records = load_log_records(run_dir, limit=limit)
-    return records if records else load_tensorboard_records(run_dir, limit=limit)
+    """Read the densest available history, preserving the full run span."""
+    candidates = [
+        load_jsonl(run_dir / "telemetry.jsonl", limit=None),
+        load_log_records(run_dir, limit=None),
+        load_tensorboard_records(run_dir, limit=None),
+    ]
+    records = max(candidates, key=len, default=[])
+    return records[-limit:] if limit is not None else records
 
 
 def training_log_path(run_dir: Path, root: Path | None = None) -> Path:
