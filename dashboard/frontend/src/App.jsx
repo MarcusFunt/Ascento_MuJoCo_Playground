@@ -55,6 +55,17 @@ const CANONICAL_CHARTS = [
   },
 ]
 
+const ADVANCED_CHARTS = [
+  { key: 'effort_rms', label: 'Effort RMS', description: 'Root-mean-square actuator effort.', interpretation: 'Track alongside saturation; a rising value can explain sag or unstable motion.' },
+  { key: 'effort_mean_abs', label: 'Mean absolute effort', description: 'Average absolute actuator effort.', interpretation: 'Useful for distinguishing sustained load from brief torque spikes.' },
+  { key: 'physical_saturation_fraction', label: 'Command saturation', description: 'Fraction of control samples at the configured effort limit.', interpretation: 'Diagnostic only for this simulation; high values indicate the policy is using the available authority.' },
+  { key: 'recovery_success', label: 'Recovery success', description: 'Strict binary recovery-success metric.', interpretation: 'This must improve independently of dense shaping rewards.' },
+  { key: 'recovery_time_s', label: 'Recovery time', description: 'Time to satisfy the strict recovery condition.', interpretation: 'Lower is better; inspect together with hold duration.' },
+  { key: 'max_recovery_hold_s', label: 'Recovery hold duration', description: 'Longest continuous interval satisfying recovery conditions.', interpretation: 'Shows whether recovery is stable or only a transient pose.' },
+  { key: 'recovery_dwell', label: 'Recovery dwell shaping', description: 'Dense recovery proximity/dwell shaping term.', interpretation: 'A shaping trend must not be mistaken for binary task success.' },
+  { key: 'post_landing_stability', label: 'Post-landing stability', description: 'Dense post-landing stabilization signal.', interpretation: 'Use with jump/recovery success to detect reward hacking.' },
+]
+
 function fmtNumber(value, digits = 1) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—'
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: digits })
@@ -374,7 +385,7 @@ function App() {
   }, [telemetry])
 
   const availableCharts = useMemo(
-    () => CANONICAL_CHARTS.filter(({ key }) => (
+    () => [...CANONICAL_CHARTS, ...ADVANCED_CHARTS].filter(({ key }) => (
       chartRecords.some((record) => Number.isFinite(Number(record[key])))
     )),
     [chartRecords],
@@ -545,6 +556,10 @@ function App() {
                   <HealthMetric label="Entropy" value={fmtNumber(canonical.entropy, 6)} />
                   <HealthMetric label="KL" value={fmtNumber(canonical.kl, 6)} />
                   <HealthMetric label="Clip fraction" value={fmtNumber(canonical.clip_fraction, 5)} />
+                  <HealthMetric label="Effort RMS" value={fmtNumber(canonical.effort_rms, 3)} />
+                  <HealthMetric label="Saturation" value={fmtNumber(canonical.physical_saturation_fraction, 3)} />
+                  <HealthMetric label="Recovery success" value={fmtNumber(canonical.recovery_success, 3)} />
+                  <HealthMetric label="Recovery hold" value={fmtNumber(canonical.max_recovery_hold_s, 2)} />
                   <HealthMetric
                     label="Invalid updates"
                     value={fmtNumber(detail.training_health?.invalid_updates, 0)}

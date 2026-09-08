@@ -70,6 +70,24 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "learning_rate": ("Loss/learning_rate", "training/learning_rate", "learning_rate"),
     "invalid_update": ("training/invalid_update", "Train/invalid_update", "invalid_update"),
     "throughput": ("Perf/total_fps", "perf/total_fps", "training/fps", "steps_per_second"),
+    # Advanced control/evaluation diagnostics.  These remain optional so older
+    # runs continue to render while newer trainers expose them live.
+    "effort_rms": ("effort_rms", "Eval/effort_rms", "evaluation/effort_rms"),
+    "effort_mean_abs": ("effort_mean_abs", "Eval/effort_mean_abs", "evaluation/effort_mean_abs"),
+    "physical_saturation_fraction": (
+        "physical_saturation_fraction",
+        "Eval/physical_saturation_fraction",
+        "evaluation/physical_saturation_fraction",
+    ),
+    "recovery_success": ("recovery_success", "Eval/recovery_success", "evaluation/recovery_success"),
+    "recovery_time_s": ("recovery_time_s", "Eval/recovery_time_s", "evaluation/recovery_time_s"),
+    "max_recovery_hold_s": ("max_recovery_hold_s", "Eval/max_recovery_hold_s", "evaluation/max_recovery_hold_s"),
+    "recovery_dwell": ("recovery_dwell", "Reward/recovery_dwell", "rewards/recovery_dwell"),
+    "post_landing_stability": (
+        "post_landing_stability",
+        "Reward/post_landing_stability",
+        "rewards/post_landing_stability",
+    ),
 }
 CHECKPOINT_RE = re.compile(r"(?:model|checkpoint)[_-]?(\d+)", re.IGNORECASE)
 TRAINING_RUNTIME_RE = re.compile(
