@@ -23,7 +23,7 @@ def check_episode(
     scenario: ScenarioSpec,
     *,
     step_dt: float,
-    physical_effort_limit: float = 40.0,
+    physical_effort_limit: float = 65.0,
     atol: float = 1.0e-5,
 ) -> list[ConsistencyCheck]:
     metrics = result.metrics

@@ -87,7 +87,7 @@ def test_regularizers_preserve_100_hz_scale_and_are_frequency_aware():
     env = _env(step_dt=0.01)
     asset_cfg = SimpleNamespace(name="robot", actuator_ids=[0, 1, 2, 3, 4, 5])
 
-    assert effort_penalty(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
+    assert effort_penalty(env, asset_cfg=asset_cfg, peak_effort_nm=40.0).item() == pytest.approx(1.0)
     assert action_rate_penalty(env).item() == pytest.approx(0.04)
 
     slower = _env(step_dt=0.02)
@@ -99,9 +99,9 @@ def test_effort_target_barrier_is_zero_below_soft_limit_and_one_at_limit():
     env = _env()
     asset_cfg = SimpleNamespace(name="robot", actuator_ids=[0, 1, 2, 3, 4, 5])
     env.scene["robot"].data.joint_effort_target[:] = 30.0
-    assert effort_target_barrier(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0)
+    assert effort_target_barrier(env, asset_cfg=asset_cfg, peak_effort_nm=40.0).item() == pytest.approx(0.0)
     env.scene["robot"].data.joint_effort_target[:] = 40.0
-    assert effort_target_barrier(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
+    assert effort_target_barrier(env, asset_cfg=asset_cfg, peak_effort_nm=40.0).item() == pytest.approx(1.0)
 
 
 def test_recovery_progress_requires_support_and_accounts_for_angular_speed():

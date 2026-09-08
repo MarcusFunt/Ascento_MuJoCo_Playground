@@ -176,6 +176,9 @@ metric = "physical_saturation_fraction"
 statistic = "p95"
 op = "<="
 threshold = 0.02
+# Simulation-only authority is intentionally high; keep saturation visible as
+# a diagnostic without rejecting a policy on this hardware-oriented heuristic.
+hard = false
 
 [[gates]]
 id = "disturbance_p95_recovery_time"

@@ -27,26 +27,26 @@ def test_balance_env_is_six_effort_flat_ground():
     env.close()
 
 
-def test_balance_action_contract_reaches_40_nm_and_penalizes_drift():
+def test_balance_action_contract_reaches_65_nm_and_penalizes_drift():
     cfg = load_env_cfg("Ascento-Balance-Flat")
     cfg.scene.num_envs = 1
 
     action_cfg = cfg.actions["effort"]
-    assert action_cfg.scale == 40.0
-    assert action_cfg.clip == {".*": (-40.0, 40.0)}
+    assert action_cfg.scale == 65.0
+    assert action_cfg.clip == {".*": (-65.0, 65.0)}
     assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.2)
     assert cfg.rewards["position_hold"].weight == pytest.approx(4.0)
     assert cfg.rewards["settled_balance"].weight == pytest.approx(1.0)
     assert cfg.rewards["leg_pose_symmetry"].weight == pytest.approx(-2.0)
     assert cfg.rewards["effort"].weight == pytest.approx(-0.8)
-    assert cfg.rewards["effort"].params["peak_effort_nm"] == pytest.approx(40.0)
+    assert cfg.rewards["effort"].params["peak_effort_nm"] == pytest.approx(65.0)
     assert "initialize_balance_origin" in cfg.events
     assert "balance_push" in cfg.events
 
     env = ManagerBasedRlEnv(cfg, device="cpu")
     env.action_manager.process_action(torch.ones((1, 6)))
     action_term = env.action_manager.get_term("effort")
-    assert torch.allclose(action_term._processed_actions, torch.full((1, 6), 40.0))
+    assert torch.allclose(action_term._processed_actions, torch.full((1, 6), 65.0))
     env.close()
 
 

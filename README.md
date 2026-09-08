@@ -17,9 +17,9 @@ Ascento actuator extension, motion-specific MDP terms, task configs, capture,
 and tests.
 
 The initial direct-effort actuator uses six normalized actions in `[-1, 1]`,
-40 Nm peak simulation authority, a linear torque-speed envelope, controller
+65 Nm peak simulation authority, a linear torque-speed envelope, controller
 speed protection, and finite torque response. Training clips the policy action
-to `[-1, 1]` before the environment maps it to a physical `[-40, 40] Nm`
+to `[-1, 1]` before the environment maps it to a physical `[-65, 65] Nm`
 effort target. The 15 Nm leg and 5 Nm wheel continuous ratings are documentation
 only until a thermal/duration model is justified. No communication delay, sensor
 noise, or thermal model is enabled.

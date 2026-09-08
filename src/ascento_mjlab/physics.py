@@ -15,7 +15,8 @@ class PhysicsProfile:
     name: str = "animation_high_authority"
     sim_dt_s: float = 0.002
     decimation: int = 5
-    peak_effort_nm: float = 40.0
+    # Simulation-only authority; deliberately exceeds the nominal hardware rating.
+    peak_effort_nm: float = 65.0
     default_root_height_m: float = 0.75
 
     @property

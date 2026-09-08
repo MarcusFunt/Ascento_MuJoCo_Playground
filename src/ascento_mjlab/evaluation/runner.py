@@ -22,7 +22,7 @@ from ascento_mjlab.physics import REWARD_SCHEMA_VERSION
 from .policy import RslRlPolicyAdapter
 from .schema import EpisodeResult, ScenarioSpec
 
-DEFAULT_PHYSICAL_EFFORT_LIMIT = 40.0
+DEFAULT_PHYSICAL_EFFORT_LIMIT = 65.0
 
 
 def physics_timestep(cfg: Any) -> float:

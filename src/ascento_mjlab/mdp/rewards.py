@@ -147,7 +147,7 @@ def settled_balance(
 
 def effort_penalty(
     env: ManagerBasedRlEnv,
-    peak_effort_nm: float = 40.0,
+    peak_effort_nm: float = 65.0,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     if peak_effort_nm <= 0.0:
@@ -159,7 +159,7 @@ def effort_penalty(
 
 def effort_target_barrier(
     env: ManagerBasedRlEnv,
-    peak_effort_nm: float = 40.0,
+    peak_effort_nm: float = 65.0,
     soft_limit_fraction: float = 0.75,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
