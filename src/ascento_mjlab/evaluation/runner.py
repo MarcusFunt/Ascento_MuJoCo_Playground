@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import gc
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -676,10 +677,13 @@ def _run_batch(
             # finish; otherwise auto_reset=False leaves a pending slot that
             # raises on the next step.
             early_timeout = active_done & ~non_timeout_done & ~reached_horizon
-            # Every reported done slot must be reset before the next step. A
-            # done signal that is neither a strict success nor a termination
-            # failure is still an unsuccessful early timeout.
-            finish = active_done
+            # Finalize slots either when the backend reports done or when the
+            # requested scenario horizon has been reached.  Some backends
+            # emit their timeout one step after the requested horizon; using
+            # only ``active_done`` would incorrectly leave completed episodes
+            # active until the bounded loop force-closes them as
+            # ``evaluation_horizon`` failures.
+            finish = active_done | reached_horizon
 
             if bool(finish.any().item()):
                 final_xy_snapshot[finish] = xy[finish]
@@ -808,6 +812,16 @@ def _run_batch(
         return results, metadata
     finally:
         env.close()
+        # mjlab/Warp keeps device allocations reachable through the runner,
+        # policy, and wrapper objects after ``close``.  Drop those references
+        # and release Torch's caching allocator before constructing the next
+        # batch (the deterministic consistency pass may create thousands of
+        # environments in one invocation).
+        del runner, policy, env, base_env
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
 
 
 def run_scenarios(
