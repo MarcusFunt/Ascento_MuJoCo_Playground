@@ -89,6 +89,22 @@ wx = [-0.10, 0.10]
 wy = [-0.10, 0.10]
 wz = [-0.10, 0.10]
 
+[[families]]
+id = "long_endurance"
+kind = "endurance"
+count = 256
+horizon_s = 120.0
+[families.reset]
+roll = [-0.12, 0.12]
+pitch = [-0.12, 0.12]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.10, 0.10]
+vy = [-0.08, 0.08]
+vz = [-0.05, 0.05]
+wx = [-0.20, 0.20]
+wy = [-0.20, 0.20]
+wz = [-0.15, 0.15]
+
 [[gates]]
 id = "nominal_survival_lcb"
 family = "nominal"
@@ -120,6 +136,14 @@ metric = "success"
 statistic = "wilson_lower"
 op = ">="
 threshold = 0.98
+
+[[gates]]
+id = "long_endurance_survival_lcb"
+family = "long_endurance"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.90
 
 [[gates]]
 id = "corner_conformance"

@@ -178,6 +178,9 @@ def evaluate(
     output_base: Path,
     batch_size: int,
     device: str,
+    render_clips: bool = False,
+    clip_takes: int = 3,
+    clip_steps: int = 600,
 ) -> tuple[EvaluationStatus, Path]:
     suite = load_suite(suite_path)
     capabilities = task_capabilities(suite.task)
@@ -260,6 +263,34 @@ def evaluate(
         gate_payload=gate_payload,
         worst=worst,
     )
+    if render_clips:
+        clips_dir = output_dir / "clips"
+        command = [
+            sys.executable,
+            "-m",
+            "ascento_mjlab.tools.capture_motion",
+            "--task",
+            suite.task,
+            "--checkpoint",
+            str(checkpoint),
+            "--takes",
+            str(clip_takes),
+            "--steps",
+            str(clip_steps),
+            "--output-dir",
+            str(clips_dir),
+            "--video-dir",
+            str(clips_dir / "videos"),
+            "--device",
+            device,
+        ]
+        clip_payload: dict[str, object] = {"requested": True, "command": command}
+        try:
+            completed = subprocess.run(command, check=True, capture_output=True, text=True)
+            clip_payload.update({"status": "ok", "stdout": completed.stdout[-4000:]})
+        except (OSError, subprocess.CalledProcessError) as error:
+            clip_payload.update({"status": "error", "error": str(error)})
+        write_json(output_dir / "clips_manifest.json", clip_payload)
     return status, output_dir
 
 
@@ -270,12 +301,17 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-root", type=Path, default=Path("evaluations"))
+    parser.add_argument("--render-clips", action="store_true", help="render representative policy videos")
+    parser.add_argument("--clip-takes", type=int, default=3)
+    parser.add_argument("--clip-steps", type=int, default=600)
     args = parser.parse_args()
 
     if not args.checkpoint.is_file():
         parser.error(f"checkpoint does not exist: {args.checkpoint}")
     if args.batch_size < 1:
         parser.error("--batch-size must be positive")
+    if args.clip_takes < 1 or args.clip_steps < 1:
+        parser.error("--clip-takes and --clip-steps must be positive")
     suite_path = resolve_suite_path(args.suite)
     status, output_dir = evaluate(
         checkpoint=args.checkpoint,
@@ -283,6 +319,9 @@ def main() -> None:
         output_base=args.output_root,
         batch_size=args.batch_size,
         device=_device(args.device),
+        render_clips=args.render_clips,
+        clip_takes=args.clip_takes,
+        clip_steps=args.clip_steps,
     )
     print(f"\nEvaluation: {status.value}")
     print(f"Artifacts: {output_dir}")
