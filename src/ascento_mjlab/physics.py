@@ -13,6 +13,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class PhysicsProfile:
     name: str = "animation_high_authority"
+    contract_version: str = "v1"
     sim_dt_s: float = 0.002
     decimation: int = 5
     # Simulation-only authority; deliberately exceeds the nominal hardware rating.
@@ -22,6 +23,12 @@ class PhysicsProfile:
     @property
     def control_dt_s(self) -> float:
         return self.sim_dt_s * self.decimation
+
+    @property
+    def contract_id(self) -> str:
+        """Stable identity for artifacts produced against this plant contract."""
+        effort = f"{self.peak_effort_nm:g}".replace("-", "neg").replace(".", "p")
+        return f"ascento-{self.name}-{effort}nm-{self.contract_version}"
 
 
 PHYSICS_PROFILE = PhysicsProfile()

@@ -21,7 +21,8 @@ versioned, deterministic by default, and independent of training rewards.
 | --- | --- | --- |
 | `balance_dev_v1` | Balance | Smaller development screen before a full gate |
 | `balance_gate_v1` | Balance | Original authoritative balance baseline |
-| `balance_gate_v2` | Balance | Current balance gate; adds mirrored hip/knee mismatch checks to v1-style coverage |
+| `balance_gate_v2` | Balance | Legacy pre-plant-contract balance gate; retained for historical artifacts |
+| `balance_gate_v3` | Balance | Current 65 Nm balance gate; adds symmetry checks and gates applied joint-space effort |
 | `velocity_gate_v1` | Velocity | Deterministic twist/height command timelines |
 | `recovery_gate_v1` | Recovery | Wide-reset recovery, strict success, time, and continuous hold |
 | `jump_gate_v1` | Jump | Takeoff, landing, recovered landing, distance, pre-impact speed, clearance, and hold |
@@ -37,7 +38,7 @@ managed run ID:
 
 ```bash
 ascento evaluate run --checkpoint logs/rsl_rl/.../model_2999.pt \
-  --suite balance_gate_v2 --batch-size 512 --device auto --render-clips
+  --suite balance_gate_v3 --batch-size 512 --device auto --render-clips
 
 ascento evaluate run --run-id <run-id> --suite recovery_gate_v1
 ```
@@ -52,8 +53,9 @@ ascento evaluate screen 'logs/rsl_rl/.../model_*.pt' \
   --suite balance_dev_v1 --top 3
 ```
 
-Compare completed evaluations only when their stored scenario identities are
-compatible:
+Compare completed evaluations only when their stored scenario identities and
+plant contracts are compatible. Artifacts without a plant contract are legacy
+and are intentionally not comparable:
 
 ```bash
 ascento evaluate compare <baseline-evaluation> <candidate-evaluation> \
@@ -82,8 +84,9 @@ collection.
 
 Examples of task metrics include:
 
-- balance: survival, recovery, tilt, planar speed, displacement, effort,
-  saturation, recovery time, and leg symmetry;
+- balance: survival, recovery, tilt, planar speed, displacement, separately
+  commanded/actuator-output/joint-applied effort, applied-effort saturation,
+  recovery time, and leg symmetry;
 - velocity: survival plus velocity and height tracking error;
 - recovery: strict binary success, time from start, and stable-hold duration;
 - jump: takeoff, landing, recovered landing, post-landing hold, distance error,
@@ -101,7 +104,7 @@ Each completed evaluation has an immutable directory under `evaluations/`:
 
 ```text
 <evaluation-id>/
-├── manifest.json                  provenance, source revision, device, package versions
+├── manifest.json                  provenance, compiled plant + checkpoint contract, source revision, device
 ├── suite.json                     immutable suite snapshot
 ├── resolved_scenarios.jsonl       exact materialized inputs
 ├── results.sqlite                 scenario outcomes and long-form metrics
@@ -135,7 +138,7 @@ For a frame-by-frame diagnosis of one measured scenario, replay its stored ID:
 
 ```bash
 ascento tools replay-evaluation -- <evaluation-id> \
-  --scenario balance_gate_v2/disturbance/000000 --viewer native
+  --scenario balance_gate_v3/disturbance/000000 --viewer native
 ```
 
 The replay uses the stored resolved scenario. Restart it to return to that exact

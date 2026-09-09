@@ -9,6 +9,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ascento_mjlab.plant_contract import plant_contracts_compatible
+
 from .statistics import bootstrap_ci, iqm
 
 
@@ -29,7 +31,56 @@ def _metrics(path: Path) -> dict[str, dict[str, float]]:
     return output
 
 
+def _plant_contract(path: Path) -> dict | None:
+    """Read immutable plant provenance, if this evaluation was produced after P0."""
+    manifest_path = path / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    contract = manifest.get("plant_contract") if isinstance(manifest, dict) else None
+    return contract if isinstance(contract, dict) else None
+
+
+def _checkpoint_plant_contract(path: Path) -> dict | None:
+    try:
+        manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    contract = manifest.get("checkpoint_plant_contract") if isinstance(manifest, dict) else None
+    return contract if isinstance(contract, dict) else None
+
+
+def ensure_compatible_plants(base: Path, candidate: Path) -> None:
+    """Reject quantitative comparison unless both artifacts share one plant."""
+    left = _plant_contract(base)
+    right = _plant_contract(candidate)
+    if left is None or right is None:
+        raise ValueError(
+            "cannot compare legacy evaluation artifacts without plant_contract provenance; "
+            "re-evaluate both checkpoints against the current plant"
+        )
+    if not plant_contracts_compatible(left, right):
+        raise ValueError(
+            "cannot compare evaluations produced against different plant contracts; "
+            "re-evaluate against a single compiled plant"
+        )
+    left_checkpoint = _checkpoint_plant_contract(base)
+    right_checkpoint = _checkpoint_plant_contract(candidate)
+    if left_checkpoint is None or right_checkpoint is None:
+        raise ValueError(
+            "cannot compare checkpoints with legacy plant provenance; "
+            "retrain or re-establish a baseline on the current plant"
+        )
+    if not plant_contracts_compatible(left_checkpoint, right_checkpoint):
+        raise ValueError(
+            "cannot compare checkpoints trained against different plant contracts; "
+            "re-establish both baselines on the current plant"
+        )
+
+
 def compare(base: Path, candidate: Path) -> dict:
+    ensure_compatible_plants(base, candidate)
     left = _metrics(base)
     right = _metrics(candidate)
     common = sorted(set(left) & set(right))

@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import torch
+
 from ascento_mjlab.horizon_curriculum import HORIZON_SCHEDULE_S, HorizonCurriculumRunner
 
 
@@ -84,15 +86,28 @@ def test_horizon_rollover_preserves_surplus_completions(monkeypatch):
 
     monkeypatch.setattr(runner, "_evaluate_completion_window", evaluate_window)
 
-    runner._record_completion_batch(510, 510)
-    runner._record_completion_batch(4, 2)
+    runner._record_completion_outcomes(torch.tensor([True] * 510))
+    runner._record_completion_outcomes(torch.tensor([False, True, False, True]))
 
-    assert windows == [(512, 512)]
-    assert len(runner._pending_completion_outcomes) == 2
+    assert windows == [(512, 511)]
+    assert runner._pending_completion_outcomes == [False, True]
 
-    runner._record_completion_batch(510, 510)
-    assert windows == [(512, 512), (512, 510)]
+    runner._record_completion_outcomes(torch.tensor([True] * 510))
+    assert windows == [(512, 511), (512, 511)]
     assert len(runner._pending_completion_outcomes) == 0
+
+
+def test_horizon_step_preserves_interleaved_per_environment_timeout_outcomes(monkeypatch):
+    runner = _runner()
+    runner.env.unwrapped.reset_time_outs = torch.tensor([True, False, True, False])
+    runner._base_step = lambda actions: (None, torch.zeros(4), torch.tensor([True, True, True, False]), {})
+    recorded = []
+    monkeypatch.setattr(runner, "_record_completion_outcomes", lambda values: recorded.append(values.clone()))
+
+    runner._step(torch.zeros((4, 1)))
+
+    assert len(recorded) == 1
+    assert torch.equal(recorded[0], torch.tensor([True, False, True]))
 
 
 def test_horizon_demotes_after_sustained_severe_regression(monkeypatch):

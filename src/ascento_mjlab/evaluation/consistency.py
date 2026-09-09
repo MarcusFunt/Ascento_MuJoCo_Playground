@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, dataclass
 
+from ascento_mjlab.physics import PHYSICS_PROFILE
+
 from .schema import EpisodeResult, ScenarioSpec
 
 
@@ -23,7 +25,7 @@ def check_episode(
     scenario: ScenarioSpec,
     *,
     step_dt: float,
-    physical_effort_limit: float = 65.0,
+    physical_effort_limit: float = PHYSICS_PROFILE.peak_effort_nm,
     atol: float = 1.0e-5,
 ) -> list[ConsistencyCheck]:
     metrics = result.metrics
@@ -59,41 +61,53 @@ def check_episode(
             )
         )
 
-    mean_abs = metrics.get("effort_mean_abs")
-    rms = metrics.get("effort_rms")
-    peak = metrics.get("effort_max_abs")
-    if mean_abs is not None and rms is not None:
-        checks.append(
-            ConsistencyCheck(
-                "effort_mean_abs_le_rms",
-                mean_abs <= rms + 1.0e-5,
-                f"mean_abs={mean_abs:.9g}, rms={rms:.9g}",
+    for prefix in (
+        "effort",
+        "commanded_effort",
+        "actuator_output_effort",
+        "joint_applied_effort",
+    ):
+        mean_abs = metrics.get(f"{prefix}_mean_abs")
+        rms = metrics.get(f"{prefix}_rms")
+        peak = metrics.get(f"{prefix}_max_abs")
+        if mean_abs is not None and rms is not None:
+            checks.append(
+                ConsistencyCheck(
+                    f"{prefix}_mean_abs_le_rms",
+                    mean_abs <= rms + 1.0e-5,
+                    f"mean_abs={mean_abs:.9g}, rms={rms:.9g}",
+                )
             )
-        )
-    if rms is not None and peak is not None:
-        checks.append(
-            ConsistencyCheck(
-                "effort_rms_le_peak",
-                rms <= peak + 1.0e-5,
-                f"rms={rms:.9g}, peak={peak:.9g}",
+        if rms is not None and peak is not None:
+            checks.append(
+                ConsistencyCheck(
+                    f"{prefix}_rms_le_peak",
+                    rms <= peak + 1.0e-5,
+                    f"rms={rms:.9g}, peak={peak:.9g}",
+                )
             )
-        )
 
-    request_peak = metrics.get("physical_request_max_abs")
-    if request_peak is not None:
-        checks.append(
-            ConsistencyCheck(
-                "physical_request_within_limit",
-                request_peak <= physical_effort_limit + 1.0e-4,
-                f"request_peak={request_peak:.9g}, limit={physical_effort_limit:.9g}",
+    for metric, check_id in (
+        ("physical_request_max_abs", "physical_request_within_limit"),
+        ("commanded_effort_max_abs", "commanded_effort_within_limit"),
+        ("joint_applied_effort_max_abs", "joint_applied_effort_within_limit"),
+    ):
+        peak = metrics.get(metric)
+        if peak is not None:
+            checks.append(
+                ConsistencyCheck(
+                    check_id,
+                    peak <= physical_effort_limit + 1.0e-4,
+                    f"peak={peak:.9g}, limit={physical_effort_limit:.9g}",
+                )
             )
-        )
 
     for key in (
         "both_supported_fraction",
         "airborne_fraction",
         "action_clip_fraction",
         "physical_saturation_fraction",
+        "joint_applied_saturation_fraction",
     ):
         value = metrics.get(key)
         if value is not None:

@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .plant_contract import current_plant_contract, plant_contracts_compatible
+
 
 def repo_root() -> Path:
     """Return the checkout root without relying on the caller's CWD."""
@@ -186,6 +188,8 @@ def _partial_report_row(directory: Path, base: Path) -> dict[str, Any]:
         "scenario_count": None,
         "report_path": None,
         "clips_status": None,
+        "plant_contract": None,
+        "plant_compatibility": "legacy",
         "incomplete_reason": "manifest.json is missing; evaluation was interrupted or is still running",
     }
 
@@ -197,6 +201,14 @@ def _report_row(directory: Path, base: Path) -> dict[str, Any]:
     gate = _json_object(directory / "gate.json") if (directory / "gate.json").is_file() else {}
     clips = _json_object(directory / "clips_manifest.json") if (directory / "clips_manifest.json").is_file() else {}
     report = directory / "report.html"
+    plant_contract = manifest.get("plant_contract")
+    plant_compatibility = (
+        "current"
+        if plant_contracts_compatible(plant_contract, current_plant_contract())
+        else "legacy"
+        if plant_contract is None
+        else "incompatible"
+    )
     return {
         "id": directory.relative_to(base).as_posix(),
         "path": str(directory),
@@ -212,6 +224,8 @@ def _report_row(directory: Path, base: Path) -> dict[str, Any]:
         "scenario_count": manifest.get("scenario_count"),
         "report_path": str(report) if report.is_file() else None,
         "clips_status": clips.get("status") if clips else None,
+        "plant_contract": plant_contract,
+        "plant_compatibility": plant_compatibility,
     }
 
 

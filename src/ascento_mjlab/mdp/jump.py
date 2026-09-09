@@ -42,6 +42,9 @@ def initialize_jump_state(env, env_ids: torch.Tensor | None = None) -> None:
             "phase_time": torch.zeros(env.num_envs, device=env.device),
             "attempt_active": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
             "has_taken_off": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "had_valid_two_wheel_support": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
             "last_jump_generation": torch.zeros(env.num_envs, dtype=torch.long, device=env.device),
             "target_distance": torch.zeros(env.num_envs, device=env.device),
             "takeoff_xy": torch.zeros((env.num_envs, 2), device=env.device),
@@ -65,6 +68,7 @@ def initialize_jump_state(env, env_ids: torch.Tensor | None = None) -> None:
     state["phase_time"][ids] = 0.0
     state["attempt_active"][ids] = False
     state["has_taken_off"][ids] = False
+    state["had_valid_two_wheel_support"][ids] = False
     # Command generations are deliberately monotonic across episode resets.  A
     # reset must therefore acknowledge the generation already present on the
     # command term; resetting this value to zero would replay every historical
@@ -147,6 +151,10 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
 
     state["attempt_active"][new_request] = True
     state["has_taken_off"][new_request] = False
+    # A real attempt must originate in valid two-wheel support.  Once that
+    # condition has occurred, the eventual transition from *any* contact to no
+    # contact is one takeoff, even if wheels lift off on adjacent control steps.
+    state["had_valid_two_wheel_support"][new_request] = supported[new_request]
     state["phase"][new_request] = PHASE_CROUCH
     state["phase_time"][new_request] = 0.0
     state["air_time"][new_request] = 0.0
@@ -160,6 +168,9 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
 
     ticking = ids & state["attempt_active"] & ~new_request
     state["phase_time"][ticking] += dt
+    state["had_valid_two_wheel_support"][
+        ids & state["attempt_active"] & supported
+    ] = True
 
     crouch_to_thrust = (
         ids
@@ -170,9 +181,15 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
     state["phase"][crouch_to_thrust] = PHASE_THRUST
     state["phase_time"][crouch_to_thrust] = 0.0
 
-    previous_supported = state["supported"].clone()
     previous_airborne = state["airborne"].clone()
-    takeoff = ids & state["attempt_active"] & previous_supported & airborne
+    takeoff = (
+        ids
+        & state["attempt_active"]
+        & ~state["has_taken_off"]
+        & state["had_valid_two_wheel_support"]
+        & ~previous_airborne
+        & airborne
+    )
     landing = ids & state["attempt_active"] & previous_airborne & any_contact
 
     state["takeoff"][ids] = 0.0
@@ -245,6 +262,7 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
     )
     finished = recovery_to_idle | failed_attempt
     state["attempt_active"][finished] = False
+    state["had_valid_two_wheel_support"][finished] = False
     state["phase"][finished] = PHASE_IDLE
     state["phase_time"][finished] = 0.0
 
@@ -289,6 +307,7 @@ class JumpSemantics:
     """Definitions shared by jump rewards, evaluation, and capture metrics."""
 
     takeoff_requires_both_wheels_airborne: bool = True
+    takeoff_requires_prior_valid_support: bool = True
     landing_is_first_subsequent_wheel_contact: bool = True
     landing_impact_uses_precontact_vertical_speed: bool = True
     recovered_landing_requires_stable_recovery: bool = True

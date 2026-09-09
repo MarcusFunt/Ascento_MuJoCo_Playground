@@ -15,7 +15,7 @@ from .scenarios import materialize_suite
 from .schema import EpisodeResult, ScenarioSpec, load_suite
 
 DEFAULT_SUITES = {
-    "balance": "balance_gate_v1.toml",
+    "balance": "balance_gate_v3.toml",
     "velocity": "velocity_gate_v1.toml",
     "recovery": "recovery_gate_v1.toml",
 }

@@ -1,6 +1,7 @@
 import json
 
 from dashboard.versioning import (
+    classify_run_plant_contract,
     classify_run_version,
     current_repository_version,
     run_repository_provenance,
@@ -26,6 +27,16 @@ def test_same_commit_is_current(monkeypatch, tmp_path):
     result = classify_run_version(run, tmp_path)
     assert result["status"] == "current"
     assert result["is_outdated"] is False
+
+
+def test_runs_without_a_plant_contract_are_legacy(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+
+    result = classify_run_plant_contract(run, tmp_path)
+
+    assert result["status"] == "legacy"
+    assert result["is_compatible"] is False
 
 
 def test_same_branch_mismatch_is_flagged_outdated(monkeypatch, tmp_path):

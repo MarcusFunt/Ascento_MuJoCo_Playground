@@ -4,6 +4,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.physics import PHYSICS_PROFILE
 from ascento_mjlab.tasks.balance.env_cfg import ascento_balance_env_cfg
 from ascento_mjlab.tasks.jump.env_cfg import ascento_jump_env_cfg
 from ascento_mjlab.tasks.recovery.env_cfg import ascento_recovery_env_cfg
@@ -32,21 +33,26 @@ def test_balance_action_contract_reaches_65_nm_and_penalizes_drift():
     cfg.scene.num_envs = 1
 
     action_cfg = cfg.actions["effort"]
-    assert action_cfg.scale == 65.0
-    assert action_cfg.clip == {".*": (-65.0, 65.0)}
+    assert action_cfg.scale == PHYSICS_PROFILE.peak_effort_nm
+    assert action_cfg.clip == {".*": (-PHYSICS_PROFILE.peak_effort_nm, PHYSICS_PROFILE.peak_effort_nm)}
     assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.2)
     assert cfg.rewards["position_hold"].weight == pytest.approx(4.0)
     assert cfg.rewards["settled_balance"].weight == pytest.approx(1.0)
     assert cfg.rewards["leg_pose_symmetry"].weight == pytest.approx(-2.0)
     assert cfg.rewards["effort"].weight == pytest.approx(-0.8)
-    assert cfg.rewards["effort"].params["peak_effort_nm"] == pytest.approx(65.0)
+    assert cfg.rewards["effort"].params["peak_effort_nm"] == pytest.approx(
+        PHYSICS_PROFILE.peak_effort_nm
+    )
     assert "initialize_balance_origin" in cfg.events
     assert "balance_push" in cfg.events
 
     env = ManagerBasedRlEnv(cfg, device="cpu")
     env.action_manager.process_action(torch.ones((1, 6)))
     action_term = env.action_manager.get_term("effort")
-    assert torch.allclose(action_term._processed_actions, torch.full((1, 6), 65.0))
+    assert torch.allclose(
+        action_term._processed_actions,
+        torch.full((1, 6), PHYSICS_PROFILE.peak_effort_nm),
+    )
     env.close()
 
 

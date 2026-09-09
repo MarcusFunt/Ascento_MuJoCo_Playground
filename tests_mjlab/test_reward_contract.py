@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from ascento_mjlab.mdp.jump import PHASE_CROUCH, PHASE_THRUST
+from ascento_mjlab.mdp.jump import PHASE_CROUCH, PHASE_FLIGHT, PHASE_IDLE, PHASE_THRUST
 from ascento_mjlab.mdp.recovery import recovery_progress
 from ascento_mjlab.mdp.rewards import (
     action_rate_penalty,
@@ -73,7 +73,7 @@ def test_jump_objectives_consume_the_motion_command_without_forward_conflict():
 
     assert jump_commanded_height_tracking(env, asset_cfg=asset_cfg).item() == pytest.approx(0.05)
     assert lateral_speed_penalty(env, asset_cfg=asset_cfg).item() == pytest.approx(0.09)
-    assert track_motion_forward_velocity(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
+    assert track_motion_forward_velocity(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0)
     assert track_motion_yaw_rate(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
     assert jump_crouch(env, asset_cfg=asset_cfg).item() == pytest.approx(
         torch.exp(torch.tensor(-(0.11 / 0.05) ** 2)).item()
@@ -81,6 +81,11 @@ def test_jump_objectives_consume_the_motion_command_without_forward_conflict():
 
     env.ascento_jump_state["phase"][0] = PHASE_THRUST
     assert jump_thrust(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
+
+    env.ascento_jump_state["phase"][0] = PHASE_IDLE
+    assert track_motion_forward_velocity(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
+    env.ascento_jump_state["phase"][0] = PHASE_FLIGHT
+    assert track_motion_forward_velocity(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0)
 
 
 def test_regularizers_preserve_100_hz_scale_and_are_frequency_aware():

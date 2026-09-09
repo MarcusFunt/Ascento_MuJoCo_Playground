@@ -9,13 +9,15 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+from mjlab.rl import RslRlVecEnvWrapper
+
+from .provenance_runner import AscentoProvenanceRunner
 
 HORIZON_SCHEDULE_S = (20.0, 60.0, 120.0, 300.0)
 """Successive episode horizons used by balance and velocity training."""
 
 
-class HorizonCurriculumRunner(MjlabOnPolicyRunner):
+class HorizonCurriculumRunner(AscentoProvenanceRunner):
     """Adapt episode horizons while preserving the final long-horizon phase.
 
     The horizon advances after three consecutive 512-episode windows with at
@@ -76,21 +78,19 @@ class HorizonCurriculumRunner(MjlabOnPolicyRunner):
     def _step(self, actions: torch.Tensor) -> tuple[Any, torch.Tensor, torch.Tensor, dict]:
         observations, rewards, dones, extras = self._base_step(actions)
         timeouts = self.env.unwrapped.reset_time_outs
-        completed = int(dones.sum().item())
-        if completed:
-            timeout_count = int((timeouts & dones.bool()).sum().item())
-            self._record_completion_batch(completed, timeout_count)
+        done_mask = dones.bool()
+        if bool(done_mask.any()):
+            # Preserve environment-index order.  Reconstructing a vectorized
+            # batch from aggregate counts can assign outcomes to the wrong
+            # completion window at a boundary.
+            self._record_completion_outcomes(timeouts[done_mask])
         return observations, rewards, dones, extras
 
-    def _record_completion_batch(self, completed: int, timeout_count: int) -> None:
-        """Queue aggregate completions and evaluate only complete windows."""
-        if completed < 0 or timeout_count < 0 or timeout_count > completed:
-            raise ValueError("completion counts must satisfy 0 <= timeouts <= completed")
-        # The simulator exposes aggregate counts rather than completion order;
-        # timeout outcomes are queued first, deterministically, while preserving
-        # both totals and every remainder across vectorized-step boundaries.
-        self._pending_completion_outcomes.extend([True] * timeout_count)
-        self._pending_completion_outcomes.extend([False] * (completed - timeout_count))
+    def _record_completion_outcomes(self, timeouts: torch.Tensor) -> None:
+        """Queue ordered timeout outcomes and evaluate only complete windows."""
+        if timeouts.ndim != 1:
+            raise ValueError("completion outcomes must be a one-dimensional tensor")
+        self._pending_completion_outcomes.extend(bool(value) for value in timeouts.cpu().tolist())
         while len(self._pending_completion_outcomes) >= self.completion_window_episodes:
             window = self._pending_completion_outcomes[: self.completion_window_episodes]
             del self._pending_completion_outcomes[: self.completion_window_episodes]
@@ -190,7 +190,7 @@ class HorizonCurriculumRunner(MjlabOnPolicyRunner):
             "timeout_fraction": timeout_fraction,
             "stable_windows": self._top_horizon_success_windows,
             "learning_iteration": self.current_learning_iteration,
-            "selection": "requires deterministic balance_gate_v2 evaluation",
+            "selection": "requires deterministic balance_gate_v3 evaluation",
         }
         self.save(str(temporary_checkpoint), infos={"long_horizon_candidate": details})
         os.replace(temporary_checkpoint, checkpoint)

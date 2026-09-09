@@ -14,6 +14,8 @@ from typing import Any
 import torch
 from mjlab.tasks.registry import load_env_cfg
 
+from ascento_mjlab.plant_contract import current_plant_contract, plant_contracts_compatible
+
 from .consistency import check_collection
 from .gates import evaluate_gates
 from .report import render_html, select_worst_scenarios, summarize_results
@@ -108,18 +110,6 @@ def _make_output_dir(base: Path, suite_id: str, checkpoint: Path) -> Path:
     return candidate
 
 
-def _sha256_file(path: Path) -> str | None:
-    if not path.is_file():
-        return None
-    import hashlib
-
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _manifest(
     *,
     suite,
@@ -141,7 +131,6 @@ def _manifest(
     env_cfg = load_env_cfg(suite.task, play=False)
     timestep = physics_timestep(env_cfg)
     decimation = int(env_cfg.decimation)
-    model_path = repo_root / "src/ascento_mjlab/assets/ascento_guard2/robot.xml"
     return {
         "evaluation_schema_version": suite.schema_version,
         "suite_id": suite.suite_id,
@@ -164,7 +153,7 @@ def _manifest(
         "step_dt": step_dt,
         "physics_timestep": timestep,
         "decimation": decimation,
-        "robot_mjcf_sha256": _sha256_file(model_path),
+        "plant_contract": current_plant_contract(),
         "packages": _package_versions(),
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "argv": sys.argv,
@@ -238,6 +227,15 @@ def evaluate(
 
     manifest["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
     manifest["runtime"] = runtime
+    checkpoint_contract = runtime.get("checkpoint_plant_contract")
+    manifest["checkpoint_plant_contract"] = checkpoint_contract
+    manifest["checkpoint_plant_compatibility"] = (
+        "current"
+        if plant_contracts_compatible(checkpoint_contract, current_plant_contract())
+        else "legacy"
+        if checkpoint_contract is None
+        else "incompatible"
+    )
     manifest["capabilities"] = sorted(capabilities)
     write_json(output_dir / "manifest.json", manifest)
     write_results_database(output_dir / "results.sqlite", scenarios, results)

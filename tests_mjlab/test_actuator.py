@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import mujoco
+import pytest
 import torch
 from mjlab.actuator import Actuator, ActuatorCmd
 
@@ -9,6 +10,7 @@ from ascento_mjlab.actuator import (
     AscentoTorqueActuatorCfg,
     torque_speed_limit,
 )
+from ascento_mjlab.physics import PHYSICS_PROFILE
 
 
 def test_torque_speed_envelope_and_controller_guard():
@@ -74,3 +76,21 @@ def test_actuator_response_uses_initialized_timestep():
 
     expected = 10.0 * (1.0 - torch.exp(torch.tensor(-0.02 / 0.1)))
     assert torch.allclose(result, expected.reshape(1, 1))
+
+
+def test_profile_authority_is_preserved_at_low_and_high_motor_speed():
+    peak = PHYSICS_PROFILE.peak_effort_nm
+    requested = torch.full((1, 2), peak)
+    output = torque_speed_limit(
+        peak,
+        no_load_speed=12.0,
+        controller_speed_limit=4.0,
+        velocity=torch.tensor([[0.0, 6.0]]),
+        requested=requested,
+    )
+
+    # The action request remains 65 Nm; the motor model exposes a distinct
+    # post-actuator value at a guarded high speed.
+    assert requested.tolist() == [[peak, peak]]
+    assert output[0, 0].item() == pytest.approx(peak)
+    assert output[0, 1].item() == pytest.approx(0.0)

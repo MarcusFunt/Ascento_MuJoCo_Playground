@@ -17,12 +17,13 @@ from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul
 
 import ascento_mjlab.tasks  # noqa: F401
 from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights, initialize_balance_origin
-from ascento_mjlab.physics import REWARD_SCHEMA_VERSION
+from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
+from ascento_mjlab.plant_contract import current_plant_contract
 
 from .policy import RslRlPolicyAdapter
 from .schema import EpisodeResult, ScenarioSpec
 
-DEFAULT_PHYSICAL_EFFORT_LIMIT = 65.0
+DEFAULT_PLANT_EFFORT_LIMIT = PHYSICS_PROFILE.peak_effort_nm
 
 
 def physics_timestep(cfg: Any) -> float:
@@ -317,7 +318,7 @@ def _run_batch(
     *,
     device: str,
     deterministic: bool,
-    physical_effort_limit: float,
+    plant_effort_limit: float,
 ) -> tuple[list[EpisodeResult], dict[str, Any]]:
     if not scenarios:
         return [], {}
@@ -337,11 +338,14 @@ def _run_batch(
     env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
     runner_cls = load_runner_cls(task) or MjlabOnPolicyRunner
     runner = runner_cls(env, asdict(agent_cfg), device=device)
-    runner.load(
+    checkpoint_infos = runner.load(
         str(checkpoint),
         load_cfg={"actor": True},
         strict=True,
         map_location=device,
+    )
+    checkpoint_contract = (
+        checkpoint_infos.get("plant_contract") if isinstance(checkpoint_infos, dict) else None
     )
     policy = RslRlPolicyAdapter(runner, checkpoint, deterministic=deterministic)
 
@@ -374,11 +378,16 @@ def _run_batch(
     sum_effort_abs = torch.zeros(count, device=dev)
     sum_effort_sq = torch.zeros(count, device=dev)
     max_effort_abs = torch.zeros(count, device=dev)
+    sum_request_abs = torch.zeros(count, device=dev)
     sum_request_sq = torch.zeros(count, device=dev)
     max_request_abs = torch.zeros(count, device=dev)
+    sum_joint_applied_abs = torch.zeros(count, device=dev)
+    sum_joint_applied_sq = torch.zeros(count, device=dev)
+    max_joint_applied_abs = torch.zeros(count, device=dev)
     action_clip_count = torch.zeros(count, device=dev)
     action_count = torch.zeros(count, device=dev)
     saturation_count = torch.zeros(count, device=dev)
+    joint_saturation_count = torch.zeros(count, device=dev)
     request_count = torch.zeros(count, device=dev)
     support_count = torch.zeros(count, device=dev)
     airborne_count = torch.zeros(count, device=dev)
@@ -493,15 +502,23 @@ def _run_batch(
             planar_speed = torch.linalg.vector_norm(robot.data.root_link_lin_vel_w[:, :2], dim=1)
             angular_xy = torch.linalg.vector_norm(robot.data.root_link_ang_vel_b[:, :2], dim=1)
             height = robot.data.root_link_pos_w[:, 2]
-            effort = robot.data.actuator_force
-            effort_abs = torch.mean(torch.abs(effort), dim=1)
-            effort_sq = torch.mean(torch.square(effort), dim=1)
-            effort_peak = torch.amax(torch.abs(effort), dim=1)
-            request = robot.data.joint_effort_target
-            request_sq = torch.mean(torch.square(request), dim=1)
-            request_peak = torch.amax(torch.abs(request), dim=1)
+            actuator_output = robot.data.actuator_force
+            actuator_output_abs = torch.mean(torch.abs(actuator_output), dim=1)
+            actuator_output_sq = torch.mean(torch.square(actuator_output), dim=1)
+            actuator_output_peak = torch.amax(torch.abs(actuator_output), dim=1)
+            joint_applied = robot.data.qfrc_actuator
+            joint_applied_abs = torch.mean(torch.abs(joint_applied), dim=1)
+            joint_applied_sq = torch.mean(torch.square(joint_applied), dim=1)
+            joint_applied_peak = torch.amax(torch.abs(joint_applied), dim=1)
+            requested = robot.data.joint_effort_target
+            request_abs = torch.mean(torch.abs(requested), dim=1)
+            request_sq = torch.mean(torch.square(requested), dim=1)
+            request_peak = torch.amax(torch.abs(requested), dim=1)
             request_sat = torch.mean(
-                (torch.abs(request) >= physical_effort_limit - 1.0e-4).float(), dim=1
+                (torch.abs(requested) >= plant_effort_limit - 1.0e-4).float(), dim=1
+            )
+            joint_applied_sat = torch.mean(
+                (torch.abs(joint_applied) >= plant_effort_limit - 1.0e-4).float(), dim=1
             )
             hip_mismatch = robot.data.joint_pos[:, joint_indices["left_hip"]] - robot.data.joint_pos[
                 :, joint_indices["right_hip"]
@@ -544,16 +561,25 @@ def _run_batch(
             )
             sum_height += height * weight
             min_height = torch.minimum(min_height, torch.where(active, height, min_height))
-            sum_effort_abs += effort_abs * weight
-            sum_effort_sq += effort_sq * weight
+            sum_effort_abs += actuator_output_abs * weight
+            sum_effort_sq += actuator_output_sq * weight
             max_effort_abs = torch.maximum(
-                max_effort_abs, torch.where(active, effort_peak, torch.zeros_like(effort_peak))
+                max_effort_abs,
+                torch.where(active, actuator_output_peak, torch.zeros_like(actuator_output_peak)),
             )
+            sum_request_abs += request_abs * weight
             sum_request_sq += request_sq * weight
             max_request_abs = torch.maximum(
                 max_request_abs, torch.where(active, request_peak, torch.zeros_like(request_peak))
             )
+            sum_joint_applied_abs += joint_applied_abs * weight
+            sum_joint_applied_sq += joint_applied_sq * weight
+            max_joint_applied_abs = torch.maximum(
+                max_joint_applied_abs,
+                torch.where(active, joint_applied_peak, torch.zeros_like(joint_applied_peak)),
+            )
             saturation_count += request_sat * weight
+            joint_saturation_count += joint_applied_sat * weight
             request_count += weight
             support_count += both_supported.float() * weight
             airborne_count += airborne.float() * weight
@@ -742,6 +768,17 @@ def _run_batch(
             "physical_request_max_abs": max_request_abs,
             "action_clip_fraction": action_clip_count / action_count.clamp(min=1.0),
             "physical_saturation_fraction": saturation_count / request_count.clamp(min=1.0),
+            "commanded_effort_mean_abs": sum_request_abs / denom,
+            "commanded_effort_rms": torch.sqrt(sum_request_sq / denom),
+            "commanded_effort_max_abs": max_request_abs,
+            "actuator_output_effort_mean_abs": sum_effort_abs / denom,
+            "actuator_output_effort_rms": torch.sqrt(sum_effort_sq / denom),
+            "actuator_output_effort_max_abs": max_effort_abs,
+            "joint_applied_effort_mean_abs": sum_joint_applied_abs / denom,
+            "joint_applied_effort_rms": torch.sqrt(sum_joint_applied_sq / denom),
+            "joint_applied_effort_max_abs": max_joint_applied_abs,
+            "joint_applied_saturation_fraction": joint_saturation_count
+            / request_count.clamp(min=1.0),
             "both_supported_fraction": support_count / denom,
             "airborne_fraction": airborne_count / denom,
             "path_length": path_length,
@@ -808,6 +845,8 @@ def _run_batch(
             "robot_total_mass_kg": mass,
             "policy": asdict(policy.metadata()),
             "reward_schema": REWARD_SCHEMA_VERSION,
+            "plant_contract": current_plant_contract(),
+            "checkpoint_plant_contract": checkpoint_contract,
         }
         return results, metadata
     finally:
@@ -832,7 +871,7 @@ def run_scenarios(
     batch_size: int = 512,
     device: str = "cuda:0",
     deterministic: bool = True,
-    physical_effort_limit: float = DEFAULT_PHYSICAL_EFFORT_LIMIT,
+    plant_effort_limit: float = DEFAULT_PLANT_EFFORT_LIMIT,
 ) -> tuple[list[EpisodeResult], dict[str, Any]]:
     checkpoint = Path(checkpoint)
     if not checkpoint.is_file():
@@ -853,7 +892,7 @@ def run_scenarios(
                 batch,
                 device=device,
                 deterministic=deterministic,
-                physical_effort_limit=physical_effort_limit,
+                plant_effort_limit=plant_effort_limit,
             )
             results.extend(batch_results)
             batch_metadata.append({"family": family, **metadata})
@@ -861,9 +900,15 @@ def run_scenarios(
     step_dts = {float(item["step_dt"]) for item in batch_metadata if item}
     if len(step_dts) > 1:
         raise RuntimeError(f"Inconsistent step_dt across batches: {sorted(step_dts)}")
+    checkpoint_contracts = [
+        item.get("checkpoint_plant_contract") for item in batch_metadata if item
+    ]
+    if len({repr(contract) for contract in checkpoint_contracts}) > 1:
+        raise RuntimeError("Inconsistent checkpoint plant provenance across evaluation batches")
     return results, {
         "checkpoint_sha256": checkpoint_sha256(checkpoint),
         "batches": len(batch_metadata),
         "step_dt": next(iter(step_dts)) if step_dts else task_step_dt(task),
         "batch_metadata": batch_metadata,
+        "checkpoint_plant_contract": checkpoint_contracts[0] if checkpoint_contracts else None,
     }

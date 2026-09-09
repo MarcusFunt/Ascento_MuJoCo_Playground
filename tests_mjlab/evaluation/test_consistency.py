@@ -55,3 +55,27 @@ def test_telemetry_contradiction_invalidates_collection():
     failed_ids = {check.check_id for check in checks if not check.passed}
     assert "effort_mean_abs_le_rms" in failed_ids
     assert "effort_rms_le_peak" in failed_ids
+
+
+def test_joint_applied_effort_and_saturation_are_checked_against_the_plant():
+    scenario = _scenario()
+    result = EpisodeResult(
+        scenario_id=scenario.scenario_id,
+        family=scenario.family,
+        success=True,
+        termination_reason="horizon",
+        episode_steps=100,
+        metrics={
+            "joint_applied_effort_mean_abs": 20.0,
+            "joint_applied_effort_rms": 30.0,
+            "joint_applied_effort_max_abs": 66.0,
+            "joint_applied_saturation_fraction": 1.2,
+        },
+    )
+
+    passed, checks = check_collection([result], [scenario], step_dt=0.01)
+
+    assert not passed
+    failed_ids = {check.check_id for check in checks if not check.passed}
+    assert "joint_applied_effort_within_limit" in failed_ids
+    assert "joint_applied_saturation_fraction_is_fraction" in failed_ids

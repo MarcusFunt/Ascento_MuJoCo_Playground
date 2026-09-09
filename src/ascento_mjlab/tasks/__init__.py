@@ -4,6 +4,7 @@
 # discovers task entry points while its own task package is being imported;
 # keeping registry access lazy makes both import directions safe.
 from ascento_mjlab.horizon_curriculum import HorizonCurriculumRunner
+from ascento_mjlab.provenance_runner import AscentoProvenanceRunner
 
 from .balance.env_cfg import ascento_balance_env_cfg
 from .balance.rl_cfg import AscentoBalanceRlCfg
@@ -38,12 +39,14 @@ def _register_tasks() -> None:
         env_cfg=ascento_recovery_env_cfg(),
         play_env_cfg=ascento_recovery_env_cfg(play=True),
         rl_cfg=AscentoRecoveryRlCfg,
+        runner_cls=AscentoProvenanceRunner,
     )
     register_mjlab_task(
         task_id="Ascento-Jump-Flat",
         env_cfg=ascento_jump_env_cfg(),
         play_env_cfg=ascento_jump_env_cfg(play=True),
         rl_cfg=AscentoJumpRlCfg,
+        runner_cls=AscentoProvenanceRunner,
     )
 
 

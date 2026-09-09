@@ -22,7 +22,7 @@ commands when the active environment is not already configured for it.
 
 | Stage | Task | Learns | Training-only conditions | Acceptance suite |
 | --- | --- | --- | --- | --- |
-| 1 | `Ascento-Balance-Flat` | Supported balance, controlled effort, recovery from planar pushes | Curriculum through 20, 60, 120, and 300 s; a cardinal push between 4–6 s | `balance_gate_v2` |
+| 1 | `Ascento-Balance-Flat` | Supported balance, controlled effort, recovery from planar pushes | Curriculum through 20, 60, 120, and 300 s; a cardinal push between 4–6 s | `balance_gate_v3` |
 | 2 | `Ascento-Velocity-Flat` | Linear velocity, yaw-rate, and height tracking | Random twist/height resampling every 3–6 s | `velocity_gate_v1` |
 | 3 | `Ascento-Recovery-Flat` | Wide-reset stabilization and recovery after a physical push | Broad initial roll/pitch/velocity envelope; interval push only during training | `recovery_gate_v1` |
 | 4 | `Ascento-Jump-Flat` | Commanded crouch, takeoff, flight, landing, distance, and post-landing stabilization | Flat-ground compound motion command | `jump_gate_v1` |
@@ -130,13 +130,13 @@ when it fails.
 
 For balance, screen candidate checkpoints—including
 `model_best_long_horizon.pt` when it exists—on the development suite first,
-then use `balance_gate_v2` for the final decision. The best-horizon checkpoint
+then use `balance_gate_v3` for the final decision. The best-horizon checkpoint
 is a candidate, not a pass.
 
 ```bash
 ascento evaluate screen 'logs/rsl_rl/ascento_balance/<run>/model_*.pt' \
   --suite balance_dev_v1 --top 3
-ascento evaluate run --checkpoint <selected-checkpoint> --suite balance_gate_v2
+ascento evaluate run --checkpoint <selected-checkpoint> --suite balance_gate_v3
 ```
 
 Use a new managed run for a material change in rewards, curriculum, seed,

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ascento_mjlab.plant_contract import current_plant_contract
 from dashboard.config import REPO_ROOT, load_config
 
 TRAINING_RUNTIME_RE = re.compile(
@@ -265,7 +266,12 @@ def _write_experiment_manifest(
         "device": device,
         "packages": _package_versions(),
         "git": git,
-        "checkpoint": {"path": None, "sha256": None},
+        "checkpoint": {
+            "path": None,
+            "sha256": None,
+            "plant_contract": current_plant_contract(),
+        },
+        "plant_contract": current_plant_contract(),
         "evaluation": {"suite": None, "result": None},
         "run_directory": str(run_dir),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -286,6 +292,7 @@ def _finalize_experiment_manifest(path: Path, run_dir: Path) -> None:
         manifest["checkpoint"] = {
             "path": checkpoint,
             "sha256": _file_sha256(checkpoint_path),
+            "plant_contract": manifest.get("plant_contract"),
         }
     write_metadata(path, **manifest)
 
@@ -415,6 +422,7 @@ def main() -> int:
         purpose=args.purpose.strip(),
         parent_run_id=args.parent_run_id,
         parent_checkpoint=args.parent_checkpoint,
+        plant_contract=current_plant_contract(),
     )
 
     # The API starts launchers in a new session so their process group can be
@@ -448,6 +456,7 @@ def main() -> int:
         exit_code=None,
         stop_requested_at=None,
         stop_reason=None,
+        plant_contract=current_plant_contract(),
     )
     experiment_manifest_path = run_dir / "experiment_manifest.json"
     _write_experiment_manifest(

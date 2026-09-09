@@ -71,6 +71,7 @@ def _request_jump(motion, *, distance: float = 0.2):
 def test_jump_semantics_keeps_terrain_behind_flat_ground_gate():
     semantics = JumpSemantics()
     assert semantics.takeoff_requires_both_wheels_airborne
+    assert semantics.takeoff_requires_prior_valid_support
     assert semantics.landing_is_first_subsequent_wheel_contact
     assert semantics.landing_impact_uses_precontact_vertical_speed
     assert semantics.recovered_landing_requires_stable_recovery
@@ -120,6 +121,50 @@ def test_unrequested_contact_loss_is_not_a_takeoff_event():
 
     assert env.ascento_jump_state["airborne"].item()
     assert env.ascento_jump_state["takeoff"].item() == 0.0
+
+
+@pytest.mark.parametrize("first_wheel", ["left", "right"])
+def test_staggered_wheel_liftoff_produces_one_takeoff_with_one_reference(first_wheel):
+    env, left, right, robot, motion = _jump_env()
+    _request_jump(motion, distance=0.30)
+    update_jump_state(env)
+
+    first = left if first_wheel == "left" else right
+    second = right if first_wheel == "left" else left
+    first.zero_()
+    update_jump_state(env)
+    assert env.ascento_jump_state["takeoff"].item() == 0.0
+
+    robot.root_link_pos_w[0, :2] = torch.tensor([0.12, -0.04])
+    second.zero_()
+    update_jump_state(env)
+    state = env.ascento_jump_state
+    captured_reference = state["takeoff_xy"].clone()
+    assert state["takeoff"].item() == 1.0
+    assert state["phase"].item() == PHASE_FLIGHT
+    assert torch.equal(captured_reference, torch.tensor([[0.12, -0.04]]))
+
+    robot.root_link_pos_w[0, 0] = 0.22
+    update_jump_state(env)
+    assert state["takeoff"].item() == 0.0
+    assert torch.equal(state["takeoff_xy"], captured_reference)
+
+
+def test_brief_single_wheel_unload_then_restore_waits_for_actual_airborne_transition():
+    env, left, right, _, motion = _jump_env()
+    _request_jump(motion)
+    update_jump_state(env)
+
+    left.zero_()
+    update_jump_state(env)
+    left.fill_(True)
+    update_jump_state(env)
+    assert env.ascento_jump_state["takeoff"].item() == 0.0
+
+    left.zero_()
+    right.zero_()
+    update_jump_state(env)
+    assert env.ascento_jump_state["takeoff"].item() == 1.0
 
 
 def test_reset_acknowledges_prior_jump_generation_without_replaying_it():

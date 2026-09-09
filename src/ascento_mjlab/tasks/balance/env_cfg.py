@@ -283,8 +283,14 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
             "tilt_radians": MetricsTermCfg(
                 func=ascento_mdp.metrics.tilt_radians, params={"asset_cfg": ROBOT_CFG}
             ),
-            "applied_effort": MetricsTermCfg(
-                func=ascento_mdp.metrics.applied_effort, params={"asset_cfg": ROBOT_CFG}
+            "commanded_effort": MetricsTermCfg(
+                func=ascento_mdp.metrics.commanded_effort, params={"asset_cfg": ROBOT_CFG}
+            ),
+            "actuator_output_effort": MetricsTermCfg(
+                func=ascento_mdp.metrics.actuator_output_effort, params={"asset_cfg": ROBOT_CFG}
+            ),
+            "joint_applied_effort": MetricsTermCfg(
+                func=ascento_mdp.metrics.joint_applied_effort, params={"asset_cfg": ROBOT_CFG}
             ),
             "root_speed": MetricsTermCfg(
                 func=ascento_mdp.metrics.root_speed, params={"asset_cfg": ROBOT_CFG}

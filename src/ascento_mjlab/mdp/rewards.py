@@ -10,6 +10,7 @@ from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from ascento_mjlab.geometry import projected_gravity_tilt
+from ascento_mjlab.physics import PHYSICS_PROFILE
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -169,7 +170,7 @@ def settled_balance(
 
 def effort_penalty(
     env: ManagerBasedRlEnv,
-    peak_effort_nm: float = 65.0,
+    peak_effort_nm: float = PHYSICS_PROFILE.peak_effort_nm,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     if peak_effort_nm <= 0.0:
@@ -181,7 +182,7 @@ def effort_penalty(
 
 def effort_target_barrier(
     env: ManagerBasedRlEnv,
-    peak_effort_nm: float = 65.0,
+    peak_effort_nm: float = PHYSICS_PROFILE.peak_effort_nm,
     soft_limit_fraction: float = 0.75,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
@@ -334,13 +335,24 @@ def track_motion_forward_velocity(
     std: float = 0.35,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
+    """Track cruising velocity only outside an active jump attempt.
+
+    Jump velocity is deliberately not rewarded during crouch, thrust, flight,
+    landing, or recovery.  Those phases use the takeoff and heading-relative
+    distance objectives, so they cannot be contradicted by a zero-velocity
+    command at the instant of a jump.
+    """
     if std <= 0.0:
         raise ValueError("std must be positive")
     asset: Entity = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
     assert command is not None and command.shape[1] >= 1
     error = command[:, 0] - asset.data.root_link_lin_vel_b[:, 0]
-    return torch.exp(-torch.square(error) / (std * std))
+    score = torch.exp(-torch.square(error) / (std * std))
+    from .jump import PHASE_IDLE
+
+    phase = env.ascento_jump_state["phase"]
+    return score * (phase == PHASE_IDLE).float()
 
 
 def track_motion_yaw_rate(
