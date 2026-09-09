@@ -136,6 +136,7 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
 
     motion_term = _motion_term(env)
     command = motion_term.command if motion_term is not None else None
+    prior_supported = state["supported"].clone()
     if motion_term is not None and hasattr(motion_term, "jump_generation"):
         generation = motion_term.jump_generation
         generation_changed = ids & (generation != state["last_jump_generation"])
@@ -154,7 +155,9 @@ def update_jump_state(env, env_ids: torch.Tensor | None = None, dt: float | None
     # A real attempt must originate in valid two-wheel support.  Once that
     # condition has occurred, the eventual transition from *any* contact to no
     # contact is one takeoff, even if wheels lift off on adjacent control steps.
-    state["had_valid_two_wheel_support"][new_request] = supported[new_request]
+    state["had_valid_two_wheel_support"][new_request] = (
+        prior_supported[new_request] | supported[new_request]
+    )
     state["phase"][new_request] = PHASE_CROUCH
     state["phase_time"][new_request] = 0.0
     state["air_time"][new_request] = 0.0

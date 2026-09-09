@@ -96,6 +96,7 @@ TRAINING_RUNTIME_RE = re.compile(
     r"Training with:\s*device=([^,\s]+),\s*seed=([^,\s]+),\s*rank=(\d+)"
 )
 GPU_WORLD_RE = re.compile(r"Launching training with\s+(\d+)\s+GPUs?", re.IGNORECASE)
+STARTING_PROCESS_GRACE_SECONDS = 5.0
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -389,6 +390,14 @@ def process_status(pid: Any, source_pid_namespace: str | None = None) -> dict[st
     }
 
 
+def _starting_process_grace_active(status: dict[str, Any], now: float) -> bool:
+    started_at = _timestamp(status.get("started_at"))
+    return (
+        started_at is not None
+        and 0.0 <= now - started_at < STARTING_PROCESS_GRACE_SECONDS
+    )
+
+
 def gpu_snapshot(pid: int | None = None) -> dict[str, Any]:
     executable = shutil.which("nvidia-smi")
     if executable is None:
@@ -670,7 +679,12 @@ def summarize_dashboard_run(
             status.get("launcher_pid"), status.get("pid_namespace")
         )
 
-    if state in {"starting", "running", "stopping"} and lifecycle_process["alive"] is False:
+    startup_grace = state == "starting" and _starting_process_grace_active(status, now)
+    if (
+        state in {"starting", "running", "stopping"}
+        and lifecycle_process["alive"] is False
+        and not startup_grace
+    ):
         stopped = state == "stopping" or bool(status.get("stop_requested_at"))
         status = {
             **status,

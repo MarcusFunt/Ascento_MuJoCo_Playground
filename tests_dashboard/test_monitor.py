@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime, timezone
 
 from dashboard.health import (
     _pid_namespace,
@@ -240,6 +241,33 @@ def test_missing_managed_process_reconciles_status_to_terminal(monkeypatch, tmp_
     assert summary["stale"] is False
     assert stored["state"] == "error"
     assert stored["lifecycle_error"] == "managed process exited without writing a terminal status"
+
+
+def test_new_starting_process_gets_a_short_initialization_grace(monkeypatch, tmp_path):
+    run = tmp_path / "starting"
+    run.mkdir()
+    status_path = run / "run_status.json"
+    status_path.write_text(
+        json.dumps(
+            {
+                "state": "starting",
+                "task": "Ascento-Balance-Flat",
+                "launcher_pid": 424242,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def missing_process(pid, sig):
+        del pid, sig
+        raise ProcessLookupError
+
+    monkeypatch.setattr("dashboard.health.os.kill", missing_process)
+    summary = summarize_dashboard_run(run, tmp_path)
+
+    assert summary["state"] == "starting"
+    assert json.loads(status_path.read_text(encoding="utf-8"))["state"] == "starting"
 
 
 def test_jsonl_eta_uses_iteration_rate_not_environment_fps(tmp_path):

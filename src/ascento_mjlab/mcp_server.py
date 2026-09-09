@@ -9,9 +9,9 @@ from typing import Any
 from ascento_mjlab.operations import (
     archive_evaluation,
     default_capture_dir,
+    ensure_checkout_import_path,
     evaluation_details,
     evaluation_root,
-    ensure_checkout_import_path,
     list_evaluations,
     repo_root,
     resolve_checkpoint,
