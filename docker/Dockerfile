@@ -42,6 +42,8 @@ COPY dashboard ./dashboard
 COPY tests_mjlab ./tests_mjlab
 COPY tests_dashboard ./tests_dashboard
 COPY scripts ./scripts
+# Keep the runtime-compose contract available to the in-image dashboard tests.
+COPY docker/compose.yaml ./docker/compose.yaml
 COPY --from=dashboard-frontend /frontend/dist ./dashboard/frontend/dist
 
 # Install every optional extra that is compatible with the selected compute

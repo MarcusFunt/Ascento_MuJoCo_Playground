@@ -359,9 +359,22 @@ class HostSupervisor:
         return {"ok": False, "error": "unsupported supervisor operation", "code": "unsupported"}
 
 
-class _ThreadingUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    daemon_threads = True
-    allow_reuse_address = True
+def _threading_unix_server_type() -> type[socketserver.BaseServer]:
+    """Return the Unix-socket server implementation when this host supports it.
+
+    The supervisor is installed and run under Linux/WSL.  Keeping this lookup
+    lazy lets the repository's platform-neutral controller tests import on
+    Windows without suggesting that the supervisor itself is a Windows service.
+    """
+    unix_server = getattr(socketserver, "UnixStreamServer", None)
+    if unix_server is None:
+        raise RuntimeError("the host supervisor requires Linux/WSL Unix-domain sockets")
+
+    class _ThreadingUnixServer(socketserver.ThreadingMixIn, unix_server):
+        daemon_threads = True
+        allow_reuse_address = True
+
+    return _ThreadingUnixServer
 
 
 class _Handler(socketserver.StreamRequestHandler):
@@ -380,6 +393,7 @@ class _Handler(socketserver.StreamRequestHandler):
 
 
 def serve(repo_root: Path, socket_path: Path) -> None:
+    server_type = _threading_unix_server_type()
     supervisor = HostSupervisor(repo_root)
     socket_path = socket_path.expanduser().resolve()
     socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -387,7 +401,7 @@ def serve(repo_root: Path, socket_path: Path) -> None:
         socket_path.unlink()
     except FileNotFoundError:
         pass
-    server = _ThreadingUnixServer(str(socket_path), _Handler)
+    server = server_type(str(socket_path), _Handler)
     server.supervisor = supervisor  # type: ignore[attr-defined]
     os.chmod(socket_path, 0o660)
     try:

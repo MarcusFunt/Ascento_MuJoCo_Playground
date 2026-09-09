@@ -1,5 +1,8 @@
 import json
 
+import pytest
+
+from scripts import host_supervisor
 from scripts.host_supervisor import HostSupervisor
 
 
@@ -107,3 +110,10 @@ def test_dispatch_exposes_only_status_and_update(monkeypatch, tmp_path):
     rejected = supervisor.dispatch({"op": "shell", "command": "rm -rf /"})
     assert rejected["ok"] is False
     assert rejected["code"] == "unsupported"
+
+
+def test_unix_server_requirement_is_deferred_until_the_service_starts(monkeypatch):
+    monkeypatch.delattr(host_supervisor.socketserver, "UnixStreamServer", raising=False)
+
+    with pytest.raises(RuntimeError, match="requires Linux/WSL"):
+        host_supervisor._threading_unix_server_type()
