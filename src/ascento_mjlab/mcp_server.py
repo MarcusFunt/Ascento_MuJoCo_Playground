@@ -21,7 +21,6 @@ from ascento_mjlab.operations import (
     list_evaluation_suites as discover_evaluation_suites,
 )
 
-
 # See ``ensure_checkout_import_path``: MCP is also installed as a console
 # entry point, so it must not rely on the caller having cd'ed to the checkout.
 ensure_checkout_import_path()
