@@ -9,7 +9,7 @@ import re
 import shutil
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +112,13 @@ def _json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def _write_json(path: Path, value: dict[str, Any]) -> None:
+    """Atomically persist a recovered lifecycle status."""
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
+    temporary.replace(path)
 
 
 def _finite(value: Any) -> bool:
@@ -653,6 +660,32 @@ def summarize_dashboard_run(
             latest["elapsed_seconds"] = max(0.0, event_time - started)
 
     process = process_status(status.get("pid"), status.get("pid_namespace"))
+    lifecycle_process = process
+    # A launcher has not recorded the trainer PID while it is starting. In
+    # that small window, the launcher is the only process we can reliably
+    # check. Once training starts, checking the trainer PID avoids treating a
+    # launcher that has already exited as proof that training is still alive.
+    if state == "starting" and lifecycle_process["pid"] is None:
+        lifecycle_process = process_status(
+            status.get("launcher_pid"), status.get("pid_namespace")
+        )
+
+    if state in {"starting", "running", "stopping"} and lifecycle_process["alive"] is False:
+        stopped = state == "stopping" or bool(status.get("stop_requested_at"))
+        status = {
+            **status,
+            "state": "stopped" if stopped else "error",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "lifecycle_error": (
+                "managed process was already absent while completing the stop request"
+                if stopped
+                else "managed process exited without writing a terminal status"
+            ),
+        }
+        if status_file.is_file() and _inside(status_file, root):
+            _write_json(status_file, status)
+        state = str(status["state"])
+
     stale = state in {"starting", "running"} and freshness > stale_after_seconds
     if state == "running" and process["alive"] is False:
         stale = True

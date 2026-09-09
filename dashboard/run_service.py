@@ -348,25 +348,41 @@ class RunService:
         pgid = status.get("process_group")
         launcher_pid = status.get("launcher_pid")
         trainer_pid = status.get("pid")
-        try:
-            if isinstance(pgid, int) and pgid > 0:
-                os.killpg(pgid, signal.SIGINT)
-            elif isinstance(launcher_pid, int) and launcher_pid > 0:
-                os.kill(launcher_pid, signal.SIGINT)
-            elif isinstance(trainer_pid, int) and trainer_pid > 0:
-                os.kill(trainer_pid, signal.SIGINT)
-            else:
-                raise ProcessLookupError("no controllable process id recorded")
-        except ProcessLookupError as error:
-            status.update(
-                {
-                    "state": "error",
-                    "control_error": str(error),
-                    "finished_at": _now(),
-                }
-            )
-            _write_json(status_path, status)
-            raise
+        attempts: list[tuple[str, int]] = []
+        if isinstance(pgid, int) and pgid > 0:
+            attempts.append(("process group", pgid))
+        if isinstance(launcher_pid, int) and launcher_pid > 0:
+            attempts.append(("launcher", launcher_pid))
+        if isinstance(trainer_pid, int) and trainer_pid > 0:
+            attempts.append(("trainer", trainer_pid))
+
+        errors: list[str] = []
+        for target, identifier in attempts:
+            try:
+                if target == "process group":
+                    os.killpg(identifier, signal.SIGINT)
+                else:
+                    os.kill(identifier, signal.SIGINT)
+            except ProcessLookupError as error:
+                # A launcher can disappear before its child. Continue through
+                # every recorded target so a stale group never strands a live
+                # trainer.
+                errors.append(f"{target} {identifier}: {error}")
+                continue
+            return self.detail(run_id)
+
+        # The stop request itself is still durable even when every recorded
+        # PID is already gone. Mark it terminal instead of leaving the run in
+        # an un-actionable active state that blocks maintenance.
+        status.update(
+            {
+                "state": "stopped",
+                "control_error": "; ".join(errors) or "no controllable process id recorded",
+                "finished_at": _now(),
+                "lifecycle_error": "stop request found no live managed process",
+            }
+        )
+        _write_json(status_path, status)
         return self.detail(run_id)
 
     def compare(self, run_ids: list[str]) -> dict[str, Any]:

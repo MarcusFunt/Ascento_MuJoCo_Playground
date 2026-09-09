@@ -1,4 +1,5 @@
 import json
+import signal
 from pathlib import Path
 
 import pytest
@@ -185,6 +186,38 @@ def test_stop_marks_stopping_before_signalling(monkeypatch, tmp_path):
     assert calls and calls[0][0] == 12345
     assert stored["state"] == "stopping"
     assert stored["stop_reason"] == "plateau"
+    assert result["state"] == "stopping"
+
+
+def test_stop_falls_back_from_stale_group_and_launcher_to_trainer(monkeypatch, tmp_path):
+    run = _run(tmp_path, "active", state="running")
+    status_path = run / "run_status.json"
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    status.update({"process_group": 101, "launcher_pid": 102, "pid": 103})
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+    service = RunService(tmp_path)
+    run_id = service_compare_ids(service, tmp_path)[0]
+    attempts = []
+
+    def stale_group(pgid, sig):
+        attempts.append(("group", pgid, sig))
+        raise ProcessLookupError("stale process group")
+
+    def signal_pid(pid, sig):
+        attempts.append(("pid", pid, sig))
+        if pid == 102:
+            raise ProcessLookupError("stale launcher")
+
+    monkeypatch.setattr("dashboard.run_service.os.killpg", stale_group)
+    monkeypatch.setattr("dashboard.run_service.os.kill", signal_pid)
+
+    result = service.stop(run_id, reason="operator_stop")
+
+    assert attempts[:3] == [
+        ("group", 101, signal.SIGINT),
+        ("pid", 102, signal.SIGINT),
+        ("pid", 103, signal.SIGINT),
+    ]
     assert result["state"] == "stopping"
 
 

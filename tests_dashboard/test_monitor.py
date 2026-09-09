@@ -212,6 +212,36 @@ def test_cross_namespace_pid_is_not_reported_alive():
     assert result["reason"] == "different_pid_namespace"
 
 
+def test_missing_managed_process_reconciles_status_to_terminal(monkeypatch, tmp_path):
+    run = tmp_path / "orphaned"
+    run.mkdir()
+    status_path = run / "run_status.json"
+    status_path.write_text(
+        json.dumps(
+            {
+                "state": "running",
+                "task": "Ascento-Balance-Flat",
+                "pid": 424242,
+                "pid_namespace": _pid_namespace(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def missing_process(pid, sig):
+        del pid, sig
+        raise ProcessLookupError
+
+    monkeypatch.setattr("dashboard.health.os.kill", missing_process)
+    summary = summarize_dashboard_run(run, tmp_path)
+    stored = json.loads(status_path.read_text(encoding="utf-8"))
+
+    assert summary["state"] == "error"
+    assert summary["stale"] is False
+    assert stored["state"] == "error"
+    assert stored["lifecycle_error"] == "managed process exited without writing a terminal status"
+
+
 def test_jsonl_eta_uses_iteration_rate_not_environment_fps(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()

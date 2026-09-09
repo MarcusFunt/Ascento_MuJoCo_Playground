@@ -321,6 +321,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _interrupt_on_sigterm(_signum: int, _frame: Any) -> None:
+    """Route an external supervisor stop through the existing SIGINT cleanup."""
+    raise KeyboardInterrupt
+
+
+def _graceful_stop(process: subprocess.Popen[str]) -> int:
+    """Give the trainer its normal interrupt cleanup before escalating."""
+    try:
+        process.send_signal(signal.SIGINT)
+    except ProcessLookupError:
+        pass
+    try:
+        return process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            return process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return process.wait()
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -440,60 +462,52 @@ def main() -> int:
 
     exit_code = 127
     stop_requested = False
+    process: subprocess.Popen[str] | None = None
+    previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, _interrupt_on_sigterm)
     try:
-        with log_path.open("a", encoding="utf-8", buffering=1) as log:
-            log.write("DASHBOARD_LAUNCH " + " ".join(command) + "\n")
-            try:
-                process = subprocess.Popen(
-                    command,
-                    cwd=REPO_ROOT,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                )
-            except OSError as error:
-                message = f"Dashboard launcher could not start training: {error}"
-                log.write(message + "\n")
-                print(message, file=sys.stderr)
-                write_status(
-                    status_path,
-                    state="error",
-                    launch_error=str(error),
-                    exit_code=127,
-                    finished_at=datetime.now(timezone.utc).isoformat(),
-                )
-                return 127
+        try:
+            with log_path.open("a", encoding="utf-8", buffering=1) as log:
+                log.write("DASHBOARD_LAUNCH " + " ".join(command) + "\n")
+                try:
+                    process = subprocess.Popen(
+                        command,
+                        cwd=REPO_ROOT,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                    )
+                except OSError as error:
+                    message = f"Dashboard launcher could not start training: {error}"
+                    log.write(message + "\n")
+                    print(message, file=sys.stderr)
+                    write_status(
+                        status_path,
+                        state="error",
+                        launch_error=str(error),
+                        exit_code=127,
+                        finished_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                    return 127
 
-            write_status(status_path, state="running", pid=process.pid)
-            try:
-                assert process.stdout is not None
-                for line in process.stdout:
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-                    log.write(line)
-                    runtime_values = _runtime_status_from_line(line)
-                    if runtime_values:
-                        write_status(status_path, **runtime_values)
-                exit_code = process.wait()
-            except KeyboardInterrupt:
-                stop_requested = True
-                # SIGINT is the graceful request for both native and API-managed
-                # launches. Give the trainer time to run its interrupt cleanup
-                # before escalating to terminate/kill.
+                write_status(status_path, state="running", pid=process.pid)
                 try:
-                    process.send_signal(signal.SIGINT)
-                except ProcessLookupError:
-                    pass
-                try:
-                    exit_code = process.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    process.terminate()
-                    try:
-                        exit_code = process.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        exit_code = process.wait()
+                    assert process.stdout is not None
+                    for line in process.stdout:
+                        sys.stdout.write(line)
+                        sys.stdout.flush()
+                        log.write(line)
+                        runtime_values = _runtime_status_from_line(line)
+                        if runtime_values:
+                            write_status(status_path, **runtime_values)
+                    exit_code = process.wait()
+                except KeyboardInterrupt:
+                    stop_requested = True
+                    exit_code = _graceful_stop(process)
+        except KeyboardInterrupt:
+            stop_requested = True
+            exit_code = _graceful_stop(process) if process is not None else 130
     except OSError as error:
         message = f"Dashboard launcher cannot write {log_path}: {error}"
         print(message, file=sys.stderr)
@@ -505,6 +519,8 @@ def main() -> int:
             finished_at=datetime.now(timezone.utc).isoformat(),
         )
         return 127
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
     _finalize_experiment_manifest(experiment_manifest_path, run_dir)
     finished = datetime.now(timezone.utc).isoformat()

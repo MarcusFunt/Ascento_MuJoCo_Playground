@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -115,3 +116,48 @@ def test_cli_and_mcp_import_dashboard_from_outside_the_checkout(tmp_path):
             check=False,
         )
         assert result.returncode == 0, result.stderr
+
+
+def test_foreground_start_forwards_interrupt_to_the_managed_run(monkeypatch, tmp_path):
+    from ascento_mjlab import cli
+
+    stops = []
+
+    class Service:
+        def create(self, request):
+            assert request["display_name"] == "Foreground lifecycle test"
+            return {"id": "managed-run"}
+
+        def progress(self, run_id):
+            assert run_id == "managed-run"
+            raise KeyboardInterrupt
+
+        def stop(self, run_id, *, reason):
+            stops.append((run_id, reason))
+
+    monkeypatch.setattr(cli, "_service", lambda root: Service())
+    monkeypatch.setattr(cli, "_print", lambda value, as_json: None)
+    monkeypatch.setattr(cli.signal, "getsignal", lambda _signal: object())
+    monkeypatch.setattr(cli.signal, "signal", lambda _signal, _handler: None)
+    args = SimpleNamespace(
+        artifact_root=str(tmp_path),
+        training_args=[],
+        envs=None,
+        iterations=None,
+        seed=None,
+        display_name="Foreground lifecycle test",
+        name=None,
+        task="Ascento-Balance-Flat",
+        purpose="test",
+        tag=[],
+        notes="",
+        parent_run_id=None,
+        parent_checkpoint=None,
+        episode_horizon_s=None,
+        json=True,
+        foreground=True,
+        interval=0.0,
+    )
+
+    assert cli._start(args) == 130
+    assert stops == [("managed-run", "foreground_monitor_interrupted")]

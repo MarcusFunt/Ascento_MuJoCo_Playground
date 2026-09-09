@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import subprocess
 import sys
 import time
@@ -20,16 +21,15 @@ from ascento_mjlab.operations import (
     archive_evaluation,
     artifact_root,
     default_capture_dir,
+    ensure_checkout_import_path,
     evaluation_details,
     evaluation_root,
-    ensure_checkout_import_path,
     list_evaluation_suites,
     list_evaluations,
     repo_root,
     resolve_checkpoint,
     resolve_evaluation_dir,
 )
-
 
 # The dashboard is a checkout-local companion package.  Console entry points
 # start with ``.venv/bin`` on sys.path, so establish the repository path before
@@ -84,12 +84,29 @@ def _start(args: argparse.Namespace) -> int:
     created = _service(root).create(request)
     _print(created, args.json)
     if args.foreground:
-        while True:
-            progress = _service(root).progress(created["id"])
-            _print(progress, args.json)
-            if progress.get("state") not in {"starting", "running", "stopping"}:
-                return 0 if progress.get("status", {}).get("exit_code", 1) == 0 else 1
-            time.sleep(args.interval)
+        previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+
+        def interrupt_monitor(_signum: int, _frame: Any) -> None:
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGTERM, interrupt_monitor)
+        try:
+            while True:
+                progress = _service(root).progress(created["id"])
+                _print(progress, args.json)
+                if progress.get("state") not in {"starting", "running", "stopping"}:
+                    return 0 if progress.get("status", {}).get("exit_code", 1) == 0 else 1
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            try:
+                _service(root).stop(created["id"], reason="foreground_monitor_interrupted")
+            except (ProcessLookupError, ValueError):
+                # A concurrent terminal update has already made the request
+                # durable; do not obscure that outcome with monitor cleanup.
+                pass
+            return 130
+        finally:
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
     return 0
 
 
