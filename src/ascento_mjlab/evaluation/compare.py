@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ascento_mjlab.control_contract import action_contracts_compatible
 from ascento_mjlab.plant_contract import plant_contracts_compatible
 
 from .statistics import bootstrap_ci, iqm
@@ -51,6 +52,15 @@ def _checkpoint_plant_contract(path: Path) -> dict | None:
     return contract if isinstance(contract, dict) else None
 
 
+def _action_contract(path: Path, key: str = "action_contract") -> dict | None:
+    try:
+        manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    contract = manifest.get(key) if isinstance(manifest, dict) else None
+    return contract if isinstance(contract, dict) else None
+
+
 def ensure_compatible_plants(base: Path, candidate: Path) -> None:
     """Reject quantitative comparison unless both artifacts share one plant."""
     left = _plant_contract(base)
@@ -77,6 +87,18 @@ def ensure_compatible_plants(base: Path, candidate: Path) -> None:
             "cannot compare checkpoints trained against different plant contracts; "
             "re-establish both baselines on the current plant"
         )
+    for key in ("action_contract", "checkpoint_action_contract"):
+        left_action = _action_contract(base, key)
+        right_action = _action_contract(candidate, key)
+        if left_action is None or right_action is None:
+            raise ValueError(
+                "cannot compare legacy evaluation artifacts without structured action provenance; "
+                "re-evaluate checkpoints trained with structured_targets_v1"
+            )
+        if not action_contracts_compatible(left_action, right_action):
+            raise ValueError(
+                "cannot compare evaluations produced with different action-controller contracts"
+            )
 
 
 def compare(base: Path, candidate: Path) -> dict:

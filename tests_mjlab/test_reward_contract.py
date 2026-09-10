@@ -24,7 +24,18 @@ def _env(*, step_dt: float = 0.01):
     motion_command = torch.tensor([[0.50, 0.25, 0.80, 1.0, 0.20, 0.10]])
     twist_command = torch.tensor([[0.50, 0.0, 0.50]])
     robot = SimpleNamespace(
-        joint_names=("left_hip", "left_knee", "left_wheel", "right_hip", "right_knee", "right_wheel"),
+        actuators=(
+            SimpleNamespace(controller_requested_effort=torch.full((1, 4), 40.0)),
+            SimpleNamespace(controller_requested_effort=torch.full((1, 2), 40.0)),
+        ),
+        joint_names=(
+            "left_hip",
+            "left_knee",
+            "left_wheel",
+            "right_hip",
+            "right_knee",
+            "right_wheel",
+        ),
         data=SimpleNamespace(
             root_link_pos_w=torch.tensor([[0.0, 0.0, 0.80]]),
             root_link_lin_vel_b=torch.tensor([[0.50, 0.30, 0.0]]),
@@ -32,7 +43,6 @@ def _env(*, step_dt: float = 0.01):
             root_link_ang_vel_b=torch.tensor([[0.0, 0.0, 0.25]]),
             projected_gravity_b=torch.tensor([[0.0, 0.0, -1.0]]),
             actuator_force=torch.full((1, 6), 40.0),
-            joint_effort_target=torch.full((1, 6), 40.0),
             joint_pos=torch.zeros((1, 6)),
         ),
     )
@@ -44,7 +54,9 @@ def _env(*, step_dt: float = 0.01):
         command_manager=SimpleNamespace(
             get_command=lambda name: {"motion": motion_command, "twist": twist_command}.get(name)
         ),
-        action_manager=SimpleNamespace(action=torch.tensor([[0.20]]), prev_action=torch.zeros((1, 1))),
+        action_manager=SimpleNamespace(
+            action=torch.tensor([[0.20]]), prev_action=torch.zeros((1, 1))
+        ),
         ascento_jump_state={
             "phase": torch.tensor([PHASE_CROUCH]),
             "recovered_landing": torch.zeros(1),
@@ -59,9 +71,9 @@ def test_velocity_tracking_terms_are_independently_tunable():
     env.scene["robot"].data.root_link_lin_vel_b[0, 1] = 0.0
     env.scene["robot"].data.root_link_ang_vel_b[0, 2] = 0.0
 
-    assert track_linear_velocity_xy(env, "twist", std=0.5, asset_cfg=asset_cfg).item() == pytest.approx(
-        torch.exp(torch.tensor(-1.0)).item()
-    )
+    assert track_linear_velocity_xy(
+        env, "twist", std=0.5, asset_cfg=asset_cfg
+    ).item() == pytest.approx(torch.exp(torch.tensor(-1.0)).item())
     assert track_yaw_rate(env, "twist", std=0.25, asset_cfg=asset_cfg).item() == pytest.approx(
         torch.exp(torch.tensor(-4.0)).item()
     )
@@ -76,7 +88,7 @@ def test_jump_objectives_consume_the_motion_command_without_forward_conflict():
     assert track_motion_forward_velocity(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0)
     assert track_motion_yaw_rate(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
     assert jump_crouch(env, asset_cfg=asset_cfg).item() == pytest.approx(
-        torch.exp(torch.tensor(-(0.11 / 0.05) ** 2)).item()
+        torch.exp(torch.tensor(-((0.11 / 0.05) ** 2))).item()
     )
 
     env.ascento_jump_state["phase"][0] = PHASE_THRUST
@@ -92,7 +104,9 @@ def test_regularizers_preserve_100_hz_scale_and_are_frequency_aware():
     env = _env(step_dt=0.01)
     asset_cfg = SimpleNamespace(name="robot", actuator_ids=[0, 1, 2, 3, 4, 5])
 
-    assert effort_penalty(env, asset_cfg=asset_cfg, peak_effort_nm=40.0).item() == pytest.approx(1.0)
+    assert effort_penalty(env, asset_cfg=asset_cfg, peak_effort_nm=40.0).item() == pytest.approx(
+        1.0
+    )
     assert action_rate_penalty(env).item() == pytest.approx(0.04)
 
     slower = _env(step_dt=0.02)
@@ -103,10 +117,16 @@ def test_regularizers_preserve_100_hz_scale_and_are_frequency_aware():
 def test_effort_target_barrier_is_zero_below_soft_limit_and_one_at_limit():
     env = _env()
     asset_cfg = SimpleNamespace(name="robot", actuator_ids=[0, 1, 2, 3, 4, 5])
-    env.scene["robot"].data.joint_effort_target[:] = 30.0
-    assert effort_target_barrier(env, asset_cfg=asset_cfg, peak_effort_nm=40.0).item() == pytest.approx(0.0)
-    env.scene["robot"].data.joint_effort_target[:] = 40.0
-    assert effort_target_barrier(env, asset_cfg=asset_cfg, peak_effort_nm=40.0).item() == pytest.approx(1.0)
+    env.scene["robot"].actuators[0].controller_requested_effort[:] = 30.0
+    env.scene["robot"].actuators[1].controller_requested_effort[:] = 30.0
+    assert effort_target_barrier(
+        env, asset_cfg=asset_cfg, peak_effort_nm=40.0
+    ).item() == pytest.approx(0.0)
+    env.scene["robot"].actuators[0].controller_requested_effort[:] = 40.0
+    env.scene["robot"].actuators[1].controller_requested_effort[:] = 40.0
+    assert effort_target_barrier(
+        env, asset_cfg=asset_cfg, peak_effort_nm=40.0
+    ).item() == pytest.approx(1.0)
 
 
 def test_recovery_progress_requires_support_and_accounts_for_angular_speed():

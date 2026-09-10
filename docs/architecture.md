@@ -29,16 +29,20 @@ JAX/MJX/Brax work is diagnostic history only; it is not an acceptance target.
 
 ## Plant and timing contract
 
-The robot has six direct-effort actions in normalized `[-1, 1]` form:
+The robot has six normalized `structured_targets_v1` actions in this fixed order:
 
-- left/right hip;
-- left/right knee; and
-- left/right wheel.
+- left hip position, left knee position, left wheel velocity;
+- right hip position, right knee position, right wheel velocity.
 
-Actions are clipped before the actuator maps them to an effort target. The
+Leg targets are offsets of up to pi/2 from the nominal -pi pose and are clamped
+to the MJCF limits. Wheel targets span +/-8 rad/s; both wheel-joint signs are
+inverted so positive policy commands move forward in the base-frame convention.
+A physics-rate PD controller
+for legs and PI controller with conditional anti-windup for wheels produce a
+requested torque. The
 canonical `animation_high_authority` physics profile uses a 0.002 s MuJoCo
 timestep, decimation of 5 (0.01 s control period), a 0.75 m supported root
-height, and 65 Nm peak simulated effort. The custom actuator applies a linear
+height, and 65 Nm peak simulated effort. The motor stage then applies a linear
 torque-speed envelope, controller-speed protection, and finite response time.
 Leg and wheel continuous-torque figures in `actuator.py` are documentation-only
 figures, not thermal limits.

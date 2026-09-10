@@ -12,7 +12,7 @@ from __future__ import annotations
 import torch
 from rsl_rl.algorithms import PPO
 
-from .physics import PHYSICS_PROFILE
+from .control_contract import LEG_POSITION_SCALE_RAD, WHEEL_VELOCITY_SCALE_RAD_S
 
 
 class InstrumentedPPO(PPO):
@@ -53,12 +53,13 @@ class InstrumentedPPO(PPO):
         loss_dict["kl"] = float(kl.item())
         loss_dict["clip_fraction"] = float(clip_fraction.item())
 
-        # Rollout actions are normalized policy commands. Expose effort-demand
-        # diagnostics during training without pretending they are measured
-        # actuator forces (those remain evaluation-only metrics).
-        commanded_effort = actions.clamp(-1.0, 1.0) * PHYSICS_PROFILE.peak_effort_nm
-        loss_dict["command_effort_rms"] = float(torch.sqrt(torch.mean(commanded_effort.square())).item())
-        loss_dict["command_effort_mean_abs"] = float(torch.mean(commanded_effort.abs()).item())
+        # Rollout actions are normalized structured targets, never torque commands.
+        legs = actions[:, (0, 1, 3, 4)].clamp(-1.0, 1.0) * LEG_POSITION_SCALE_RAD
+        wheels = actions[:, (2, 5)].clamp(-1.0, 1.0) * WHEEL_VELOCITY_SCALE_RAD_S
+        loss_dict["leg_target_offset_rms_rad"] = float(torch.sqrt(torch.mean(legs.square())).item())
+        loss_dict["wheel_target_velocity_rms_rad_s"] = float(
+            torch.sqrt(torch.mean(wheels.square())).item()
+        )
         loss_dict["command_saturation_fraction"] = float(
             torch.mean((actions.abs() >= 1.0 - 1.0e-4).float()).item()
         )

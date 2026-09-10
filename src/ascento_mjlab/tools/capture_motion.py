@@ -18,6 +18,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.wrappers import VideoRecorder
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.control_contract import current_action_contract, require_current_action_contract
 from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
 
 
@@ -95,11 +96,7 @@ class MotionRecorder(RecorderTerm):
                 )
             if "recovered_landing" in env.ascento_jump_state:
                 frame["recovered_landing"] = (
-                    env.ascento_jump_state["recovered_landing"][0]
-                    .detach()
-                    .cpu()
-                    .numpy()
-                    .copy()
+                    env.ascento_jump_state["recovered_landing"][0].detach().cpu().numpy().copy()
                 )
         for command_name in ("motion", "twist"):
             try:
@@ -189,11 +186,14 @@ def capture(
                 agent_cfg = load_rl_cfg(task)
                 runner_cls = load_runner_cls(task) or MjlabOnPolicyRunner
                 runner = runner_cls(env, asdict(agent_cfg), device=device)
-                runner.load(
+                infos = runner.load(
                     str(checkpoint),
                     load_cfg={"actor": True},
                     strict=True,
                     map_location=device,
+                )
+                require_current_action_contract(
+                    infos.get("action_contract") if isinstance(infos, dict) else None
                 )
                 policy = runner.get_inference_policy(device=device)
             captured_steps, ended_on_done = _run_capture_steps(env, policy, steps=steps)
@@ -211,6 +211,7 @@ def capture(
                     "model_sha256": checkpoint_hash,
                     "physics_profile": PHYSICS_PROFILE.name,
                     "reward_schema": REWARD_SCHEMA_VERSION,
+                    "action_contract": current_action_contract()["id"],
                     "captured_steps": str(captured_steps),
                     "ended_on_done": str(ended_on_done).lower(),
                 },

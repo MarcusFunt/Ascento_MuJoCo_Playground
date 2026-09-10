@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import gc
 import hashlib
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,11 +12,13 @@ import numpy as np
 import torch
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
-from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
+from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.control_contract import current_action_contract, require_current_action_contract
 from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights, initialize_balance_origin
+from ascento_mjlab.mdp.metrics import controller_requested_effort
 from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
 from ascento_mjlab.plant_contract import current_plant_contract
 
@@ -311,6 +313,87 @@ def _termination_reasons(base_env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> 
     return reasons
 
 
+@dataclass
+class _EvaluationRuntime:
+    """One native simulation world reused across an entire evaluation suite."""
+
+    base_env: ManagerBasedRlEnv
+    env: RslRlVecEnvWrapper
+    runner: Any
+    policy: RslRlPolicyAdapter
+    agent_cfg: Any
+    checkpoint_contract: dict[str, Any] | None
+    checkpoint_action_contract: dict[str, Any] | None
+    capacity: int
+
+    def close(self) -> None:
+        """Release the one native world after all suite batches have completed."""
+        self.env.close()
+        del self.runner, self.policy, self.env, self.base_env
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+
+
+def _create_runtime(
+    task: str,
+    checkpoint: Path,
+    *,
+    device: str,
+    deterministic: bool,
+    capacity: int,
+    max_horizon: int,
+) -> _EvaluationRuntime:
+    """Build one fixed-size world instead of rebuilding GPU state per batch.
+
+    Repeated Mujoco-Warp construction/destruction eventually faults the WSL dxg
+    bridge during long gates. A suite needs only one task, policy, and maximum
+    horizon, so all chunks safely share this native world.
+    """
+    cfg = load_env_cfg(task, play=False)
+    cfg.events.pop("balance_push", None)
+    cfg.scene.num_envs = capacity
+    cfg.auto_reset = False
+    cfg.seed = 0
+    step_dt = physics_timestep(cfg) * int(cfg.decimation)
+    cfg.episode_length_s = (max_horizon + 2) * step_dt
+
+    base_env = ManagerBasedRlEnv(cfg, device=device, render_mode=None)
+    try:
+        agent_cfg = load_rl_cfg(task)
+        env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
+        # Task registration selects HorizonCurriculumRunner for *training*.
+        # Evaluations hold completed slots rather than resetting them, so that
+        # wrapper would repeatedly count the same done flags, mutate the
+        # episode horizon, and synchronize every rollout step.  Load the
+        # checkpoint through the base runner instead.
+        runner = MjlabOnPolicyRunner(env, asdict(agent_cfg), device=device)
+        checkpoint_infos = runner.load(
+            str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device
+        )
+        checkpoint_contract = (
+            checkpoint_infos.get("plant_contract") if isinstance(checkpoint_infos, dict) else None
+        )
+        checkpoint_action_contract = (
+            checkpoint_infos.get("action_contract") if isinstance(checkpoint_infos, dict) else None
+        )
+        require_current_action_contract(checkpoint_action_contract)
+        return _EvaluationRuntime(
+            base_env=base_env,
+            env=env,
+            runner=runner,
+            policy=RslRlPolicyAdapter(runner, checkpoint, deterministic=deterministic),
+            agent_cfg=agent_cfg,
+            checkpoint_contract=checkpoint_contract,
+            checkpoint_action_contract=checkpoint_action_contract,
+            capacity=capacity,
+        )
+    except Exception:
+        base_env.close()
+        raise
+
+
 def _run_batch(
     task: str,
     checkpoint: Path,
@@ -319,35 +402,30 @@ def _run_batch(
     device: str,
     deterministic: bool,
     plant_effort_limit: float,
+    runtime: _EvaluationRuntime | None = None,
 ) -> tuple[list[EpisodeResult], dict[str, Any]]:
     if not scenarios:
         return [], {}
-    cfg = load_env_cfg(task, play=False)
-    # Training-only interval pushes are part of the balance curriculum.  Gate
-    # disturbances are supplied explicitly from the immutable scenario suite.
-    cfg.events.pop("balance_push", None)
-    cfg.scene.num_envs = len(scenarios)
-    cfg.auto_reset = False
-    cfg.seed = 0
-    step_dt = physics_timestep(cfg) * int(cfg.decimation)
+    owns_runtime = runtime is None
+    if runtime is None:
+        runtime = _create_runtime(
+            task,
+            checkpoint,
+            device=device,
+            deterministic=deterministic,
+            capacity=len(scenarios),
+            max_horizon=max(scenario.horizon_steps for scenario in scenarios),
+        )
+    if len(scenarios) != runtime.capacity:
+        raise ValueError("shared evaluation runtime requires a full padded batch")
+    base_env = runtime.base_env
+    env = runtime.env
+    policy = runtime.policy
+    agent_cfg = runtime.agent_cfg
+    checkpoint_contract = runtime.checkpoint_contract
+    checkpoint_action_contract = runtime.checkpoint_action_contract
+    step_dt = physics_timestep(base_env.cfg) * int(base_env.cfg.decimation)
     max_horizon = max(scenario.horizon_steps for scenario in scenarios)
-    cfg.episode_length_s = (max_horizon + 2) * step_dt
-
-    base_env = ManagerBasedRlEnv(cfg, device=device, render_mode=None)
-    agent_cfg = load_rl_cfg(task)
-    env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
-    runner_cls = load_runner_cls(task) or MjlabOnPolicyRunner
-    runner = runner_cls(env, asdict(agent_cfg), device=device)
-    checkpoint_infos = runner.load(
-        str(checkpoint),
-        load_cfg={"actor": True},
-        strict=True,
-        map_location=device,
-    )
-    checkpoint_contract = (
-        checkpoint_infos.get("plant_contract") if isinstance(checkpoint_infos, dict) else None
-    )
-    policy = RslRlPolicyAdapter(runner, checkpoint, deterministic=deterministic)
 
     env.reset()
     initial_xy = _exact_reset(base_env, scenarios)
@@ -510,7 +588,7 @@ def _run_batch(
             joint_applied_abs = torch.mean(torch.abs(joint_applied), dim=1)
             joint_applied_sq = torch.mean(torch.square(joint_applied), dim=1)
             joint_applied_peak = torch.amax(torch.abs(joint_applied), dim=1)
-            requested = robot.data.joint_effort_target
+            requested = controller_requested_effort(robot)
             request_abs = torch.mean(torch.abs(requested), dim=1)
             request_sq = torch.mean(torch.square(requested), dim=1)
             request_peak = torch.amax(torch.abs(requested), dim=1)
@@ -520,12 +598,14 @@ def _run_batch(
             joint_applied_sat = torch.mean(
                 (torch.abs(joint_applied) >= plant_effort_limit - 1.0e-4).float(), dim=1
             )
-            hip_mismatch = robot.data.joint_pos[:, joint_indices["left_hip"]] - robot.data.joint_pos[
-                :, joint_indices["right_hip"]
-            ]
-            knee_mismatch = robot.data.joint_pos[:, joint_indices["left_knee"]] - robot.data.joint_pos[
-                :, joint_indices["right_knee"]
-            ]
+            hip_mismatch = (
+                robot.data.joint_pos[:, joint_indices["left_hip"]]
+                - robot.data.joint_pos[:, joint_indices["right_hip"]]
+            )
+            knee_mismatch = (
+                robot.data.joint_pos[:, joint_indices["left_knee"]]
+                - robot.data.joint_pos[:, joint_indices["right_knee"]]
+            )
             xy = robot.data.root_link_pos_w[:, :2]
             segment = torch.linalg.vector_norm(xy - prev_xy, dim=1)
             prev_xy = xy.clone()
@@ -847,20 +927,13 @@ def _run_batch(
             "reward_schema": REWARD_SCHEMA_VERSION,
             "plant_contract": current_plant_contract(),
             "checkpoint_plant_contract": checkpoint_contract,
+            "action_contract": current_action_contract(),
+            "checkpoint_action_contract": checkpoint_action_contract,
         }
         return results, metadata
     finally:
-        env.close()
-        # mjlab/Warp keeps device allocations reachable through the runner,
-        # policy, and wrapper objects after ``close``.  Drop those references
-        # and release Torch's caching allocator before constructing the next
-        # batch (the deterministic consistency pass may create thousands of
-        # environments in one invocation).
-        del runner, policy, env, base_env
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
+        if owns_runtime:
+            runtime.close()
 
 
 def run_scenarios(
@@ -878,24 +951,47 @@ def run_scenarios(
         raise FileNotFoundError(checkpoint)
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
+    if not scenarios:
+        return [], {
+            "checkpoint_sha256": checkpoint_sha256(checkpoint),
+            "batches": 0,
+            "step_dt": task_step_dt(task),
+            "batch_metadata": [],
+            "checkpoint_plant_contract": None,
+            "checkpoint_action_contract": None,
+        }
 
     results: list[EpisodeResult] = []
     batch_metadata: list[dict[str, Any]] = []
-    family_order = list(dict.fromkeys(scenario.family for scenario in scenarios))
-    for family in family_order:
-        family_scenarios = [scenario for scenario in scenarios if scenario.family == family]
-        for start in range(0, len(family_scenarios), batch_size):
-            batch = family_scenarios[start : start + batch_size]
-            batch_results, metadata = _run_batch(
-                task,
-                checkpoint,
-                batch,
-                device=device,
-                deterministic=deterministic,
-                plant_effort_limit=plant_effort_limit,
-            )
-            results.extend(batch_results)
-            batch_metadata.append({"family": family, **metadata})
+    capacity = min(batch_size, len(scenarios))
+    runtime = _create_runtime(
+        task,
+        checkpoint,
+        device=device,
+        deterministic=deterministic,
+        capacity=capacity,
+        max_horizon=max(scenario.horizon_steps for scenario in scenarios),
+    )
+    try:
+        family_order = list(dict.fromkeys(scenario.family for scenario in scenarios))
+        for family in family_order:
+            family_scenarios = [scenario for scenario in scenarios if scenario.family == family]
+            for start in range(0, len(family_scenarios), capacity):
+                batch = family_scenarios[start : start + capacity]
+                padded = batch + [batch[-1]] * (capacity - len(batch))
+                batch_results, metadata = _run_batch(
+                    task,
+                    checkpoint,
+                    padded,
+                    device=device,
+                    deterministic=deterministic,
+                    plant_effort_limit=plant_effort_limit,
+                    runtime=runtime,
+                )
+                results.extend(batch_results[: len(batch)])
+                batch_metadata.append({"family": family, **metadata})
+    finally:
+        runtime.close()
 
     step_dts = {float(item["step_dt"]) for item in batch_metadata if item}
     if len(step_dts) > 1:
@@ -903,12 +999,20 @@ def run_scenarios(
     checkpoint_contracts = [
         item.get("checkpoint_plant_contract") for item in batch_metadata if item
     ]
+    checkpoint_action_contracts = [
+        item.get("checkpoint_action_contract") for item in batch_metadata if item
+    ]
     if len({repr(contract) for contract in checkpoint_contracts}) > 1:
         raise RuntimeError("Inconsistent checkpoint plant provenance across evaluation batches")
+    if len({repr(contract) for contract in checkpoint_action_contracts}) > 1:
+        raise RuntimeError("Inconsistent checkpoint action provenance across evaluation batches")
     return results, {
         "checkpoint_sha256": checkpoint_sha256(checkpoint),
         "batches": len(batch_metadata),
         "step_dt": next(iter(step_dts)) if step_dts else task_step_dt(task),
         "batch_metadata": batch_metadata,
         "checkpoint_plant_contract": checkpoint_contracts[0] if checkpoint_contracts else None,
+        "checkpoint_action_contract": checkpoint_action_contracts[0]
+        if checkpoint_action_contracts
+        else None,
     }

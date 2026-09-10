@@ -12,6 +12,8 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from ascento_mjlab.geometry import projected_gravity_tilt
 from ascento_mjlab.physics import PHYSICS_PROFILE
 
+from .metrics import controller_requested_effort
+
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
@@ -110,7 +112,9 @@ def leg_pose_symmetry_penalty(
     if joint_names is None:
         raise RuntimeError("leg symmetry requires robot joint names")
     try:
-        indices = [(joint_names.index(left), joint_names.index(right)) for left, right in joint_pairs]
+        indices = [
+            (joint_names.index(left), joint_names.index(right)) for left, right in joint_pairs
+        ]
     except ValueError as error:
         raise RuntimeError("leg symmetry joint pair is absent from the robot") from error
     deltas = torch.stack(
@@ -199,7 +203,7 @@ def effort_target_barrier(
     if not 0.0 < soft_limit_fraction < 1.0:
         raise ValueError("soft_limit_fraction must lie strictly between 0 and 1")
     asset: Entity = env.scene[asset_cfg.name]
-    request = asset.data.joint_effort_target[:, asset_cfg.actuator_ids]
+    request = controller_requested_effort(asset)[:, asset_cfg.actuator_ids]
     utilisation = torch.abs(request) / peak_effort_nm
     excess = torch.relu(utilisation - soft_limit_fraction)
     normalized = excess / (1.0 - soft_limit_fraction)
@@ -242,7 +246,9 @@ def track_linear_velocity_xy(
     asset: Entity = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
     assert command is not None
-    error_sq = torch.sum(torch.square(command[:, :2] - asset.data.root_link_lin_vel_b[:, :2]), dim=1)
+    error_sq = torch.sum(
+        torch.square(command[:, :2] - asset.data.root_link_lin_vel_b[:, :2]), dim=1
+    )
     return torch.exp(-error_sq / (std * std))
 
 

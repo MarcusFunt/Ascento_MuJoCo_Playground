@@ -14,6 +14,18 @@ if TYPE_CHECKING:
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
+def controller_requested_effort(asset: Entity) -> torch.Tensor:
+    """Return pre-motor controller requests in canonical robot joint order."""
+    actuators = asset.actuators
+    if len(actuators) != 2:
+        raise RuntimeError("Ascento structured control requires leg and wheel actuator groups")
+    leg = actuators[0].controller_requested_effort
+    wheel = actuators[1].controller_requested_effort
+    return torch.stack(
+        (leg[:, 0], leg[:, 1], wheel[:, 0], leg[:, 2], leg[:, 3], wheel[:, 1]), dim=1
+    )
+
+
 def tilt_radians(
     env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
 ) -> torch.Tensor:
@@ -25,9 +37,11 @@ def tilt_radians(
 def commanded_effort(
     env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
 ) -> torch.Tensor:
-    """Mean absolute effort requested by the action layer, in Nm."""
+    """Mean absolute torque requested by the structured controllers, in Nm."""
     asset: Entity = env.scene[asset_cfg.name]
-    return torch.mean(torch.abs(asset.data.joint_effort_target[:, asset_cfg.actuator_ids]), dim=1)
+    return torch.mean(
+        torch.abs(controller_requested_effort(asset)[:, asset_cfg.actuator_ids]), dim=1
+    )
 
 
 def actuator_output_effort(

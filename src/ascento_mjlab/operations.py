@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .control_contract import action_contracts_compatible, current_action_contract
 from .plant_contract import current_plant_contract, plant_contracts_compatible
 
 
@@ -190,6 +191,8 @@ def _partial_report_row(directory: Path, base: Path) -> dict[str, Any]:
         "clips_status": None,
         "plant_contract": None,
         "plant_compatibility": "legacy",
+        "action_contract": None,
+        "action_compatibility": "legacy",
         "incomplete_reason": "manifest.json is missing; evaluation was interrupted or is still running",
     }
 
@@ -202,11 +205,19 @@ def _report_row(directory: Path, base: Path) -> dict[str, Any]:
     clips = _json_object(directory / "clips_manifest.json") if (directory / "clips_manifest.json").is_file() else {}
     report = directory / "report.html"
     plant_contract = manifest.get("plant_contract")
+    action_contract = manifest.get("action_contract")
     plant_compatibility = (
         "current"
         if plant_contracts_compatible(plant_contract, current_plant_contract())
         else "legacy"
         if plant_contract is None
+        else "incompatible"
+    )
+    action_compatibility = (
+        "current"
+        if action_contracts_compatible(action_contract, current_action_contract())
+        else "legacy"
+        if action_contract is None
         else "incompatible"
     )
     return {
@@ -226,6 +237,8 @@ def _report_row(directory: Path, base: Path) -> dict[str, Any]:
         "clips_status": clips.get("status") if clips else None,
         "plant_contract": plant_contract,
         "plant_compatibility": plant_compatibility,
+        "action_contract": action_contract,
+        "action_compatibility": action_compatibility,
     }
 
 

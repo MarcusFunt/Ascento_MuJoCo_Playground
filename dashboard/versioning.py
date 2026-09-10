@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from ascento_mjlab.control_contract import action_contracts_compatible, current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract, plant_contracts_compatible
 from dashboard.config import REPO_ROOT
 
@@ -197,7 +198,27 @@ def classify_run_plant_contract(run_dir: Path, root: Path) -> dict[str, Any]:
     }
 
 
+def classify_run_action_contract(run_dir: Path, root: Path) -> dict[str, Any]:
+    """Classify the structured action ABI independently from Git provenance."""
+    manifest_path = _parent_file(run_dir, root, "experiment_manifest.json")
+    manifest = _load_json(manifest_path) if manifest_path else None
+    contract = manifest.get("action_contract") if manifest else None
+    current = current_action_contract()
+    compatible = action_contracts_compatible(contract, current)
+    return {
+        "status": "current"
+        if compatible
+        else "legacy"
+        if not isinstance(contract, dict)
+        else "incompatible",
+        "is_compatible": compatible,
+        "run_contract": contract if isinstance(contract, dict) else None,
+        "current_contract": current,
+    }
+
+
 def annotate_run_summary(summary: dict[str, Any], run_dir: Path, root: Path) -> dict[str, Any]:
     summary["repository_version"] = classify_run_version(run_dir, root)
     summary["plant_contract"] = classify_run_plant_contract(run_dir, root)
+    summary["action_contract"] = classify_run_action_contract(run_dir, root)
     return summary

@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.evaluation.compare import ensure_compatible_plants
 from ascento_mjlab.plant_contract import current_plant_contract
 
@@ -9,7 +10,14 @@ from ascento_mjlab.plant_contract import current_plant_contract
 def _manifest(directory, contract):
     directory.mkdir()
     (directory / "manifest.json").write_text(
-        json.dumps({"plant_contract": contract, "checkpoint_plant_contract": contract}),
+        json.dumps(
+            {
+                "plant_contract": contract,
+                "checkpoint_plant_contract": contract,
+                "action_contract": current_action_contract() if contract else None,
+                "checkpoint_action_contract": current_action_contract() if contract else None,
+            }
+        ),
         encoding="utf-8",
     )
 

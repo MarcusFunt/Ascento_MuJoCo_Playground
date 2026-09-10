@@ -6,8 +6,7 @@ module before the actuator constants existed could re-enter Ascento task
 registration through ``robot_cfg`` and leave the registry empty.
 
 The actual actuator classes are loaded lazily from ``actuator_impl`` when a
-consumer asks for them. Existing imports from ``ascento_mjlab.actuator`` remain
-compatible while actuator-first imports are now safe.
+consumer asks for them while actuator-first imports remain safe.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from .physics import PHYSICS_PROFILE
 
 if TYPE_CHECKING:
-    from .actuator_impl import AscentoTorqueActuator, AscentoTorqueActuatorCfg, torque_speed_limit
+    from .actuator_impl import AscentoTargetActuator, AscentoTargetActuatorCfg, torque_speed_limit
 
 
 @dataclass(frozen=True)
@@ -34,8 +33,8 @@ LEG_ACTUATOR = ActuatorDocumentation(PHYSICS_PROFILE.peak_effort_nm, 15.0, 12.0,
 WHEEL_ACTUATOR = ActuatorDocumentation(PHYSICS_PROFILE.peak_effort_nm, 5.0, 20.0, 10.0, 0.003)
 
 _LAZY_EXPORTS = {
-    "AscentoTorqueActuator",
-    "AscentoTorqueActuatorCfg",
+    "AscentoTargetActuator",
+    "AscentoTargetActuatorCfg",
     "torque_speed_limit",
 }
 
@@ -54,7 +53,7 @@ __all__ = [
     "ActuatorDocumentation",
     "LEG_ACTUATOR",
     "WHEEL_ACTUATOR",
-    "AscentoTorqueActuator",
-    "AscentoTorqueActuatorCfg",
+    "AscentoTargetActuator",
+    "AscentoTargetActuatorCfg",
     "torque_speed_limit",
 ]

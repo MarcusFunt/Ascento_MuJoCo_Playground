@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract
 from dashboard.config import REPO_ROOT, load_config
 
@@ -258,7 +259,11 @@ def _write_experiment_manifest(
             for key, value in sorted(os.environ.items())
             if key.startswith("ASCENTO_")
             and key
-            not in {"ASCENTO_ARTIFACT_ROOT", "ASCENTO_REPOSITORY_COMMIT", "ASCENTO_REPOSITORY_BRANCH"}
+            not in {
+                "ASCENTO_ARTIFACT_ROOT",
+                "ASCENTO_REPOSITORY_COMMIT",
+                "ASCENTO_REPOSITORY_BRANCH",
+            }
         },
         "seed": _number(_training_arg_value(training_args, "--seed", "--agent.seed")),
         "environment_count": _number(env_count),
@@ -270,8 +275,10 @@ def _write_experiment_manifest(
             "path": None,
             "sha256": None,
             "plant_contract": current_plant_contract(),
+            "action_contract": current_action_contract(),
         },
         "plant_contract": current_plant_contract(),
+        "action_contract": current_action_contract(),
         "evaluation": {"suite": None, "result": None},
         "run_directory": str(run_dir),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -293,6 +300,7 @@ def _finalize_experiment_manifest(path: Path, run_dir: Path) -> None:
             "path": checkpoint,
             "sha256": _file_sha256(checkpoint_path),
             "plant_contract": manifest.get("plant_contract"),
+            "action_contract": manifest.get("action_contract"),
         }
     write_metadata(path, **manifest)
 

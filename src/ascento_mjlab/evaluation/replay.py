@@ -14,6 +14,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.control_contract import require_current_action_contract
 
 from .policy import RslRlPolicyAdapter
 from .runner import (
@@ -111,7 +112,10 @@ def replay(
     env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
     runner_cls = load_runner_cls(scenario.task) or MjlabOnPolicyRunner
     runner = runner_cls(env, asdict(agent_cfg), device=device)
-    runner.load(str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device)
+    infos = runner.load(str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device)
+    require_current_action_contract(
+        infos.get("action_contract") if isinstance(infos, dict) else None
+    )
     policy = RslRlPolicyAdapter(runner, checkpoint, deterministic=True)
 
     env.reset()

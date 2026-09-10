@@ -1,5 +1,6 @@
 import torch
 
+from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.plant_contract import (
     PLANT_CONTRACT_SCHEMA_VERSION,
     ROBOT_MJCF,
@@ -32,3 +33,4 @@ def test_checkpoint_embeds_the_plant_contract(tmp_path):
 
     payload = torch.load(path, weights_only=False)
     assert plant_contracts_compatible(payload["infos"]["plant_contract"], current_plant_contract())
+    assert payload["infos"]["action_contract"] == current_action_contract()

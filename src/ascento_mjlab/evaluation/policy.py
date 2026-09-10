@@ -23,6 +23,7 @@ class PolicyAdapter:
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         del env_ids
 
+    @torch.inference_mode()
     def act(self, observations: Any) -> torch.Tensor:
         raise NotImplementedError
 
@@ -64,6 +65,7 @@ class RslRlPolicyAdapter(PolicyAdapter):
         except TypeError:
             reset(dones=done)
 
+    @torch.inference_mode()
     def act(self, observations: Any) -> torch.Tensor:
         # MLPModel and recurrent RSL-RL models accept stochastic_output. Making the
         # mode explicit prevents evaluation from silently sampling the Gaussian.

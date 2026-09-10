@@ -14,6 +14,7 @@ from typing import Any
 import torch
 from mjlab.tasks.registry import load_env_cfg
 
+from ascento_mjlab.control_contract import action_contracts_compatible, current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract, plant_contracts_compatible
 
 from .consistency import check_collection
@@ -154,6 +155,7 @@ def _manifest(
         "physics_timestep": timestep,
         "decimation": decimation,
         "plant_contract": current_plant_contract(),
+        "action_contract": current_action_contract(),
         "packages": _package_versions(),
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "argv": sys.argv,
@@ -228,12 +230,21 @@ def evaluate(
     manifest["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
     manifest["runtime"] = runtime
     checkpoint_contract = runtime.get("checkpoint_plant_contract")
+    checkpoint_action_contract = runtime.get("checkpoint_action_contract")
     manifest["checkpoint_plant_contract"] = checkpoint_contract
+    manifest["checkpoint_action_contract"] = checkpoint_action_contract
     manifest["checkpoint_plant_compatibility"] = (
         "current"
         if plant_contracts_compatible(checkpoint_contract, current_plant_contract())
         else "legacy"
         if checkpoint_contract is None
+        else "incompatible"
+    )
+    manifest["checkpoint_action_compatibility"] = (
+        "current"
+        if action_contracts_compatible(checkpoint_action_contract, current_action_contract())
+        else "legacy"
+        if checkpoint_action_contract is None
         else "incompatible"
     )
     manifest["capabilities"] = sorted(capabilities)
@@ -301,7 +312,9 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-root", type=Path, default=Path("evaluations"))
-    parser.add_argument("--render-clips", action="store_true", help="render representative policy videos")
+    parser.add_argument(
+        "--render-clips", action="store_true", help="render representative policy videos"
+    )
     parser.add_argument("--clip-takes", type=int, default=3)
     parser.add_argument("--clip-steps", type=int, default=600)
     args = parser.parse_args()

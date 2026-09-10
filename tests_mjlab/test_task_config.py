@@ -4,13 +4,14 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.control_contract import LEG_POSITION_SCALE_RAD, WHEEL_VELOCITY_SCALE_RAD_S
 from ascento_mjlab.physics import PHYSICS_PROFILE
 from ascento_mjlab.tasks.balance.env_cfg import ascento_balance_env_cfg
 from ascento_mjlab.tasks.jump.env_cfg import ascento_jump_env_cfg
 from ascento_mjlab.tasks.recovery.env_cfg import ascento_recovery_env_cfg
 
 
-def test_balance_env_is_six_effort_flat_ground():
+def test_balance_env_is_six_target_flat_ground():
     cfg = ascento_balance_env_cfg()
     assert cfg.decimation == 5
     assert cfg.sim.mujoco.timestep == 0.002
@@ -28,13 +29,19 @@ def test_balance_env_is_six_effort_flat_ground():
     env.close()
 
 
-def test_balance_action_contract_reaches_65_nm_and_penalizes_drift():
+def test_balance_action_contract_maps_normalized_targets_and_penalizes_drift():
     cfg = load_env_cfg("Ascento-Balance-Flat")
     cfg.scene.num_envs = 1
 
-    action_cfg = cfg.actions["effort"]
-    assert action_cfg.scale == PHYSICS_PROFILE.peak_effort_nm
-    assert action_cfg.clip == {".*": (-PHYSICS_PROFILE.peak_effort_nm, PHYSICS_PROFILE.peak_effort_nm)}
+    action_cfg = cfg.actions["targets"]
+    assert action_cfg.actuator_names == (
+        "left_hip",
+        "left_knee",
+        "left_wheel_joint",
+        "right_hip",
+        "right_knee",
+        "right_wheel_joint",
+    )
     assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.2)
     assert cfg.rewards["position_hold"].weight == pytest.approx(4.0)
     assert cfg.rewards["settled_balance"].weight == pytest.approx(1.0)
@@ -48,10 +55,13 @@ def test_balance_action_contract_reaches_65_nm_and_penalizes_drift():
 
     env = ManagerBasedRlEnv(cfg, device="cpu")
     env.action_manager.process_action(torch.ones((1, 6)))
-    action_term = env.action_manager.get_term("effort")
+    action_term = env.action_manager.get_term("targets")
     assert torch.allclose(
-        action_term._processed_actions,
-        torch.full((1, 6), PHYSICS_PROFILE.peak_effort_nm),
+        action_term._position_targets,
+        torch.full((1, 4), -3.141592653589793 + LEG_POSITION_SCALE_RAD),
+    )
+    assert torch.allclose(
+        action_term._velocity_targets, torch.full((1, 2), -WHEEL_VELOCITY_SCALE_RAD_S)
     )
     env.close()
 

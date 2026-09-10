@@ -6,7 +6,6 @@ import os
 from copy import deepcopy
 
 from mjlab.envs import ManagerBasedRlEnvCfg, mdp
-from mjlab.envs.mdp.actions import JointEffortActionCfg
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
@@ -26,6 +25,7 @@ from ascento_mjlab.robot_cfg import (
     SIM_CFG,
     VIEWER_CONFIG,
 )
+from ascento_mjlab.structured_action import StructuredTargetActionCfg
 
 ROBOT_CFG = SceneEntityCfg(
     "robot",
@@ -122,14 +122,10 @@ def _observations(play: bool) -> dict[str, ObservationGroupCfg]:
 
 
 def _actions() -> dict[str, ActionTermCfg]:
-    effort_limit = PHYSICS_PROFILE.peak_effort_nm
     return {
-        "effort": JointEffortActionCfg(
+        "targets": StructuredTargetActionCfg(
             entity_name="robot",
             actuator_names=JOINT_NAMES,
-            scale=effort_limit,
-            clip={".*": (-effort_limit, effort_limit)},
-            preserve_order=True,
         )
     }
 
@@ -137,9 +133,7 @@ def _actions() -> dict[str, ActionTermCfg]:
 def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerBasedRlEnvCfg:
     """Build the validated flat-ground balance configuration."""
     drift_scale = float(os.environ.get("ASCENTO_BALANCE_DRIFT_PENALTY_SCALE", "1.0"))
-    stabilization_scale = float(
-        os.environ.get("ASCENTO_BALANCE_STABILIZATION_WEIGHT", "1.0")
-    )
+    stabilization_scale = float(os.environ.get("ASCENTO_BALANCE_STABILIZATION_WEIGHT", "1.0"))
     if drift_scale <= 0.0 or stabilization_scale <= 0.0:
         raise ValueError("balance reward scales must be positive")
     events = {

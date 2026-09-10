@@ -14,7 +14,14 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.viewer import ViewerConfig
 
 from .actuator import LEG_ACTUATOR, WHEEL_ACTUATOR
-from .actuator_impl import AscentoTorqueActuatorCfg
+from .actuator_impl import AscentoTargetActuatorCfg
+from .control_contract import (
+    LEG_KD_NM_S_RAD,
+    LEG_KP_NM_RAD,
+    WHEEL_INTEGRAL_LIMIT_RAD,
+    WHEEL_KI_NM_RAD,
+    WHEEL_KP_NM_S_RAD,
+)
 from .physics import PHYSICS_PROFILE
 
 ROBOT_XML = Path(__file__).parent / "assets" / "ascento_guard2" / "robot.xml"
@@ -50,19 +57,26 @@ def get_spec() -> mujoco.MjSpec:
 
 ARTICULATION_CFG = EntityArticulationInfoCfg(
     actuators=(
-        AscentoTorqueActuatorCfg(
+        AscentoTargetActuatorCfg(
             target_names_expr=LEG_JOINT_NAMES,
             peak_torque=LEG_ACTUATOR.peak_torque_nm,
             no_load_speed=LEG_ACTUATOR.no_load_speed_rad_s,
             controller_speed_limit=LEG_ACTUATOR.controller_speed_limit_rad_s,
             response_time=LEG_ACTUATOR.response_time_s,
+            controller="position_pd",
+            kp=LEG_KP_NM_RAD,
+            kd_or_ki=LEG_KD_NM_S_RAD,
         ),
-        AscentoTorqueActuatorCfg(
+        AscentoTargetActuatorCfg(
             target_names_expr=WHEEL_JOINT_NAMES,
             peak_torque=WHEEL_ACTUATOR.peak_torque_nm,
             no_load_speed=WHEEL_ACTUATOR.no_load_speed_rad_s,
             controller_speed_limit=WHEEL_ACTUATOR.controller_speed_limit_rad_s,
             response_time=WHEEL_ACTUATOR.response_time_s,
+            controller="velocity_pi",
+            kp=WHEEL_KP_NM_S_RAD,
+            kd_or_ki=WHEEL_KI_NM_RAD,
+            integral_limit=WHEEL_INTEGRAL_LIMIT_RAD,
         ),
     ),
 )

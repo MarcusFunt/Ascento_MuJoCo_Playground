@@ -6,8 +6,8 @@ import torch
 from mjlab.actuator import Actuator, ActuatorCmd
 
 from ascento_mjlab.actuator import (
-    AscentoTorqueActuator,
-    AscentoTorqueActuatorCfg,
+    AscentoTargetActuator,
+    AscentoTargetActuatorCfg,
     torque_speed_limit,
 )
 from ascento_mjlab.physics import PHYSICS_PROFILE
@@ -37,13 +37,16 @@ def test_actuator_uses_active_model_timestep(monkeypatch):
     # The base initializer needs a full entity/model setup. It is not relevant
     # to this timing contract, so isolate the custom initializer here.
     monkeypatch.setattr(Actuator, "initialize", lambda self, *args: None)
-    actuator = object.__new__(AscentoTorqueActuator)
-    actuator.cfg = AscentoTorqueActuatorCfg(
+    actuator = object.__new__(AscentoTargetActuator)
+    actuator.cfg = AscentoTargetActuatorCfg(
         target_names_expr=("joint",),
         peak_torque=40.0,
         no_load_speed=12.0,
         controller_speed_limit=4.0,
         response_time=0.1,
+        controller="position_pd",
+        kp=1.0,
+        kd_or_ki=0.0,
     )
     actuator._target_ids = torch.tensor([0])
     model = mujoco.MjModel.from_xml_string('<mujoco><option timestep="0.007"/></mujoco>')
@@ -54,28 +57,31 @@ def test_actuator_uses_active_model_timestep(monkeypatch):
 
 
 def test_actuator_response_uses_initialized_timestep():
-    actuator = object.__new__(AscentoTorqueActuator)
-    actuator.cfg = AscentoTorqueActuatorCfg(
+    actuator = object.__new__(AscentoTargetActuator)
+    actuator.cfg = AscentoTargetActuatorCfg(
         target_names_expr=("joint",),
         peak_torque=40.0,
         no_load_speed=12.0,
         controller_speed_limit=4.0,
         response_time=0.1,
+        controller="position_pd",
+        kp=1.0,
+        kd_or_ki=0.0,
     )
     actuator._physics_dt = 0.02
     actuator._filtered = torch.zeros((1, 1))
+    actuator._controller_requested = torch.zeros((1, 1))
     cmd = ActuatorCmd(
         position_target=torch.zeros((1, 1)),
         velocity_target=torch.zeros((1, 1)),
-        effort_target=torch.full((1, 1), 10.0),
+        effort_target=torch.zeros((1, 1)),
         pos=torch.zeros((1, 1)),
         vel=torch.zeros((1, 1)),
     )
 
     result = actuator.compute(cmd)
 
-    expected = 10.0 * (1.0 - torch.exp(torch.tensor(-0.02 / 0.1)))
-    assert torch.allclose(result, expected.reshape(1, 1))
+    assert torch.allclose(result, torch.zeros((1, 1)))
 
 
 def test_profile_authority_is_preserved_at_low_and_high_motor_speed():
