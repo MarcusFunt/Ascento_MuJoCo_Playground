@@ -71,7 +71,10 @@ the evaluation before judging the checkpoint.
 
 ## Registration notes
 
-The PowerShell registration helper validates a WSL distribution, maps the
-checkout to `/mnt/<drive>/…`, and registers the project shell launcher with the
-Codex CLI. It does not register tools in an already-running conversation. After
-registration, open a new task or restart Codex Desktop.
+The PowerShell registration helper validates a WSL distribution and registers
+the native WSL shell launcher with the Codex CLI. It explicitly assigns the
+server's managed-run root to
+`/root/Ascento_MuJoCo_Playground/logs/rsl_rl`; MCP reads and run operations then
+refer to the same artifacts as the native WSL CLI. The native profile must be
+maintained before registration. It does not register tools in an already-running
+conversation; open a new task or restart Codex Desktop afterward.

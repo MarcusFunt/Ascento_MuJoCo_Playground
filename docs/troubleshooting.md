@@ -87,6 +87,26 @@ For CPU development, replace `cu128` with `cpu`. Run
 `python -m ascento_mjlab.tools.smoke` after synchronization to confirm Torch,
 CUDA/device, MuJoCo/Warp, and finite simulation steps.
 
+## One-shot WSL command returned, but no run started
+
+Do not infer success from a PID printed by `wsl.exe`. In this workstation's
+Windows/WSL configuration, a command backgrounded from a one-shot invocation
+can be terminated when that invocation returns, including a child wrapped in
+`nohup`. This leaves no native run artifacts or training process.
+
+Use the interactive, foreground procedure in
+[Operations](operations.md#start-a-managed-cuda-training-run-on-this-workstation).
+If a launch looks suspicious, check the native install before starting a
+replacement:
+
+```bash
+cd /root/Ascento_MuJoCo_Playground
+.venv/bin/ascento run list --active --json
+```
+
+An empty list means no managed run was created. If a run ID exists, inspect it
+before deciding whether it needs a graceful stop or normal completion.
+
 ## Maintenance refuses to update
 
 The maintainer correctly refuses a dirty tracked checkout or local-only commits

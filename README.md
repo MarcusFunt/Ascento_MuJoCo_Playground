@@ -105,6 +105,9 @@ the GPU Compose overlay. Run these commands in Ubuntu WSL; the profile overrides
 the script's normal current-checkout selection even when it is sourced from the
 Windows checkout.
 
+For the full copy/paste training sequence and the WSL child-process failure
+mode to avoid, see [Operations: start a managed CUDA run](docs/operations.md#start-a-managed-cuda-training-run-on-this-workstation).
+
 ### Dashboard host updates
 
 The Dashboard's **System** page can compare the local checkout with

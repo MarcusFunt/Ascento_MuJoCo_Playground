@@ -7,17 +7,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Convert-ToWslPath([string]$WindowsPath) {
-    if ($WindowsPath -notmatch "^([A-Za-z]):\\(.*)$") {
-        throw "The checkout must be on a mounted Windows drive, got: $WindowsPath"
-    }
-    $drive = $Matches[1].ToLowerInvariant()
-    $tail = $Matches[2].Replace("\", "/")
-    return "/mnt/$drive/$tail"
-}
-
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$serverPath = "$(Convert-ToWslPath $repoRoot)/scripts/ascento_mcp_server.sh"
+# MCP must share the maintained CUDA checkout and its Linux-native artifacts.
+# Registering the Windows/OneDrive checkout here creates an independent run
+# universe and reintroduces slow host bind mounts.
+$nativeRoot = "/root/Ascento_MuJoCo_Playground"
+$serverPath = "$nativeRoot/scripts/ascento_mcp_server.sh"
+$artifactRoot = "$nativeRoot/logs/rsl_rl"
 
 if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
     throw "The Codex CLI is not on PATH. Open Codex Desktop, then run this script again."
@@ -36,7 +31,7 @@ if ($available -notcontains $Distro) {
 
 & wsl.exe --distribution $Distro --exec test -f $serverPath
 if ($LASTEXITCODE -ne 0) {
-    throw "The WSL server launcher is not reachable at $serverPath"
+    throw "The native WSL server launcher is not reachable at $serverPath. Run the WSL CUDA maintenance profile first."
 }
 
 & codex mcp get $Name *> $null
@@ -51,7 +46,7 @@ if ($exists) {
     }
 }
 
-& codex mcp add $Name -- wsl.exe --distribution $Distro --exec bash $serverPath
+& codex mcp add $Name -- wsl.exe --distribution $Distro --exec env "ASCENTO_ARTIFACT_ROOT=$artifactRoot" bash $serverPath
 if ($LASTEXITCODE -ne 0) {
     throw "Codex could not register the '$Name' MCP server."
 }
@@ -61,4 +56,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "Codex did not persist the '$Name' MCP registration."
 }
 
-Write-Host "Registered '$Name'. Open a new Codex Desktop task or restart the app to load its tools."
+Write-Host "Registered '$Name' against the native WSL checkout and artifact root. Open a new Codex Desktop task or restart the app to load its tools."
