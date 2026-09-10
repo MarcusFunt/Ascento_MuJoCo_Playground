@@ -29,7 +29,7 @@ ascento
 ├── run       start, inspect, monitor, compare, annotate, stop managed training
 ├── evaluate  run, screen, compare, inspect, archive immutable evaluations
 ├── capture   capture state channels and optional policy MP4 clips
-├── tools     forward to specialist clip, quality, reward, and replay tools
+├── tools     forward to specialist clip, quality, reward, controller, and replay tools
 ├── dashboard start or query the local FastAPI dashboard
 ├── maintain  forward arguments to scripts/maintain.sh
 └── mcp serve run the stdio MCP server
@@ -219,6 +219,7 @@ Use the separator so their flags cannot be parsed as outer CLI options.
 | `tools clip-motion -- INPUT.npz` | `tools.clip_motion` | `--output PATH`, `--fps FPS`, `--event all|takeoff|landing`, `--pre-roll S` (0.5), `--post-roll S` (0.5) |
 | `tools rank-motion -- INPUT…` | `tools.motion_quality` | one or more NPZ files/directories; `--top N`, `--output PATH` |
 | `tools reward-probe` | `tools.reward_probe` | no arguments; prints deterministic reward-geometry checks |
+| `tools controller-probe` | `tools.controller_probe` | `--device DEVICE` (CPU), `--duration-s S` (20), `--direction-duration-s S` (0.1), `--wheel-action A` (0.05), `--json`; records neutral behavior and checks wheel directions plus indexed PI reset |
 | `tools replay-evaluation -- EVAL_DIR` | `evaluation.replay` | `--scenario ID` required, `--checkpoint PATH`, `--viewer native|viser`, `--device DEVICE` |
 
 Examples:
@@ -226,6 +227,7 @@ Examples:
 ```bash
 ascento tools clip-motion -- captures/run/take_000.npz --event landing --fps 24
 ascento tools rank-motion -- captures/run --top 5 --output captures/run/ranking.json
+ascento tools controller-probe -- --device cuda:0 --json
 ascento tools replay-evaluation -- evaluations/<id> \
   --scenario recovery_gate_v1/recovery_random/000000 --viewer native
 ```

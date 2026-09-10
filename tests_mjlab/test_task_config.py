@@ -50,6 +50,7 @@ def test_balance_action_contract_maps_normalized_targets_and_penalizes_drift():
     assert cfg.rewards["effort"].params["peak_effort_nm"] == pytest.approx(
         PHYSICS_PROFILE.peak_effort_nm
     )
+    assert "wheel_target_magnitude" not in cfg.rewards
     assert "initialize_balance_origin" in cfg.events
     assert "balance_push" in cfg.events
 
@@ -165,9 +166,11 @@ def test_dense_specialist_shaping_can_be_disabled_for_ablation(monkeypatch):
 def test_balance_experiment_overrides_change_reward_weights(monkeypatch):
     monkeypatch.setenv("ASCENTO_BALANCE_DRIFT_PENALTY_SCALE", "2.5")
     monkeypatch.setenv("ASCENTO_BALANCE_STABILIZATION_WEIGHT", "1.75")
+    monkeypatch.setenv("ASCENTO_BALANCE_WHEEL_TARGET_PENALTY_WEIGHT", "0.125")
     cfg = ascento_balance_env_cfg()
     assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.5)
     assert cfg.rewards["settled_balance"].weight == pytest.approx(1.75)
+    assert cfg.rewards["wheel_target_magnitude"].weight == pytest.approx(-0.125)
 
 
 def test_jump_observation_contains_phase_and_remaining_distance():

@@ -218,6 +218,23 @@ def action_rate_penalty(env: ManagerBasedRlEnv, reference_dt: float = 0.01) -> t
     return torch.mean(torch.square(scaled_delta), dim=1)
 
 
+def wheel_target_magnitude_penalty(
+    env: ManagerBasedRlEnv,
+    wheel_action_indices: tuple[int, int] = (2, 5),
+) -> torch.Tensor:
+    """Penalize sustained normalized wheel-velocity targets.
+
+    Unlike ``action_rate_penalty``, this regularizer charges a constant wheel
+    command.  It is intended for balance-foundation ablations where drift from
+    a persistent high velocity target is more harmful than rapid changes alone.
+    The value is normalized and does not alter the public action/controller ABI.
+    """
+    action = env.action_manager.action
+    if action.ndim != 2 or action.shape[1] <= max(wheel_action_indices):
+        raise ValueError("wheel target magnitude requires the six-channel structured action")
+    return torch.mean(torch.square(action[:, wheel_action_indices]), dim=1)
+
+
 def track_velocity(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",

@@ -23,7 +23,9 @@ WHEEL_KI_NM_RAD = 4.0
 WHEEL_INTEGRAL_LIMIT_RAD = 5.0
 CONTROLLER_REQUEST_LIMIT_NM = 65.0
 # MuJoCo's wheel joint convention advances this robot along negative base X for
-# a positive joint velocity. Invert both channels so policy-positive is forward.
+# a positive joint velocity. Invert both channels so equal policy-positive
+# targets move forward. A positive left target plus a negative right target
+# turns the base clockwise (negative yaw) when viewed from above.
 WHEEL_TARGET_SIGNS = (-1.0, -1.0)
 
 

@@ -31,6 +31,20 @@ The task configurations are the source of exact reward weights and reset
 ranges. Training changes must be evaluated against their gates, not accepted
 from scalar reward or episode length alone.
 
+Before starting or materially changing balance training, run the deterministic
+controller characterization on the intended compute backend:
+
+```bash
+ascento tools controller-probe -- --device cuda:0 --json
+```
+
+It records a neutral structured target for 20 seconds from the exact supported
+pose, checks equal-wheel forward motion and opposing-wheel clockwise turn, and
+confirms an indexed reset clears only the selected wheel PI state. The neutral
+result is an open-loop baseline—not a policy gate for this dynamically balanced
+robot. Treat a failed direction or PI-reset check as a plant/controller issue,
+not a PPO tuning result.
+
 ## Starting a managed run
 
 Use the unified CLI so that the dashboard and MCP can observe the run:
@@ -77,8 +91,15 @@ Balance tuning can be explored with these explicit environment variables:
 
 - `ASCENTO_BALANCE_DRIFT_PENALTY_SCALE`;
 - `ASCENTO_BALANCE_STABILIZATION_WEIGHT`;
+- `ASCENTO_BALANCE_WHEEL_TARGET_PENALTY_WEIGHT`;
 - `ASCENTO_BALANCE_PUSH_INTERVAL_MIN_S`; and
 - `ASCENTO_BALANCE_PUSH_INTERVAL_MAX_S`.
+
+The wheel-target magnitude penalty is disabled by default. Set a positive
+weight only for a named balance-foundation ablation: it penalizes sustained
+normalized wheel velocity targets while retaining the action-rate and physical
+effort penalties. It changes reward shaping only, not the structured action or
+controller contract.
 
 Record any non-default values in the run notes/tags and experiment manifest
 metadata. Do not promote a policy based on an override whose effect was not

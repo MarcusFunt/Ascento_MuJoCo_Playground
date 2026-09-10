@@ -41,6 +41,12 @@ def test_capture_cli_imports_on_cpu_safe_help_path():
     assert "--device" in result.stdout
 
 
+def test_controller_probe_cli_imports_on_cpu_safe_help_path():
+    result = _run_module("ascento_mjlab.tools.controller_probe", "--help")
+    assert result.returncode == 0, result.stderr
+    assert "--duration-s" in result.stdout
+
+
 def test_clip_and_rank_clis_process_representative_npz(tmp_path):
     source = tmp_path / "capture.npz"
     clipped = tmp_path / "capture_clip.npz"

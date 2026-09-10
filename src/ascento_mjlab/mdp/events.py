@@ -106,6 +106,53 @@ def reset_root_state_supported(
     env.sim.sense()
 
 
+def reset_to_default_supported(
+    env,
+    env_ids: torch.Tensor | slice | None = None,
+    *,
+    asset_name: str = "robot",
+    wheel_radius_m: float = DEFAULT_WHEEL_RADIUS_M,
+    wheel_half_width_m: float = DEFAULT_WHEEL_HALF_WIDTH_M,
+) -> None:
+    """Reset selected worlds to the nominal, support-aligned robot state.
+
+    This is deliberately deterministic: it bypasses randomized reset events,
+    restores the configured root/joint defaults, and then aligns the actual
+    wheel geometry to the plane.  Plant/controller probes use it to separate
+    control behavior from reset-distribution behavior.
+    """
+    ids = _resolved_env_ids(env, env_ids)
+    if ids.numel() == 0:
+        return
+    asset = env.scene[asset_name]
+    default_root = asset.data.default_root_state.index_select(0, ids).clone()
+    default_root[:, :3] += env.scene.env_origins.index_select(0, ids)
+    asset.write_root_link_pose_to_sim(default_root[:, :7], env_ids=ids)
+    asset.write_root_link_velocity_to_sim(default_root[:, 7:13], env_ids=ids)
+    if asset.is_articulated:
+        asset.write_joint_state_to_sim(
+            asset.data.default_joint_pos.index_select(0, ids).clone(),
+            asset.data.default_joint_vel.index_select(0, ids).clone(),
+            env_ids=ids,
+        )
+    env.sim.forward()
+    env.sim.sense()
+
+    bottoms = flat_ground_wheel_bottom_heights(
+        env,
+        asset_name=asset_name,
+        wheel_radius_m=wheel_radius_m,
+        wheel_half_width_m=wheel_half_width_m,
+        env_ids=ids,
+    )
+    pose = asset.data.root_link_pose_w.index_select(0, ids).clone()
+    pose[:, 2] -= bottoms.amin(dim=1)
+    asset.write_root_link_pose_to_sim(pose, env_ids=ids)
+    env.sim.forward()
+    env.sim.sense()
+    initialize_balance_origin(env, ids, asset_name=asset_name)
+
+
 def initialize_balance_origin(
     env,
     env_ids: torch.Tensor | slice | None = None,
@@ -186,6 +233,7 @@ __all__ = [
     "flat_ground_wheel_bottom_heights",
     "initialize_balance_origin",
     "OneShotPlanarVelocityPush",
+    "reset_to_default_supported",
     "reset_root_state_supported",
     "reset_root_state_uniform",
 ]

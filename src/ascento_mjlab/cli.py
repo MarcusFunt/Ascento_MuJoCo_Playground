@@ -586,6 +586,11 @@ def build_parser() -> argparse.ArgumentParser:
         ("clip-motion", "ascento_mjlab.tools.clip_motion", "trim or resample a capture"),
         ("rank-motion", "ascento_mjlab.tools.motion_quality", "rank captures for visual review"),
         ("reward-probe", "ascento_mjlab.tools.reward_probe", "inspect reward terms"),
+        (
+            "controller-probe",
+            "ascento_mjlab.tools.controller_probe",
+            "characterize neutral hold, wheel signs, and PI reset",
+        ),
         ("replay-evaluation", "ascento_mjlab.evaluation.replay", "open an exact evaluator replay"),
     ):
         tool = tools_sub.add_parser(name, help=help_text)

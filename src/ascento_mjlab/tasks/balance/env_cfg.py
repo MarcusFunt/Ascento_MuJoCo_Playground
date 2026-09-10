@@ -134,8 +134,11 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
     """Build the validated flat-ground balance configuration."""
     drift_scale = float(os.environ.get("ASCENTO_BALANCE_DRIFT_PENALTY_SCALE", "1.0"))
     stabilization_scale = float(os.environ.get("ASCENTO_BALANCE_STABILIZATION_WEIGHT", "1.0"))
-    if drift_scale <= 0.0 or stabilization_scale <= 0.0:
-        raise ValueError("balance reward scales must be positive")
+    wheel_target_penalty_weight = float(
+        os.environ.get("ASCENTO_BALANCE_WHEEL_TARGET_PENALTY_WEIGHT", "0.0")
+    )
+    if drift_scale <= 0.0 or stabilization_scale <= 0.0 or wheel_target_penalty_weight < 0.0:
+        raise ValueError("balance reward scales must be positive and wheel target penalty non-negative")
     events = {
         "reset_scene_to_default": EventTermCfg(func=mdp.reset_scene_to_default, mode="reset"),
         "reset_supported_pose": EventTermCfg(
@@ -185,6 +188,79 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
                 "asset_cfg": ROBOT_CFG,
             },
         )
+    rewards = {
+        "alive": RewardTermCfg(func=ascento_mdp.rewards.alive, weight=1.0),
+        "upright": RewardTermCfg(
+            func=ascento_mdp.rewards.upright,
+            weight=2.0,
+            params={"std": 0.35, "asset_cfg": ROBOT_CFG},
+        ),
+        "height": RewardTermCfg(
+            func=ascento_mdp.rewards.height_tracking,
+            weight=1.0,
+            params={
+                "target": PHYSICS_PROFILE.default_root_height_m,
+                "std": 0.08,
+                "asset_cfg": ROBOT_CFG,
+            },
+        ),
+        "angular_rate": RewardTermCfg(
+            func=ascento_mdp.rewards.angular_rate_penalty,
+            weight=-0.04,
+            params={"asset_cfg": ROBOT_CFG},
+        ),
+        "planar_speed": RewardTermCfg(
+            func=ascento_mdp.rewards.planar_speed_penalty,
+            weight=-0.2 * drift_scale,
+            params={"asset_cfg": ROBOT_CFG},
+        ),
+        "position_hold": RewardTermCfg(
+            func=ascento_mdp.rewards.position_hold,
+            weight=4.0,
+            params={"std": 0.50, "asset_cfg": ROBOT_CFG},
+        ),
+        "settled_balance": RewardTermCfg(
+            func=ascento_mdp.rewards.settled_balance,
+            weight=stabilization_scale,
+            params={"asset_cfg": ROBOT_CFG},
+        ),
+        "leg_pose_symmetry": RewardTermCfg(
+            func=ascento_mdp.rewards.leg_pose_symmetry_penalty,
+            weight=-2.0,
+            params={"beta": 0.15, "asset_cfg": ROBOT_CFG},
+        ),
+        "leg_pose_hold": RewardTermCfg(
+            func=ascento_mdp.rewards.leg_pose_hold_penalty,
+            weight=-0.15,
+            params={"target": -3.141592653589793, "std": 0.35, "asset_cfg": ROBOT_CFG},
+        ),
+        "effort": RewardTermCfg(
+            func=ascento_mdp.rewards.effort_penalty,
+            weight=-0.8,
+            params={
+                "peak_effort_nm": PHYSICS_PROFILE.peak_effort_nm,
+                "asset_cfg": ROBOT_CFG,
+            },
+        ),
+        "effort_target_barrier": RewardTermCfg(
+            func=ascento_mdp.rewards.effort_target_barrier,
+            weight=-1.0,
+            params={
+                "peak_effort_nm": PHYSICS_PROFILE.peak_effort_nm,
+                "soft_limit_fraction": 0.75,
+                "asset_cfg": ROBOT_CFG,
+            },
+        ),
+        "action_rate": RewardTermCfg(
+            func=ascento_mdp.rewards.action_rate_penalty, weight=-0.02
+        ),
+    }
+    if wheel_target_penalty_weight > 0.0:
+        rewards["wheel_target_magnitude"] = RewardTermCfg(
+            func=ascento_mdp.rewards.wheel_target_magnitude_penalty,
+            weight=-wheel_target_penalty_weight,
+        )
+
     cfg = ManagerBasedRlEnvCfg(
         decimation=PHYSICS_PROFILE.decimation,
         scene=_scene(1 if play else num_envs),
@@ -193,73 +269,7 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
         observations=_observations(play),
         actions=_actions(),
         events=events,
-        rewards={
-            "alive": RewardTermCfg(func=ascento_mdp.rewards.alive, weight=1.0),
-            "upright": RewardTermCfg(
-                func=ascento_mdp.rewards.upright,
-                weight=2.0,
-                params={"std": 0.35, "asset_cfg": ROBOT_CFG},
-            ),
-            "height": RewardTermCfg(
-                func=ascento_mdp.rewards.height_tracking,
-                weight=1.0,
-                params={
-                    "target": PHYSICS_PROFILE.default_root_height_m,
-                    "std": 0.08,
-                    "asset_cfg": ROBOT_CFG,
-                },
-            ),
-            "angular_rate": RewardTermCfg(
-                func=ascento_mdp.rewards.angular_rate_penalty,
-                weight=-0.04,
-                params={"asset_cfg": ROBOT_CFG},
-            ),
-            "planar_speed": RewardTermCfg(
-                func=ascento_mdp.rewards.planar_speed_penalty,
-                weight=-0.2 * drift_scale,
-                params={"asset_cfg": ROBOT_CFG},
-            ),
-            "position_hold": RewardTermCfg(
-                func=ascento_mdp.rewards.position_hold,
-                weight=4.0,
-                params={"std": 0.50, "asset_cfg": ROBOT_CFG},
-            ),
-            "settled_balance": RewardTermCfg(
-                func=ascento_mdp.rewards.settled_balance,
-                weight=stabilization_scale,
-                params={"asset_cfg": ROBOT_CFG},
-            ),
-            "leg_pose_symmetry": RewardTermCfg(
-                func=ascento_mdp.rewards.leg_pose_symmetry_penalty,
-                weight=-2.0,
-                params={"beta": 0.15, "asset_cfg": ROBOT_CFG},
-            ),
-            "leg_pose_hold": RewardTermCfg(
-                func=ascento_mdp.rewards.leg_pose_hold_penalty,
-                weight=-0.15,
-                params={"target": -3.141592653589793, "std": 0.35, "asset_cfg": ROBOT_CFG},
-            ),
-            "effort": RewardTermCfg(
-                func=ascento_mdp.rewards.effort_penalty,
-                weight=-0.8,
-                params={
-                    "peak_effort_nm": PHYSICS_PROFILE.peak_effort_nm,
-                    "asset_cfg": ROBOT_CFG,
-                },
-            ),
-            "effort_target_barrier": RewardTermCfg(
-                func=ascento_mdp.rewards.effort_target_barrier,
-                weight=-1.0,
-                params={
-                    "peak_effort_nm": PHYSICS_PROFILE.peak_effort_nm,
-                    "soft_limit_fraction": 0.75,
-                    "asset_cfg": ROBOT_CFG,
-                },
-            ),
-            "action_rate": RewardTermCfg(
-                func=ascento_mdp.rewards.action_rate_penalty, weight=-0.02
-            ),
-        },
+        rewards=rewards,
         terminations={
             "fallen": TerminationTermCfg(
                 func=ascento_mdp.terminations.fallen, params={"asset_cfg": ROBOT_CFG}

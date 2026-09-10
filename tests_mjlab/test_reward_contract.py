@@ -17,6 +17,7 @@ from ascento_mjlab.mdp.rewards import (
     track_motion_forward_velocity,
     track_motion_yaw_rate,
     track_yaw_rate,
+    wheel_target_magnitude_penalty,
 )
 
 
@@ -55,7 +56,7 @@ def _env(*, step_dt: float = 0.01):
             get_command=lambda name: {"motion": motion_command, "twist": twist_command}.get(name)
         ),
         action_manager=SimpleNamespace(
-            action=torch.tensor([[0.20]]), prev_action=torch.zeros((1, 1))
+            action=torch.full((1, 6), 0.20), prev_action=torch.zeros((1, 6))
         ),
         ascento_jump_state={
             "phase": torch.tensor([PHASE_CROUCH]),
@@ -110,8 +111,17 @@ def test_regularizers_preserve_100_hz_scale_and_are_frequency_aware():
     assert action_rate_penalty(env).item() == pytest.approx(0.04)
 
     slower = _env(step_dt=0.02)
-    slower.action_manager.action[0, 0] = 0.40
+    slower.action_manager.action[:] = 0.40
     assert action_rate_penalty(slower).item() == pytest.approx(0.04)
+
+
+def test_wheel_target_magnitude_penalty_charges_sustained_wheel_commands_only():
+    env = _env()
+    env.action_manager.action.zero_()
+    env.action_manager.action[0, 2] = 0.50
+    env.action_manager.action[0, 5] = -1.0
+
+    assert wheel_target_magnitude_penalty(env).item() == pytest.approx(0.625)
 
 
 def test_effort_target_barrier_is_zero_below_soft_limit_and_one_at_limit():

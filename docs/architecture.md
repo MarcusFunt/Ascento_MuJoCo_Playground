@@ -36,7 +36,11 @@ The robot has six normalized `structured_targets_v1` actions in this fixed order
 
 Leg targets are offsets of up to pi/2 from the nominal -pi pose and are clamped
 to the MJCF limits. Wheel targets span +/-8 rad/s; both wheel-joint signs are
-inverted so positive policy commands move forward in the base-frame convention.
+inverted so equal positive policy commands move forward in the base-frame
+convention. A positive left target with a negative right target turns clockwise
+(negative base yaw) when viewed from above. `ascento tools controller-probe`
+checks those physical conventions, neutral 20-second hold, and indexed wheel-PI
+reset behavior before a balance training run.
 A physics-rate PD controller
 for legs and PI controller with conditional anti-windup for wheels produce a
 requested torque. The

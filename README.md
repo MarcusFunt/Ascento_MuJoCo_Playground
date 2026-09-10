@@ -233,6 +233,7 @@ and `ASCENTO_EVALUATION_ROOT` when those artifacts live outside the default
 ```bash
 uv run --extra cu128 python -m ascento_mjlab.tools.smoke
 uv run --extra cu128 python -m ascento_mjlab.tools.inspect_model
+uv run --extra cu128 --extra dashboard ascento tools controller-probe -- --device cuda:0 --json
 uv run --extra cu128 --extra dashboard pytest -q
 ```
 
@@ -263,7 +264,9 @@ uv run --extra cu128 train Ascento-Balance-Flat --env.scene.num-envs 512
 uv run --extra cu128 play Ascento-Balance-Flat --agent zero
 ```
 
-Gate D is mjlab-native: the validated plant must learn robust, visually
+Gate D is mjlab-native: the validated plant must first pass the deterministic
+controller probe's physical wheel-sign and indexed-PI-reset checks, while
+recording the neutral 20-second open-loop baseline, then learn robust, visually
 plausible balance with sensible control. Balance rewards hold the root near its
 supported reset position, reward the same settled state measured by the gate,
 and softly prefer equal mirrored hip/knee coordinates without coupling their

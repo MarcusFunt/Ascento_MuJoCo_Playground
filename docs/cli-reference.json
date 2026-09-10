@@ -622,6 +622,16 @@
           "module": "ascento_mjlab.tools.reward_probe",
           "arguments": []
         },
+        "controller-probe": {
+          "module": "ascento_mjlab.tools.controller_probe",
+          "arguments": [
+            "--device cpu|cuda:0",
+            "--duration-s FLOAT (default 20)",
+            "--direction-duration-s FLOAT (default 0.1)",
+            "--wheel-action FLOAT (default 0.05)",
+            "--json"
+          ]
+        },
         "replay-evaluation": {
           "module": "ascento_mjlab.evaluation.replay",
           "arguments": [
