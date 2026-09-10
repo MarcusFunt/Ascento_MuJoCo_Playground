@@ -45,6 +45,22 @@ The unified CLI forwards the same script:
 ascento maintain -- --compute cu128 --skip-system-install
 ```
 
+### WSL-native CUDA profile
+
+The repository includes `config/maintenance.wsl-cu128.env` for the local
+Ubuntu WSL installation. It exports an explicit Linux-native checkout path and
+selects CUDA:
+
+```bash
+source config/maintenance.wsl-cu128.env
+bash scripts/maintain.sh
+```
+
+The profile targets `/root/Ascento_MuJoCo_Playground`; its `logs/`,
+`checkpoints/`, `captures/`, and `evaluations/` bind mounts therefore remain on
+WSL's ext4 filesystem instead of a Windows/OneDrive checkout. It must be
+sourced and run from Ubuntu WSL.
+
 ## Docker services
 
 The base compose file is CPU-safe. Add the GPU overlay for CUDA:

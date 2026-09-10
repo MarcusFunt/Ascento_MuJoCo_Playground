@@ -90,6 +90,21 @@ The script refuses to overwrite tracked local changes or local-only commits
 unless `--force` is explicitly supplied. See `bash scripts/maintain.sh --help`
 for CPU/GPU, install-directory, and Docker options.
 
+### WSL CUDA profile
+
+For this workstation, source the committed WSL/CUDA profile before maintenance:
+
+```bash
+source config/maintenance.wsl-cu128.env
+bash scripts/maintain.sh
+```
+
+It installs into `/root/Ascento_MuJoCo_Playground` and selects `cu128`, which
+keeps Docker artifact mounts off the Windows/OneDrive filesystem and applies
+the GPU Compose overlay. Run these commands in Ubuntu WSL; the profile overrides
+the script's normal current-checkout selection even when it is sourced from the
+Windows checkout.
+
 ### Dashboard host updates
 
 The Dashboard's **System** page can compare the local checkout with
