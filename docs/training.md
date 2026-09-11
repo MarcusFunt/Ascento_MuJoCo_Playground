@@ -75,6 +75,24 @@ without moving artifacts:
 ascento run annotate <run-id> --purpose ablation --tag no-dense-shaping
 ```
 
+To continue a managed checkpoint, start a child run. Pass its exact checkpoint
+as `--parent-checkpoint` and forward the three resume options below. The
+launcher creates its read-only resume link before the trainer starts, so do not
+try to copy or link checkpoint directories after `run start` returns:
+
+```bash
+ascento run start --task Ascento-Balance-Flat \
+  --display-name "balance continuation" --parent-run-id <parent-run-id> \
+  --parent-checkpoint /absolute/path/to/model_7999.pt \
+  --envs 512 --iterations 16000 --seed 321 -- \
+  --agent.resume True --agent.load-run _resume_parent \
+  --agent.load-checkpoint model_7999.pt
+```
+
+`--iterations` is the number of additional PPO iterations after loading; it is
+not a new total. Keep the parent checkpoint in place for the child run's
+duration because its optimizer state is loaded from that file at startup.
+
 ## Reward shaping and strict metrics
 
 Recovery and jump include dense shaping to make sparse events learnable:

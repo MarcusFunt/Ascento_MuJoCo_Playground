@@ -129,6 +129,48 @@ def _training_arg(training_args: list[str], *names: str) -> str | None:
     return value
 
 
+def _prepare_parent_resume_link(
+    run_dir: Path,
+    *,
+    parent_checkpoint: str | None,
+    training_args: list[str],
+    stage: str,
+) -> None:
+    """Make an inherited checkpoint visible to mjlab before it starts.
+
+    mjlab resolves a resume checkpoint relative to the *new* run's log root.
+    A managed continuation stores its parent under another managed run root, so
+    create one explicit, read-only directory link before spawning the trainer.
+    This avoids a race between the dashboard launcher and any after-the-fact
+    artifact setup.
+    """
+    resume = _training_arg(training_args, "--agent.resume")
+    if str(resume).strip().lower() not in {"1", "true", "yes"}:
+        return
+    if not parent_checkpoint:
+        raise ValueError("a resumed managed run requires --parent-checkpoint")
+    if _training_arg(training_args, "--agent.load-run") != "_resume_parent":
+        raise ValueError(
+            "a resumed managed run requires --agent.load-run _resume_parent"
+        )
+
+    checkpoint = Path(parent_checkpoint).expanduser().resolve()
+    if not checkpoint.is_file():
+        raise ValueError(f"parent checkpoint does not exist: {checkpoint}")
+    expected_experiment = f"ascento_{stage}"
+    if checkpoint.parent.parent.name != expected_experiment:
+        raise ValueError(
+            "parent checkpoint must be inside the matching managed experiment "
+            f"directory {expected_experiment!r}: {checkpoint}"
+        )
+
+    link = run_dir / expected_experiment / "_resume_parent"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.exists() or link.is_symlink():
+        raise ValueError(f"managed resume link already exists: {link}")
+    link.symlink_to(checkpoint.parent, target_is_directory=True)
+
+
 def _number(value: str | None) -> int | float | str | None:
     if value is None:
         return None
@@ -387,6 +429,15 @@ def main() -> int:
     status_path = run_dir / "run_status.json"
     metadata_path = run_dir / "run_metadata.json"
     log_path = run_dir / "training.log"
+    try:
+        _prepare_parent_resume_link(
+            run_dir,
+            parent_checkpoint=args.parent_checkpoint,
+            training_args=training_args,
+            stage=stage,
+        )
+    except ValueError as error:
+        parser.error(str(error))
     command = [
         sys.executable,
         "-u",

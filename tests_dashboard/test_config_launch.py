@@ -1,7 +1,12 @@
 import dashboard.launch as launch
 import pytest
 from dashboard.config import load_config, validate_startup
-from dashboard.launch import _runtime_status_from_line, _training_arg, build_parser
+from dashboard.launch import (
+    _prepare_parent_resume_link,
+    _runtime_status_from_line,
+    _training_arg,
+    build_parser,
+)
 
 
 def test_launcher_uses_same_default_artifact_root_as_dashboard(monkeypatch, tmp_path):
@@ -26,6 +31,39 @@ def test_launcher_argument_metadata_parser_supports_both_cli_forms():
     assert _training_arg(args, "--seed", "--agent.seed") == "11"
     assert _training_arg(args, "--device") == "cuda:0"
     assert _training_arg(args, "--env.sim.mujoco.timestep") == "0.002"
+
+
+def test_launcher_prepares_parent_checkpoint_link_before_resume(tmp_path):
+    checkpoint = tmp_path / "parent" / "ascento_balance" / "source" / "model_7999.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+    run_dir = tmp_path / "child"
+    run_dir.mkdir()
+
+    _prepare_parent_resume_link(
+        run_dir,
+        parent_checkpoint=str(checkpoint),
+        training_args=["--agent.resume", "True", "--agent.load-run", "_resume_parent"],
+        stage="balance",
+    )
+
+    link = run_dir / "ascento_balance" / "_resume_parent"
+    assert link.is_symlink()
+    assert link.resolve() == checkpoint.parent.resolve()
+
+
+def test_launcher_rejects_ambiguous_managed_resume(tmp_path):
+    checkpoint = tmp_path / "ascento_balance" / "source" / "model_7999.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+
+    with pytest.raises(ValueError, match="load-run _resume_parent"):
+        _prepare_parent_resume_link(
+            tmp_path / "child",
+            parent_checkpoint=str(checkpoint),
+            training_args=["--agent.resume", "True"],
+            stage="balance",
+        )
 
 
 def test_launcher_accepts_dashboard_horizon_after_training_separator():
