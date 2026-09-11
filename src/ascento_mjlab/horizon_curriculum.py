@@ -20,13 +20,13 @@ HORIZON_SCHEDULE_S = (20.0, 60.0, 120.0, 300.0)
 class HorizonCurriculumRunner(AscentoProvenanceRunner):
     """Adapt episode horizons while preserving the final long-horizon phase.
 
-    The horizon advances after three consecutive 512-episode windows with at
+    The horizon advances after six consecutive 512-episode windows with at
     least 90% timeouts. Shorter practice stages can demote only after a grace
     period and sustained severe regression. Once the policy reaches 300 seconds,
     it remains there: stochastic PPO rollouts are useful learning data, but they
     are not authoritative grounds to throw away long-horizon practice. Stable
-    300-second windows retain a candidate checkpoint; deterministic gate
-    evaluation selects the final model.
+    300-second windows retain the best candidate checkpoint immediately;
+    deterministic gate evaluation selects the final model.
     """
 
     env: RslRlVecEnvWrapper
@@ -39,8 +39,12 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
     required_failure_windows = 4
     timeout_failure_threshold = 0.50
     minimum_stage_dwell_windows = 3
-    required_top_horizon_candidate_windows = 3
+    # A policy can regress after its first successful 300-second window.  Keep
+    # that first validated training candidate rather than requiring a streak
+    # that may never complete after the regression has begun.
+    required_top_horizon_candidate_windows = 1
     top_horizon_candidate_name = "model_best_long_horizon.pt"
+    top_horizon_learning_rate = 1.0e-5
 
     def __init__(
         self,
@@ -61,6 +65,8 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
         self._pending_completion_outcomes: list[bool] = []
         self._base_step: Callable[[torch.Tensor], tuple[Any, torch.Tensor, torch.Tensor, dict]] = env.step
         env.step = self._step  # type: ignore[method-assign]
+        if self._at_top_horizon:
+            self._stabilize_top_horizon_optimizer()
         self._emit_status(timeout_fraction=None)
 
     @staticmethod
@@ -174,6 +180,22 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
         # RSL-RL consults this wrapper field for initial random episode lengths;
         # the environment derives its timeout dynamically from cfg above.
         self.env.max_episode_length = self.env.unwrapped.max_episode_length
+        if self._at_top_horizon:
+            self._stabilize_top_horizon_optimizer()
+
+    def _stabilize_top_horizon_optimizer(self) -> None:
+        """Freeze adaptive PPO rate changes for 300-second fine-tuning.
+
+        The short-horizon stages may use RSL-RL's adaptive KL schedule to
+        learn quickly.  At the final horizon, an adaptive increase after a
+        low-KL minibatch can overwrite an already stable controller.  Lock the
+        optimizer to the minimum supported rate when that stage begins.
+        """
+        algorithm = self.alg
+        algorithm.schedule = "fixed"
+        algorithm.learning_rate = min(float(algorithm.learning_rate), self.top_horizon_learning_rate)
+        for param_group in algorithm.optimizer.param_groups:
+            param_group["lr"] = algorithm.learning_rate
 
     def _save_top_horizon_candidate(self, timeout_fraction: float) -> bool:
         """Persist the best training-derived long-horizon candidate atomically."""

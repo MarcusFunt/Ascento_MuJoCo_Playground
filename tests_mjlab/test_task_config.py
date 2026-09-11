@@ -72,6 +72,8 @@ def test_balance_rl_config_enforces_normalized_actions_and_instrumented_ppo():
 
     assert cfg.clip_actions == 1.0
     assert cfg.algorithm.class_name == "ascento_mjlab.ppo:InstrumentedPPO"
+    assert cfg.algorithm.learning_rate == pytest.approx(1.0e-4)
+    assert cfg.algorithm.schedule == "adaptive"
     assert cfg.actor.obs_normalization
     assert cfg.critic.obs_normalization
     assert cfg.algorithm.gamma == pytest.approx(0.998)

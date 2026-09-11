@@ -37,6 +37,11 @@ def _runner(horizon_s=20.0, log_dir=None):
     runner._pending_completion_outcomes = []
     runner.current_learning_iteration = 123
     runner.logger = SimpleNamespace(log_dir=str(log_dir) if log_dir is not None else None)
+    runner.alg = SimpleNamespace(
+        schedule="adaptive",
+        learning_rate=3.0e-4,
+        optimizer=SimpleNamespace(param_groups=[{"lr": 3.0e-4}]),
+    )
     return runner
 
 
@@ -161,13 +166,41 @@ def test_final_horizon_retains_best_training_candidate(monkeypatch, tmp_path):
         saved.append((Path(path), infos))
 
     monkeypatch.setattr(runner, "save", save)
-    for _ in range(runner.required_top_horizon_candidate_windows):
-        runner._completed_in_window = 512
-        runner._timeouts_in_window = 510
-        runner._evaluate_completion_window()
+    runner._completed_in_window = 512
+    runner._timeouts_in_window = 510
+    runner._evaluate_completion_window()
 
     checkpoint = tmp_path / runner.top_horizon_candidate_name
     metadata = tmp_path / "long_horizon_candidate.json"
     assert checkpoint.read_text(encoding="utf-8") == "checkpoint"
     assert saved[-1][1]["long_horizon_candidate"]["horizon_s"] == 300.0
     assert json.loads(metadata.read_text(encoding="utf-8"))["timeout_fraction"] == 510 / 512
+
+
+def test_final_horizon_saves_the_first_qualified_window(monkeypatch, tmp_path):
+    runner = _runner(horizon_s=300.0, log_dir=tmp_path)
+    monkeypatch.setattr(runner, "_emit_status", lambda **_: None)
+    saved = []
+
+    def save(path, infos=None):
+        Path(path).write_text("checkpoint", encoding="utf-8")
+        saved.append(infos)
+
+    monkeypatch.setattr(runner, "save", save)
+    runner._completed_in_window = 512
+    runner._timeouts_in_window = 461
+    runner._evaluate_completion_window()
+
+    assert len(saved) == 1
+    assert saved[0]["long_horizon_candidate"]["stable_windows"] == 1
+
+
+def test_entering_final_horizon_locks_the_optimizer_rate(monkeypatch):
+    runner = _runner(horizon_s=120.0)
+    monkeypatch.setattr(runner, "_emit_status", lambda **_: None)
+    runner._schedule_index = len(HORIZON_SCHEDULE_S) - 1
+    runner._apply_horizon()
+
+    assert runner.alg.schedule == "fixed"
+    assert runner.alg.learning_rate == runner.top_horizon_learning_rate
+    assert runner.alg.optimizer.param_groups[0]["lr"] == runner.top_horizon_learning_rate

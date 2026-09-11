@@ -152,8 +152,11 @@ when it fails.
 
 For balance, screen candidate checkpoints—including
 `model_best_long_horizon.pt` when it exists—on the development suite first,
-then use `balance_gate_v4` for the final decision. The best-horizon checkpoint
-is a candidate, not a pass.
+then use `balance_gate_v4` for the final decision. The curriculum writes that
+checkpoint after its first qualifying 300-second window and replaces it only
+with a better qualifying window. At 300 seconds, PPO uses a fixed `1e-5`
+learning rate to protect an already-stable controller from adaptive-rate
+regression. The best-horizon checkpoint is a candidate, not a pass.
 
 ```bash
 ascento evaluate screen 'logs/rsl_rl/ascento_balance/<run>/model_*.pt' \
