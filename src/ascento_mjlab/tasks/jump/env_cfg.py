@@ -17,11 +17,17 @@ from ascento_mjlab.tasks.balance.env_cfg import ROBOT_CFG, ascento_balance_env_c
 def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
     cfg = ascento_balance_env_cfg(play=play, num_envs=num_envs)
     cfg.rewards.pop("world_target_proximity", None)
+    cfg.rewards.pop("world_target_heading", None)
+    cfg.rewards.pop("track_world_target_yaw_rate", None)
     cfg.rewards.pop("settled_balance", None)
     cfg.events.pop("balance_push", None)
     cfg.events.pop("initialize_world_target", None)
     cfg.observations["actor"].terms.pop("world_target_error", None)
     cfg.observations["critic"].terms.pop("world_target_error", None)
+    cfg.observations["actor"].terms.pop("world_target_heading_error", None)
+    cfg.observations["critic"].terms.pop("world_target_heading_error", None)
+    cfg.metrics.pop("world_target_heading_error_radians", None)
+    cfg.metrics.pop("yaw_rate_radians_per_s", None)
     cfg.commands = {
         "motion": ascento_mdp.commands.AscentoMotionCommandCfg(
             entity_name="robot",
@@ -129,4 +135,5 @@ def ascento_jump_env_cfg(play: bool = False, num_envs: int = 512):
     if os.environ.get("ASCENTO_DISABLE_DENSE_SHAPING", "").strip() == "1":
         cfg.rewards.pop("post_landing_stability", None)
     cfg.episode_length_s = 8.0 if not play else 10000.0
+    cfg.task_id = "Ascento-Jump-Flat"
     return cfg

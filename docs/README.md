@@ -13,6 +13,7 @@ operate them.
 | Use every `ascento` command | [CLI reference](cli-reference.md) |
 | Let an agent monitor or operate the project | [MCP reference](mcp-reference.md) |
 | Use or diagnose the web control plane | [Dashboard](dashboard.md) |
+| Compare the learning/control topology with Wheel-Legged-Lab | [Wheel-Legged-Lab comparison](wheeled-legged-lab-comparison.md) |
 | Modify the project and validate a change | [Development](development.md) |
 | Resolve common run, artifact, graphics, or integration failures | [Troubleshooting](troubleshooting.md) |
 

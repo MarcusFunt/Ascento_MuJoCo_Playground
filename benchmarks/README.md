@@ -33,6 +33,7 @@ Result states:
 ## Current suites
 
 - `balance_dev_v1`: smaller, faster development screen.
+- `balance_dev_v2`: current smaller screen; adds reset-heading and yaw-rate checks.
 - `balance_gate_v1`: immutable authoritative Gate D performance baseline with
   nominal resets, expanded resets, deterministic corners, physical force
   disturbances, and 60-second endurance.
@@ -40,8 +41,10 @@ Result states:
   historical evidence only.
 - `balance_gate_v3`: prior 65 Nm plant gate with nominal mirrored-joint
   mismatch checks and authoritative joint-space effort diagnostics.
-- `balance_gate_v4`: current world-target balance gate; it additionally caps
+- `balance_gate_v4`: prior world-target balance gate; it additionally caps
   maximum 120-second target error so survival alone cannot hide drift.
+- `balance_gate_v5`: current directional world-target gate; it additionally
+  rejects persistent yaw drift and spin relative to each reset heading.
 - `velocity_gate_v1`: deterministic command-timeline tracking benchmark.
 - `recovery_gate_v1`: wide-reset recovery benchmark using the canonical
   `RecoveryEnvelope` fields plus continuous stable duration.
@@ -63,11 +66,11 @@ Screen checkpoints:
 
 ```bash
 ascento-evaluate-checkpoints 'logs/rsl_rl/.../model_*.pt' \
-  --suite balance_dev_v1 --top 3
+  --suite balance_dev_v2 --top 3
 ```
 
 For a balance run, include `model_best_long_horizon.pt` in the development
-screen, then run `balance_gate_v4` on the selected checkpoint. The curriculum
+screen, then run `balance_gate_v5` on the selected checkpoint. The curriculum
 retains this file after sustained 300-second training survival, but it is only a
 candidate until the deterministic gate passes.
 

@@ -50,6 +50,26 @@ def test_log_records_supply_recent_rsl_rl_metrics_without_tensorboard(tmp_path):
     ]
 
 
+def test_log_records_preserve_structured_target_diagnostics(tmp_path):
+    log = tmp_path / "training.log"
+    log.write_text(
+        "Learning iteration 41/100\n"
+        "Mean leg_target_offset_rms_rad loss: 0.25\n"
+        "Mean wheel_target_velocity_rms_rad_s loss: 4.5\n"
+        "Mean command_saturation_fraction loss: 0.125\n",
+        encoding="utf-8",
+    )
+
+    record = load_log_records(tmp_path)[0]
+    decorated = decorate_records([record], tmp_path)[0]
+
+    assert record["metrics"]["Loss/leg_target_offset_rms_rad"] == 0.25
+    assert record["metrics"]["Loss/wheel_target_velocity_rms_rad_s"] == 4.5
+    assert decorated["canonical_metrics"]["leg_target_offset_rms_rad"] == 0.25
+    assert decorated["canonical_metrics"]["wheel_target_velocity_rms_rad_s"] == 4.5
+    assert decorated["canonical_metrics"]["controller_request_saturation_fraction"] == 0.125
+
+
 def test_run_list_defers_tensorboard_loading_until_a_run_is_selected(monkeypatch, tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()

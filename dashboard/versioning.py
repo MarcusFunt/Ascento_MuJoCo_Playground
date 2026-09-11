@@ -217,8 +217,45 @@ def classify_run_action_contract(run_dir: Path, root: Path) -> dict[str, Any]:
     }
 
 
+def classify_run_task_contract(run_dir: Path, root: Path) -> dict[str, Any]:
+    """Classify the observation/reward task ABI for a managed run."""
+    # ``scripts/stamp_run_provenance.py`` intentionally imports this module
+    # directly without requiring the full Ascento package installation.  Keep
+    # the newest optional contract dependency lazy so that maintenance script
+    # remains usable while an environment is being rebuilt.
+    from ascento_mjlab.task_contract import (
+        current_task_contract_for_task,
+        task_contracts_compatible,
+    )
+
+    manifest_path = _parent_file(run_dir, root, "experiment_manifest.json")
+    manifest = _load_json(manifest_path) if manifest_path else None
+    task = manifest.get("task") if manifest else None
+    contract = manifest.get("task_contract") if manifest else None
+    if not isinstance(task, str) or not task:
+        return {
+            "status": "legacy",
+            "is_compatible": False,
+            "run_contract": contract if isinstance(contract, dict) else None,
+            "current_contract": None,
+        }
+    current = current_task_contract_for_task(task)
+    compatible = task_contracts_compatible(contract, current)
+    return {
+        "status": "current"
+        if compatible
+        else "legacy"
+        if not isinstance(contract, dict)
+        else "incompatible",
+        "is_compatible": compatible,
+        "run_contract": contract if isinstance(contract, dict) else None,
+        "current_contract": current,
+    }
+
+
 def annotate_run_summary(summary: dict[str, Any], run_dir: Path, root: Path) -> dict[str, Any]:
     summary["repository_version"] = classify_run_version(run_dir, root)
     summary["plant_contract"] = classify_run_plant_contract(run_dir, root)
     summary["action_contract"] = classify_run_action_contract(run_dir, root)
+    summary["task_contract"] = classify_run_task_contract(run_dir, root)
     return summary

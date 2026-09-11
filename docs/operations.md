@@ -102,9 +102,12 @@ cd /root/Ascento_MuJoCo_Playground
 ```
 
 Balance uses a per-environment world target initialized at the supported reset
-pose. Do not add a wheel-target magnitude penalty: it conflicts with recovery
-and target-return behavior. Use `ASCENTO_BALANCE_DRIFT_PENALTY_SCALE` only to
-adjust the small instantaneous-speed regularizer in a named ablation.
+pose: both the absolute XY position and the initial world yaw are latched. The
+policy observes wrapped target-heading error; a bounded outer heading servo
+commands the yaw-rate direction needed to return to it. Do not add a
+wheel-target magnitude penalty: it conflicts with recovery and target-return
+behavior. Use `ASCENTO_BALANCE_DRIFT_PENALTY_SCALE` only to adjust the small
+instantaneous-speed regularizer in a named ablation.
 
 The command prints the managed run ID. In a second Ubuntu WSL terminal, inspect
 it without disturbing training:

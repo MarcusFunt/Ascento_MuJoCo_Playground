@@ -1,5 +1,6 @@
 import dashboard.launch as launch
 import pytest
+import torch
 from dashboard.config import load_config, validate_startup
 from dashboard.launch import (
     _prepare_parent_resume_link,
@@ -7,6 +8,10 @@ from dashboard.launch import (
     _training_arg,
     build_parser,
 )
+
+from ascento_mjlab.control_contract import current_action_contract
+from ascento_mjlab.plant_contract import current_plant_contract
+from ascento_mjlab.task_contract import current_task_contract_for_task
 
 
 def test_launcher_uses_same_default_artifact_root_as_dashboard(monkeypatch, tmp_path):
@@ -33,18 +38,20 @@ def test_launcher_argument_metadata_parser_supports_both_cli_forms():
     assert _training_arg(args, "--env.sim.mujoco.timestep") == "0.002"
 
 
-def test_launcher_prepares_parent_checkpoint_link_before_resume(tmp_path):
+def test_launcher_prepares_parent_checkpoint_link_before_resume(monkeypatch, tmp_path):
     checkpoint = tmp_path / "parent" / "ascento_balance" / "source" / "model_7999.pt"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.write_bytes(b"checkpoint")
     run_dir = tmp_path / "child"
     run_dir.mkdir()
+    monkeypatch.setattr(launch, "_validate_parent_checkpoint", lambda *_args: None)
 
     _prepare_parent_resume_link(
         run_dir,
         parent_checkpoint=str(checkpoint),
         training_args=["--agent.resume", "True", "--agent.load-run", "_resume_parent"],
         stage="balance",
+        task="Ascento-Balance-Flat",
     )
 
     link = run_dir / "ascento_balance" / "_resume_parent"
@@ -63,7 +70,42 @@ def test_launcher_rejects_ambiguous_managed_resume(tmp_path):
             parent_checkpoint=str(checkpoint),
             training_args=["--agent.resume", "True"],
             stage="balance",
+            task="Ascento-Balance-Flat",
         )
+
+
+def test_launcher_rejects_parent_checkpoint_without_task_contract(tmp_path):
+    checkpoint = tmp_path / "parent" / "ascento_balance" / "source" / "model_7999.pt"
+    checkpoint.parent.mkdir(parents=True)
+    torch.save(
+        {
+            "infos": {
+                "plant_contract": current_plant_contract(),
+                "action_contract": current_action_contract(),
+            }
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="task topology contract"):
+        launch._validate_parent_checkpoint(checkpoint, "Ascento-Balance-Flat")
+
+
+def test_launcher_accepts_parent_checkpoint_with_current_contracts(tmp_path):
+    checkpoint = tmp_path / "parent" / "ascento_balance" / "source" / "model_7999.pt"
+    checkpoint.parent.mkdir(parents=True)
+    torch.save(
+        {
+            "infos": {
+                "plant_contract": current_plant_contract(),
+                "action_contract": current_action_contract(),
+                "task_contract": current_task_contract_for_task("Ascento-Balance-Flat"),
+            }
+        },
+        checkpoint,
+    )
+
+    launch._validate_parent_checkpoint(checkpoint, "Ascento-Balance-Flat")
 
 
 def test_launcher_accepts_dashboard_horizon_after_training_separator():

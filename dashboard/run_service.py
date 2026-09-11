@@ -407,6 +407,9 @@ class RunService:
                 "dense_shaping_enabled",
                 "experiment_overrides",
                 "reward_terms",
+                "plant_contract",
+                "action_contract",
+                "task_contract",
                 "evaluation",
             )
             return {

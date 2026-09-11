@@ -105,6 +105,11 @@ def _observations(play: bool) -> dict[str, ObservationGroupCfg]:
             params={"asset_cfg": ROBOT_CFG},
             clip=(-5.0, 5.0),
         ),
+        "world_target_heading_error": ObservationTermCfg(
+            func=ascento_mdp.observations.world_target_heading_error,
+            params={"asset_cfg": ROBOT_CFG},
+            clip=(-3.141592653589793, 3.141592653589793),
+        ),
     }
     critic_terms = {
         **actor_terms,
@@ -221,6 +226,21 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
             weight=4.0,
             params={"std": 0.35, "asset_cfg": ROBOT_CFG},
         ),
+        "world_target_heading": RewardTermCfg(
+            func=ascento_mdp.rewards.world_target_heading,
+            weight=1.0,
+            params={"std": 0.35, "asset_cfg": ROBOT_CFG},
+        ),
+        "track_world_target_yaw_rate": RewardTermCfg(
+            func=ascento_mdp.rewards.track_world_target_yaw_rate,
+            weight=0.5,
+            params={
+                "std": 0.25,
+                "heading_control_stiffness": 0.60,
+                "max_target_rate": 1.0,
+                "asset_cfg": ROBOT_CFG,
+            },
+        ),
         "settled_balance": RewardTermCfg(
             func=ascento_mdp.rewards.settled_balance,
             weight=stabilization_scale,
@@ -295,9 +315,21 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
             "root_speed": MetricsTermCfg(
                 func=ascento_mdp.metrics.root_speed, params={"asset_cfg": ROBOT_CFG}
             ),
+            "world_target_heading_error_radians": MetricsTermCfg(
+                func=ascento_mdp.metrics.world_target_heading_error_radians,
+                params={"asset_cfg": ROBOT_CFG},
+            ),
+            "yaw_rate_radians_per_s": MetricsTermCfg(
+                func=ascento_mdp.metrics.yaw_rate_radians_per_s,
+                params={"asset_cfg": ROBOT_CFG},
+            ),
         },
         episode_length_s=20.0 if not play else 10000.0,
         auto_reset=True,
         scale_rewards_by_dt=True,
     )
+    # Saved checkpoint provenance uses this stable task identifier as part of
+    # the observation/reward topology ABI.  It is intentionally independent
+    # from the operational ``play`` and vector-count choices.
+    cfg.task_id = "Ascento-Balance-Flat"
     return cfg

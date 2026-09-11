@@ -9,7 +9,12 @@ from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
 
-from .events import world_target_xy
+from .events import (
+    world_target_xy,
+    world_target_yaw,
+    wrapped_angle_difference,
+    yaw_from_quaternion_wxyz,
+)
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -47,6 +52,21 @@ def world_target_error_body(
         ],
         dim=1,
     )
+
+
+def world_target_heading_error(
+    env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """Return signed target-minus-current yaw error in the principal branch.
+
+    The target is the robot's supported reset yaw, not a fixed global heading.
+    This makes the observation invariant to the reset yaw distribution while
+    giving the policy a direct signal that distinguishes yaw drift from a
+    stationary world-position target.
+    """
+    asset: Entity = env.scene[asset_cfg.name]
+    current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
+    return wrapped_angle_difference(world_target_yaw(env), current_yaw).unsqueeze(1)
 
 
 def wheel_contacts(

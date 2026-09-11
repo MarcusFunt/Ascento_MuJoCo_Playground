@@ -48,10 +48,25 @@ def plant_contracts_compatible(
     return all(left.get(field) == right.get(field) for field in fields)
 
 
+def require_current_plant_contract(contract: Mapping[str, Any] | None) -> None:
+    """Reject a checkpoint compiled for another simulation plant."""
+    if not isinstance(contract, Mapping):
+        raise ValueError(
+            "checkpoint lacks the plant contract and cannot be rolled out against the current "
+            "simulation plant; retrain the policy"
+        )
+    if not plant_contracts_compatible(contract, current_plant_contract()):
+        raise ValueError(
+            "checkpoint plant contract is incompatible with the current simulation plant; retrain "
+            "the policy"
+        )
+
+
 __all__ = [
     "PLANT_CONTRACT_SCHEMA_VERSION",
     "ROBOT_MJCF",
     "current_plant_contract",
     "plant_contracts_compatible",
+    "require_current_plant_contract",
     "robot_mjcf_sha256",
 ]

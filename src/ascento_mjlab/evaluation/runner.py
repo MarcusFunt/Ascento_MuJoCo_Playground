@@ -16,15 +16,20 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul
 
 import ascento_mjlab.tasks  # noqa: F401
-from ascento_mjlab.control_contract import current_action_contract, require_current_action_contract
+from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
+from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.mdp.events import (
     flat_ground_wheel_bottom_heights,
     initialize_world_target,
     world_target_xy,
+    world_target_yaw,
+    wrapped_angle_difference,
+    yaw_from_quaternion_wxyz,
 )
 from ascento_mjlab.mdp.metrics import controller_requested_effort
 from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
 from ascento_mjlab.plant_contract import current_plant_contract
+from ascento_mjlab.task_contract import current_task_contract
 
 from .policy import RslRlPolicyAdapter
 from .schema import EpisodeResult, ScenarioSpec
@@ -328,6 +333,7 @@ class _EvaluationRuntime:
     agent_cfg: Any
     checkpoint_contract: dict[str, Any] | None
     checkpoint_action_contract: dict[str, Any] | None
+    checkpoint_task_contract: dict[str, Any] | None
     capacity: int
 
     def close(self) -> None:
@@ -382,7 +388,10 @@ def _create_runtime(
         checkpoint_action_contract = (
             checkpoint_infos.get("action_contract") if isinstance(checkpoint_infos, dict) else None
         )
-        require_current_action_contract(checkpoint_action_contract)
+        checkpoint_task_contract = (
+            checkpoint_infos.get("task_contract") if isinstance(checkpoint_infos, dict) else None
+        )
+        require_current_checkpoint_contracts(checkpoint_infos, base_env.cfg)
         return _EvaluationRuntime(
             base_env=base_env,
             env=env,
@@ -391,6 +400,7 @@ def _create_runtime(
             agent_cfg=agent_cfg,
             checkpoint_contract=checkpoint_contract,
             checkpoint_action_contract=checkpoint_action_contract,
+            checkpoint_task_contract=checkpoint_task_contract,
             capacity=capacity,
         )
     except Exception:
@@ -428,6 +438,7 @@ def _run_batch(
     agent_cfg = runtime.agent_cfg
     checkpoint_contract = runtime.checkpoint_contract
     checkpoint_action_contract = runtime.checkpoint_action_contract
+    checkpoint_task_contract = runtime.checkpoint_task_contract
     step_dt = physics_timestep(base_env.cfg) * int(base_env.cfg.decimation)
     max_horizon = max(scenario.horizon_steps for scenario in scenarios)
 
@@ -456,6 +467,10 @@ def _run_batch(
     sum_planar_speed_sq = torch.zeros(count, device=dev)
     max_planar_speed = torch.zeros(count, device=dev)
     max_target_error = torch.zeros(count, device=dev)
+    sum_heading_error_sq = torch.zeros(count, device=dev)
+    max_heading_error = torch.zeros(count, device=dev)
+    sum_yaw_rate_sq = torch.zeros(count, device=dev)
+    max_yaw_rate = torch.zeros(count, device=dev)
     sum_height = torch.zeros(count, device=dev)
     min_height = torch.full((count,), float("inf"), device=dev)
     sum_effort_abs = torch.zeros(count, device=dev)
@@ -613,6 +628,11 @@ def _run_batch(
             )
             xy = robot.data.root_link_pos_w[:, :2]
             target_error = torch.linalg.vector_norm(xy - world_target_xy(base_env), dim=1)
+            current_yaw = yaw_from_quaternion_wxyz(robot.data.root_link_quat_w)
+            heading_error = torch.abs(
+                wrapped_angle_difference(world_target_yaw(base_env), current_yaw)
+            )
+            yaw_rate = torch.abs(robot.data.root_link_ang_vel_b[:, 2])
             segment = torch.linalg.vector_norm(xy - prev_xy, dim=1)
             prev_xy = xy.clone()
 
@@ -647,6 +667,16 @@ def _run_batch(
             )
             max_target_error = torch.maximum(
                 max_target_error, torch.where(active, target_error, torch.zeros_like(target_error))
+            )
+            sum_heading_error_sq += heading_error.square() * weight
+            max_heading_error = torch.maximum(
+                max_heading_error,
+                torch.where(active, heading_error, torch.zeros_like(heading_error)),
+            )
+            sum_yaw_rate_sq += yaw_rate.square() * weight
+            max_yaw_rate = torch.maximum(
+                max_yaw_rate,
+                torch.where(active, yaw_rate, torch.zeros_like(yaw_rate)),
             )
             sum_height += height * weight
             min_height = torch.minimum(min_height, torch.where(active, height, min_height))
@@ -760,6 +790,8 @@ def _run_batch(
                 & (planar_speed <= 0.10)
                 & (torch.abs(height - 0.75) <= 0.05)
                 & (angular_xy <= 0.25)
+                & (yaw_rate <= 0.25)
+                & (heading_error <= 0.15)
                 & both_supported
             )
             stable_count = torch.where(
@@ -849,6 +881,10 @@ def _run_batch(
             "planar_speed_rms": torch.sqrt(sum_planar_speed_sq / denom),
             "max_planar_speed": max_planar_speed,
             "max_target_error": max_target_error,
+            "heading_error_rms": torch.sqrt(sum_heading_error_sq / denom),
+            "max_heading_error": max_heading_error,
+            "yaw_rate_rms": torch.sqrt(sum_yaw_rate_sq / denom),
+            "max_yaw_rate": max_yaw_rate,
             "height_mean": sum_height / denom,
             "height_min": min_height,
             "effort_mean_abs": sum_effort_abs / denom,
@@ -939,6 +975,8 @@ def _run_batch(
             "checkpoint_plant_contract": checkpoint_contract,
             "action_contract": current_action_contract(),
             "checkpoint_action_contract": checkpoint_action_contract,
+            "task_contract": current_task_contract(base_env.cfg),
+            "checkpoint_task_contract": checkpoint_task_contract,
         }
         return results, metadata
     finally:
@@ -969,6 +1007,7 @@ def run_scenarios(
             "batch_metadata": [],
             "checkpoint_plant_contract": None,
             "checkpoint_action_contract": None,
+            "checkpoint_task_contract": None,
         }
 
     results: list[EpisodeResult] = []
@@ -1012,10 +1051,15 @@ def run_scenarios(
     checkpoint_action_contracts = [
         item.get("checkpoint_action_contract") for item in batch_metadata if item
     ]
+    checkpoint_task_contracts = [
+        item.get("checkpoint_task_contract") for item in batch_metadata if item
+    ]
     if len({repr(contract) for contract in checkpoint_contracts}) > 1:
         raise RuntimeError("Inconsistent checkpoint plant provenance across evaluation batches")
     if len({repr(contract) for contract in checkpoint_action_contracts}) > 1:
         raise RuntimeError("Inconsistent checkpoint action provenance across evaluation batches")
+    if len({repr(contract) for contract in checkpoint_task_contracts}) > 1:
+        raise RuntimeError("Inconsistent checkpoint task provenance across evaluation batches")
     return results, {
         "checkpoint_sha256": checkpoint_sha256(checkpoint),
         "batches": len(batch_metadata),
@@ -1024,5 +1068,8 @@ def run_scenarios(
         "checkpoint_plant_contract": checkpoint_contracts[0] if checkpoint_contracts else None,
         "checkpoint_action_contract": checkpoint_action_contracts[0]
         if checkpoint_action_contracts
+        else None,
+        "checkpoint_task_contract": checkpoint_task_contracts[0]
+        if checkpoint_task_contracts
         else None,
     }

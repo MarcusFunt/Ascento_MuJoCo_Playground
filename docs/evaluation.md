@@ -20,10 +20,12 @@ versioned, deterministic by default, and independent of training rewards.
 | Suite | Task | Intended use |
 | --- | --- | --- |
 | `balance_dev_v1` | Balance | Smaller development screen before a full gate |
+| `balance_dev_v2` | Balance | Current development screen; also rejects yaw drift and persistent spin |
 | `balance_gate_v1` | Balance | Original authoritative balance baseline |
 | `balance_gate_v2` | Balance | Legacy pre-plant-contract balance gate; retained for historical artifacts |
 | `balance_gate_v3` | Balance | Prior 65 Nm balance gate; retained for comparisons before world-target drift gating |
-| `balance_gate_v4` | Balance | Current world-target balance gate; adds a 120-second maximum target-error limit |
+| `balance_gate_v4` | Balance | Prior world-target balance gate; adds a 120-second maximum target-error limit |
+| `balance_gate_v5` | Balance | Current directional world-target gate; adds reset-heading and yaw-rate limits |
 | `velocity_gate_v1` | Velocity | Deterministic twist/height command timelines |
 | `recovery_gate_v1` | Recovery | Wide-reset recovery, strict success, time, and continuous hold |
 | `jump_gate_v1` | Jump | Takeoff, landing, recovered landing, distance, pre-impact speed, clearance, and hold |
@@ -39,7 +41,7 @@ managed run ID:
 
 ```bash
 ascento evaluate run --checkpoint logs/rsl_rl/.../model_2999.pt \
-  --suite balance_gate_v4 --batch-size 512 --device auto --render-clips
+  --suite balance_gate_v5 --batch-size 512 --device auto --render-clips
 
 ascento evaluate run --run-id <run-id> --suite recovery_gate_v1
 ```
@@ -51,7 +53,7 @@ Screen several checkpoints against one suite before the full review:
 
 ```bash
 ascento evaluate screen 'logs/rsl_rl/.../model_*.pt' \
-  --suite balance_dev_v1 --top 3
+  --suite balance_dev_v2 --top 3
 ```
 
 Compare completed evaluations only when their stored scenario identities and
@@ -85,7 +87,8 @@ collection.
 
 Examples of task metrics include:
 
-- balance: survival, recovery, tilt, planar speed, displacement, separately
+- balance: survival, recovery, tilt, planar speed, world-position and
+  reset-heading error, yaw rate, displacement, separately
   commanded/actuator-output/joint-applied effort, applied-effort saturation,
   recovery time, and leg symmetry;
 - velocity: survival plus velocity and height tracking error;
@@ -139,7 +142,7 @@ For a frame-by-frame diagnosis of one measured scenario, replay its stored ID:
 
 ```bash
 ascento tools replay-evaluation -- <evaluation-id> \
-  --scenario balance_gate_v4/disturbance/000000 --viewer native
+  --scenario balance_gate_v5/disturbance/000000 --viewer native
 ```
 
 The replay uses the stored resolved scenario. Restart it to return to that exact

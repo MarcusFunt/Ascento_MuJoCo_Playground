@@ -18,8 +18,10 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.wrappers import VideoRecorder
 
 import ascento_mjlab.tasks  # noqa: F401
-from ascento_mjlab.control_contract import current_action_contract, require_current_action_contract
+from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
+from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
+from ascento_mjlab.task_contract import current_task_contract_for_task
 
 
 def _jump_state_array(state: dict[str, torch.Tensor]) -> np.ndarray:
@@ -51,11 +53,17 @@ def _run_capture_steps(
     steps: int,
 ) -> tuple[int, bool]:
     """Run until the requested length or the first terminal/truncated step."""
-    obs, _ = env.reset()
-    for step in range(1, steps + 1):
-        obs, _, dones, _ = env.step(policy(obs))
-        if bool(torch.any(dones).item()):
-            return step, True
+    # The policy returned by RSL-RL is a plain actor module.  Unlike the
+    # evaluator policy wrapper, it does not necessarily disable autograd
+    # itself.  Capture must be inference-only: the target actuator uses
+    # persistent ``out=`` work buffers, which PyTorch correctly rejects when
+    # the action still participates in an autograd graph.
+    with torch.inference_mode():
+        obs, _ = env.reset()
+        for step in range(1, steps + 1):
+            obs, _, dones, _ = env.step(policy(obs))
+            if bool(torch.any(dones).item()):
+                return step, True
     return steps, False
 
 
@@ -192,8 +200,11 @@ def capture(
                     strict=True,
                     map_location=device,
                 )
-                require_current_action_contract(
-                    infos.get("action_contract") if isinstance(infos, dict) else None
+                # Play configs deliberately omit stochastic training events;
+                # checkpoint compatibility is against the canonical training
+                # task, not the viewer-specific presentation config.
+                require_current_checkpoint_contracts(
+                    infos, load_env_cfg(task, play=False)
                 )
                 policy = runner.get_inference_policy(device=device)
             captured_steps, ended_on_done = _run_capture_steps(env, policy, steps=steps)
@@ -212,6 +223,7 @@ def capture(
                     "physics_profile": PHYSICS_PROFILE.name,
                     "reward_schema": REWARD_SCHEMA_VERSION,
                     "action_contract": current_action_contract()["id"],
+                    "task_contract": current_task_contract_for_task(task)["topology_sha256"],
                     "captured_steps": str(captured_steps),
                     "ended_on_done": str(ended_on_done).lower(),
                 },

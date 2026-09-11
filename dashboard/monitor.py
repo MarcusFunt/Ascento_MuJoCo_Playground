@@ -25,6 +25,9 @@ LOG_METRIC_PATTERNS = {
     "Mean entropy loss": "Loss/entropy",
     "Mean kl loss": "Loss/kl",
     "Mean clip_fraction loss": "Loss/clip_fraction",
+    "Mean leg_target_offset_rms_rad loss": "Loss/leg_target_offset_rms_rad",
+    "Mean wheel_target_velocity_rms_rad_s loss": "Loss/wheel_target_velocity_rms_rad_s",
+    "Mean command_saturation_fraction loss": "Loss/command_saturation_fraction",
     "Mean reward": "Train/mean_reward",
     "Mean episode length": "Train/mean_episode_length",
 }

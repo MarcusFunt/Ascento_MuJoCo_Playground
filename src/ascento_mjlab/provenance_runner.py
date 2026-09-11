@@ -6,8 +6,10 @@ from typing import Any
 
 from mjlab.rl import MjlabOnPolicyRunner
 
-from .control_contract import current_action_contract, require_current_action_contract
+from .checkpoint_contract import require_current_checkpoint_contracts
+from .control_contract import current_action_contract
 from .plant_contract import current_plant_contract
+from .task_contract import current_task_contract
 
 
 class AscentoProvenanceRunner(MjlabOnPolicyRunner):
@@ -18,11 +20,12 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
             **(infos or {}),
             "plant_contract": current_plant_contract(),
             "action_contract": current_action_contract(),
+            "task_contract": current_task_contract(self.env.unwrapped.cfg),
         }
         super().save(path, infos=provenance)
 
     def load(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        """Refuse direct-effort checkpoints for resume, evaluation, or capture."""
+        """Refuse checkpoints whose plant, action, or task ABI no longer matches."""
         infos = super().load(*args, **kwargs)
-        require_current_action_contract(infos.get("action_contract") if isinstance(infos, dict) else None)
+        require_current_checkpoint_contracts(infos, self.env.unwrapped.cfg)
         return infos

@@ -20,8 +20,10 @@ The monitor surfaces:
   ETA, and freshness;
 - reward, episode length, PPO/surrogate loss, value loss, entropy, KL, and clip
   fraction when the trainer emits them;
-- advanced diagnostics such as effort RMS/mean, command saturation, recovery
-  success/time/hold, and shaping terms when compatible telemetry is emitted;
+- structured-target diagnostics (leg position-target RMS, wheel velocity-target
+  RMS, controller-request saturation), controller/actuator effort diagnostics,
+  recovery success/time/hold, and shaping terms when compatible telemetry is
+  emitted;
 - NaN/Inf, stale-run, recent-error, GPU, checkpoint, task, seed, command-line,
   and Git provenance data.
 
@@ -33,6 +35,9 @@ Interpretation rules:
 - PPO loss is an objective term, not a score to minimize visually.
 - A blank advanced-diagnostic card means the source record does not contain
   that metric. It is not equivalent to zero.
+- Target velocity is a command; controller-request torque is a PD/PI request;
+  measured actuator output is downstream physical behaviour. The dashboard
+  does not treat these as interchangeable direct-torque actions.
 - The chart endpoint samples oversized histories across the full run span; a
   short-looking segment can be a payload limit or missing telemetry, not
   necessarily a recent regression.
@@ -69,6 +74,16 @@ human-oriented endpoint list is:
 
 The REST API does not expose evaluator or capture mutation. Use the CLI or MCP
 for those operations so all artifact handling follows the same project contract.
+
+## Deliberately non-dashboard evidence
+
+The dashboard remains bounded live monitoring. It does not chart every
+per-episode evaluator result, capture state channel, contact trajectory,
+controller PI state, per-joint request/output signal, reward-term contribution,
+or full checkpoint/manifest object. Those are available through evaluation
+artifacts, capture NPZ files, exact replay, and the CLI/MCP report tools. See
+[the comparison's observability audit](wheeled-legged-lab-comparison.md#dashboard-observability-audit)
+for the source and access path for each category.
 
 ## Running it
 

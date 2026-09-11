@@ -8,6 +8,8 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from .events import world_target_yaw, wrapped_angle_difference, yaw_from_quaternion_wxyz
+
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
@@ -72,3 +74,20 @@ def root_speed(
 ) -> torch.Tensor:
     asset: Entity = env.scene[asset_cfg.name]
     return torch.linalg.vector_norm(asset.data.root_link_lin_vel_w, dim=1)
+
+
+def world_target_heading_error_radians(
+    env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
+) -> torch.Tensor:
+    """Absolute reset-relative world-heading error in radians."""
+    asset: Entity = env.scene[asset_cfg.name]
+    current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
+    return torch.abs(wrapped_angle_difference(world_target_yaw(env), current_yaw))
+
+
+def yaw_rate_radians_per_s(
+    env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
+) -> torch.Tensor:
+    """Absolute body-frame yaw rate in rad/s."""
+    asset: Entity = env.scene[asset_cfg.name]
+    return torch.abs(asset.data.root_link_ang_vel_b[:, 2])

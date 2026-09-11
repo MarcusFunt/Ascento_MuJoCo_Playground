@@ -19,8 +19,8 @@ def test_balance_env_is_six_target_flat_ground():
     assert cfg.scene.terrain.terrain_type == "plane"
     env = ManagerBasedRlEnv(cfg, device="cpu")
     obs, _ = env.reset()
-    assert obs["actor"].shape[-1] == 40
-    assert obs["critic"].shape[-1] == 49
+    assert obs["actor"].shape[-1] == 41
+    assert obs["critic"].shape[-1] == 50
     obs, reward, terminated, truncated, _ = env.step(torch.zeros((cfg.scene.num_envs, 6)))
     assert torch.isfinite(obs["actor"]).all()
     assert torch.isfinite(reward).all()
@@ -44,6 +44,8 @@ def test_balance_action_contract_maps_normalized_targets_and_penalizes_drift():
     )
     assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.05)
     assert cfg.rewards["world_target_proximity"].weight == pytest.approx(4.0)
+    assert cfg.rewards["world_target_heading"].weight == pytest.approx(1.0)
+    assert cfg.rewards["track_world_target_yaw_rate"].weight == pytest.approx(0.5)
     assert cfg.rewards["settled_balance"].weight == pytest.approx(1.0)
     assert cfg.rewards["leg_pose_symmetry"].weight == pytest.approx(-2.0)
     assert cfg.rewards["effort"].weight == pytest.approx(-0.8)
@@ -51,6 +53,7 @@ def test_balance_action_contract_maps_normalized_targets_and_penalizes_drift():
         PHYSICS_PROFILE.peak_effort_nm
     )
     assert "world_target_error" in cfg.observations["actor"].terms
+    assert "world_target_heading_error" in cfg.observations["actor"].terms
     assert "initialize_world_target" in cfg.events
     assert "balance_push" in cfg.events
 
@@ -87,7 +90,10 @@ def test_velocity_stage_has_no_reward_that_penalizes_its_commands():
     assert "height" not in cfg.rewards
     assert "planar_speed" not in cfg.rewards
     assert "world_target_proximity" not in cfg.rewards
+    assert "world_target_heading" not in cfg.rewards
+    assert "track_world_target_yaw_rate" not in cfg.rewards
     assert "world_target_error" not in cfg.observations["actor"].terms
+    assert "world_target_heading_error" not in cfg.observations["actor"].terms
     assert "settled_balance" not in cfg.rewards
     assert "leg_pose_symmetry" in cfg.rewards
     assert "balance_push" not in cfg.events
@@ -143,6 +149,8 @@ def test_jump_state_sync_is_first_and_base_rewards_are_phase_aware():
     assert "planar_speed" not in cfg.rewards
     assert cfg.rewards["lateral_speed"].func.__name__ == "lateral_speed_penalty"
     assert "world_target_proximity" not in cfg.rewards
+    assert "world_target_heading" not in cfg.rewards
+    assert "track_world_target_yaw_rate" not in cfg.rewards
     assert "settled_balance" not in cfg.rewards
     assert "leg_pose_symmetry" in cfg.rewards
     assert "balance_push" not in cfg.events

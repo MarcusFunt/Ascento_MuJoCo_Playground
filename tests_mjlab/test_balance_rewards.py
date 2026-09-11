@@ -4,13 +4,15 @@ import pytest
 import torch
 
 from ascento_mjlab.mdp.events import OneShotPlanarVelocityPush, initialize_world_target
-from ascento_mjlab.mdp.observations import world_target_error_body
+from ascento_mjlab.mdp.observations import world_target_error_body, world_target_heading_error
 from ascento_mjlab.mdp.rewards import (
     leg_pose_hold_penalty,
     leg_pose_symmetry_penalty,
-    world_target_proximity,
     settled_balance,
+    track_world_target_yaw_rate,
     upright,
+    world_target_heading,
+    world_target_proximity,
 )
 
 
@@ -41,6 +43,7 @@ def test_world_target_tracks_the_actual_supported_reset_position():
     assert torch.allclose(
         env.ascento_world_target_state["target_xy"], torch.tensor([[0.02, -0.01]])
     )
+    assert torch.allclose(env.ascento_world_target_state["target_yaw"], torch.zeros(1))
 
 
 def test_world_target_proximity_decays_with_absolute_world_drift():
@@ -68,6 +71,29 @@ def test_world_target_observation_is_yaw_invariant_but_target_is_world_framed():
     assert torch.allclose(
         world_target_error_body(env, asset_cfg), torch.tensor([[0.0, -1.0]]), atol=1.0e-6
     )
+
+
+def test_world_target_heading_is_reset_relative_wrapped_and_opposes_spin():
+    env = _env()
+    asset_cfg = SimpleNamespace(name="robot")
+    initialize_world_target(env)
+    env.scene["robot"].data.root_link_quat_w[0] = torch.tensor(
+        [2**-0.5, 0.0, 0.0, 2**-0.5]
+    )
+
+    assert torch.allclose(
+        world_target_heading_error(env, asset_cfg), torch.tensor([[-torch.pi / 2]]), atol=1.0e-6
+    )
+    assert world_target_heading(env, asset_cfg=asset_cfg).item() < 1.0e-6
+
+    # The reset target is zero yaw. A positive current yaw requires a negative
+    # target yaw rate; matching it earns more than remaining stationary.
+    env.scene["robot"].data.root_link_ang_vel_b[0, 2] = -0.60 * torch.pi / 2
+    tracking = track_world_target_yaw_rate(env, asset_cfg=asset_cfg)
+    env.scene["robot"].data.root_link_ang_vel_b[0, 2] = 0.60 * torch.pi / 2
+    spinning_away = track_world_target_yaw_rate(env, asset_cfg=asset_cfg)
+    assert tracking.item() > 0.99
+    assert spinning_away.item() < 1.0e-12
 
 
 def test_soft_leg_symmetry_penalty_distinguishes_a_persistent_knee_offset():
@@ -116,6 +142,15 @@ def test_settled_balance_requires_both_wheels_and_gate_quality_motion():
     assert settled_balance(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
     env.scene["right_wheel_contact"].data.found.zero_()
     assert settled_balance(env, asset_cfg=asset_cfg).item() == pytest.approx(0.0)
+
+
+def test_settled_balance_rejects_persistent_yaw_spin():
+    env = _env()
+    asset_cfg = SimpleNamespace(name="robot")
+    initialize_world_target(env)
+    env.scene["robot"].data.root_link_ang_vel_b[0, 2] = 0.5
+
+    assert settled_balance(env, asset_cfg=asset_cfg).item() < 0.02
 
 
 def test_signed_tilt_rewards_reject_an_inverted_robot():

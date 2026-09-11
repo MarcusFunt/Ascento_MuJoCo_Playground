@@ -16,6 +16,7 @@ from mjlab.tasks.registry import load_env_cfg
 
 from ascento_mjlab.control_contract import action_contracts_compatible, current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract, plant_contracts_compatible
+from ascento_mjlab.task_contract import current_task_contract_for_task, task_contracts_compatible
 
 from .consistency import check_collection
 from .gates import evaluate_gates
@@ -156,6 +157,7 @@ def _manifest(
         "decimation": decimation,
         "plant_contract": current_plant_contract(),
         "action_contract": current_action_contract(),
+        "task_contract": current_task_contract_for_task(suite.task),
         "packages": _package_versions(),
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "argv": sys.argv,
@@ -231,8 +233,10 @@ def evaluate(
     manifest["runtime"] = runtime
     checkpoint_contract = runtime.get("checkpoint_plant_contract")
     checkpoint_action_contract = runtime.get("checkpoint_action_contract")
+    checkpoint_task_contract = runtime.get("checkpoint_task_contract")
     manifest["checkpoint_plant_contract"] = checkpoint_contract
     manifest["checkpoint_action_contract"] = checkpoint_action_contract
+    manifest["checkpoint_task_contract"] = checkpoint_task_contract
     manifest["checkpoint_plant_compatibility"] = (
         "current"
         if plant_contracts_compatible(checkpoint_contract, current_plant_contract())
@@ -245,6 +249,15 @@ def evaluate(
         if action_contracts_compatible(checkpoint_action_contract, current_action_contract())
         else "legacy"
         if checkpoint_action_contract is None
+        else "incompatible"
+    )
+    manifest["checkpoint_task_compatibility"] = (
+        "current"
+        if task_contracts_compatible(
+            checkpoint_task_contract, current_task_contract_for_task(suite.task)
+        )
+        else "legacy"
+        if checkpoint_task_contract is None
         else "incompatible"
     )
     manifest["capabilities"] = sorted(capabilities)

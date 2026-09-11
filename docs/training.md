@@ -22,7 +22,7 @@ commands when the active environment is not already configured for it.
 
 | Stage | Task | Learns | Training-only conditions | Acceptance suite |
 | --- | --- | --- | --- | --- |
-| 1 | `Ascento-Balance-Flat` | Supported balance near a per-environment world target, controlled effort, recovery from planar pushes | Curriculum through 20, 60, 120, and 300 s; a cardinal push between 4–6 s | `balance_gate_v4` |
+| 1 | `Ascento-Balance-Flat` | Supported balance at a per-environment world position and heading target, controlled effort, recovery from planar pushes | Curriculum through 20, 60, 120, and 300 s; a cardinal push between 4–6 s | `balance_gate_v5` |
 | 2 | `Ascento-Velocity-Flat` | Linear velocity, yaw-rate, and height tracking | Random twist/height resampling every 3–6 s | `velocity_gate_v1` |
 | 3 | `Ascento-Recovery-Flat` | Wide-reset stabilization and recovery after a physical push | Broad initial roll/pitch/velocity envelope; interval push only during training | `recovery_gate_v1` |
 | 4 | `Ascento-Jump-Flat` | Commanded crouch, takeoff, flight, landing, distance, and post-landing stabilization | Flat-ground compound motion command | `jump_gate_v1` |
@@ -112,13 +112,16 @@ Balance tuning can be explored with these explicit environment variables:
 - `ASCENTO_BALANCE_PUSH_INTERVAL_MIN_S`; and
 - `ASCENTO_BALANCE_PUSH_INTERVAL_MAX_S`.
 
-Balance initializes a separate absolute XY target for every cloned environment
-at its supported reset pose. The actor receives the target error in its yaw
-frame, while the reward measures world-frame distance. This permits the wheels
-to move whenever doing so reduces true target error or prevents a fall; only a
-small instantaneous speed regularizer remains alongside action-rate and
-physical-effort penalties. Future navigation may advance the same world target
-through a gate sequence without changing the observation or reward interface.
+Balance initializes a separate absolute XY and world-yaw target for every
+cloned environment at its supported reset pose. The actor receives the position
+error in its yaw frame and a wrapped target-heading error, while rewards
+measure world-frame position and heading. A bounded proportional heading servo
+defines the corrective yaw-rate direction. This permits the wheels to move
+whenever doing so reduces true target error or prevents a fall, but makes
+stationary spinning unproductive; only a small instantaneous-speed regularizer
+remains alongside action-rate and physical-effort penalties. Future navigation
+may advance the same directional world target through a gate sequence without
+changing the observation or reward interface.
 
 Record any non-default values in the run notes/tags and experiment manifest
 metadata. Do not promote a policy based on an override whose effect was not
@@ -170,7 +173,7 @@ when it fails.
 
 For balance, screen candidate checkpoints—including
 `model_best_long_horizon.pt` when it exists—on the development suite first,
-then use `balance_gate_v4` for the final decision. The curriculum writes that
+then use `balance_gate_v5` for the final decision. The curriculum writes that
 checkpoint after its first qualifying 300-second window and replaces it only
 with a better qualifying window. At 300 seconds, PPO uses a fixed `1e-5`
 learning rate to protect an already-stable controller from adaptive-rate
@@ -178,8 +181,8 @@ regression. The best-horizon checkpoint is a candidate, not a pass.
 
 ```bash
 ascento evaluate screen 'logs/rsl_rl/ascento_balance/<run>/model_*.pt' \
-  --suite balance_dev_v1 --top 3
-ascento evaluate run --checkpoint <selected-checkpoint> --suite balance_gate_v4
+  --suite balance_dev_v2 --top 3
+ascento evaluate run --checkpoint <selected-checkpoint> --suite balance_gate_v5
 ```
 
 Use a new managed run for a material change in rewards, curriculum, seed,

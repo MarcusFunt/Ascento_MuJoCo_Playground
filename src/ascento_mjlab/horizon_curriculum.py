@@ -212,7 +212,7 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
             "timeout_fraction": timeout_fraction,
             "stable_windows": self._top_horizon_success_windows,
             "learning_iteration": self.current_learning_iteration,
-            "selection": "requires deterministic balance_gate_v4 evaluation",
+            "selection": "requires deterministic balance_gate_v5 evaluation",
         }
         self.save(str(temporary_checkpoint), infos={"long_horizon_candidate": details})
         os.replace(temporary_checkpoint, checkpoint)

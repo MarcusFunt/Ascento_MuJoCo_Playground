@@ -75,6 +75,14 @@ Rewards guide learning; they are not the pass/fail contract. The deterministic
 evaluation suites independently calculate task and physical metrics, then apply
 their versioned gates.
 
+Balance latches a directional SE(2) target at each supported reset: absolute
+world XY plus the sampled world yaw. It exposes target position in the current
+yaw frame and a wrapped target-minus-current heading error. The heading reward
+is paired with a bounded proportional heading-to-yaw-rate objective, so yaw
+randomization remains valid while stationary rotation is neither rewarded nor
+unmeasured. Velocity, recovery, and jump remove these balance-only terms before
+adding their own motion commands.
+
 ## Task topology
 
 All current tasks are flat-ground tasks and share the same base plant:

@@ -74,3 +74,24 @@ def test_capture_rollout_stops_at_first_done_state():
     assert captured_steps == 2
     assert ended_on_done is True
     assert env.steps == 2
+
+
+def test_capture_rollout_disables_autograd_for_policy_and_environment_steps():
+    class FakeEnv:
+        def reset(self):
+            assert torch.is_inference_mode_enabled()
+            return torch.zeros((1, 1)), {}
+
+        def step(self, action):
+            assert torch.is_inference_mode_enabled()
+            assert action.requires_grad is False
+            return torch.zeros((1, 1)), torch.zeros(1), torch.tensor([True]), {}
+
+    def policy(obs):
+        assert torch.is_inference_mode_enabled()
+        return torch.ones((len(obs), 6), requires_grad=torch.is_grad_enabled())
+
+    captured_steps, ended_on_done = _run_capture_steps(FakeEnv(), policy, steps=1)
+
+    assert captured_steps == 1
+    assert ended_on_done is True

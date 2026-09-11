@@ -46,11 +46,17 @@ def ascento_velocity_env_cfg(play: bool = False, num_envs: int = 512):
     cfg.rewards.pop("height", None)
     cfg.rewards.pop("planar_speed", None)
     cfg.rewards.pop("world_target_proximity", None)
+    cfg.rewards.pop("world_target_heading", None)
+    cfg.rewards.pop("track_world_target_yaw_rate", None)
     cfg.rewards.pop("settled_balance", None)
     cfg.events.pop("balance_push", None)
     cfg.events.pop("initialize_world_target", None)
     cfg.observations["actor"].terms.pop("world_target_error", None)
     cfg.observations["critic"].terms.pop("world_target_error", None)
+    cfg.observations["actor"].terms.pop("world_target_heading_error", None)
+    cfg.observations["critic"].terms.pop("world_target_heading_error", None)
+    cfg.metrics.pop("world_target_heading_error_radians", None)
+    cfg.metrics.pop("yaw_rate_radians_per_s", None)
     cfg.rewards["track_linear_velocity"] = RewardTermCfg(
         func=ascento_mdp.rewards.track_linear_velocity_xy,
         weight=1.5,
@@ -66,4 +72,5 @@ def ascento_velocity_env_cfg(play: bool = False, num_envs: int = 512):
         weight=1.0,
         params={"command_name": "height", "std": 0.05},
     )
+    cfg.task_id = "Ascento-Velocity-Flat"
     return cfg

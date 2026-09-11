@@ -16,8 +16,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
 from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract
+from ascento_mjlab.task_contract import current_task_contract_for_task
 from dashboard.config import REPO_ROOT, load_config
 
 TRAINING_RUNTIME_RE = re.compile(
@@ -129,12 +131,28 @@ def _training_arg(training_args: list[str], *names: str) -> str | None:
     return value
 
 
+def _validate_parent_checkpoint(checkpoint: Path, task: str) -> None:
+    """Reject an incompatible managed resume before starting a trainer process."""
+    import torch
+    from mjlab.tasks.registry import load_env_cfg
+
+    import ascento_mjlab.tasks  # noqa: F401
+
+    try:
+        payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ValueError(f"cannot read parent checkpoint contracts: {checkpoint}: {error}") from error
+    infos = payload.get("infos") if isinstance(payload, dict) else None
+    require_current_checkpoint_contracts(infos, load_env_cfg(task, play=False))
+
+
 def _prepare_parent_resume_link(
     run_dir: Path,
     *,
     parent_checkpoint: str | None,
     training_args: list[str],
     stage: str,
+    task: str,
 ) -> None:
     """Make an inherited checkpoint visible to mjlab before it starts.
 
@@ -163,6 +181,8 @@ def _prepare_parent_resume_link(
             "parent checkpoint must be inside the matching managed experiment "
             f"directory {expected_experiment!r}: {checkpoint}"
         )
+
+    _validate_parent_checkpoint(checkpoint, task)
 
     link = run_dir / expected_experiment / "_resume_parent"
     link.parent.mkdir(parents=True, exist_ok=True)
@@ -318,9 +338,11 @@ def _write_experiment_manifest(
             "sha256": None,
             "plant_contract": current_plant_contract(),
             "action_contract": current_action_contract(),
+            "task_contract": current_task_contract_for_task(task),
         },
         "plant_contract": current_plant_contract(),
         "action_contract": current_action_contract(),
+        "task_contract": current_task_contract_for_task(task),
         "evaluation": {"suite": None, "result": None},
         "run_directory": str(run_dir),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -343,6 +365,7 @@ def _finalize_experiment_manifest(path: Path, run_dir: Path) -> None:
             "sha256": _file_sha256(checkpoint_path),
             "plant_contract": manifest.get("plant_contract"),
             "action_contract": manifest.get("action_contract"),
+            "task_contract": manifest.get("task_contract"),
         }
     write_metadata(path, **manifest)
 
@@ -435,6 +458,7 @@ def main() -> int:
             parent_checkpoint=args.parent_checkpoint,
             training_args=training_args,
             stage=stage,
+            task=args.task,
         )
     except ValueError as error:
         parser.error(str(error))

@@ -67,10 +67,12 @@
       "rl_config": "src/ascento_mjlab/tasks/balance/rl_cfg.py",
       "evaluation_suites": [
         "balance_dev_v1",
+        "balance_dev_v2",
         "balance_gate_v1",
         "balance_gate_v2",
         "balance_gate_v3",
-        "balance_gate_v4"
+        "balance_gate_v4",
+        "balance_gate_v5"
       ],
       "runner": "HorizonCurriculumRunner"
     },
@@ -126,6 +128,14 @@
         "gate_count": 6
       },
       {
+        "id": "balance_dev_v2",
+        "task": "Ascento-Balance-Flat",
+        "policy_mode": "deterministic",
+        "scenario_count": 896,
+        "family_count": 5,
+        "gate_count": 8
+      },
+      {
         "id": "balance_gate_v1",
         "task": "Ascento-Balance-Flat",
         "policy_mode": "deterministic",
@@ -156,6 +166,14 @@
         "scenario_count": 3840,
         "family_count": 6,
         "gate_count": 16
+      },
+      {
+        "id": "balance_gate_v5",
+        "task": "Ascento-Balance-Flat",
+        "policy_mode": "deterministic",
+        "scenario_count": 3840,
+        "family_count": 6,
+        "gate_count": 19
       },
       {
         "id": "velocity_gate_v1",

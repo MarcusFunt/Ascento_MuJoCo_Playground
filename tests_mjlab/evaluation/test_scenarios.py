@@ -74,6 +74,33 @@ def test_balance_gate_v4_rejects_long_horizon_world_target_drift():
     }
 
 
+def test_balance_gate_v5_rejects_heading_drift_and_persistent_spin():
+    suite = load_suite(Path("benchmarks/suites/balance_gate_v5.toml"))
+
+    assert suite.suite_id == "balance_gate_v5"
+    assert {
+        (gate.gate_id, gate.family, gate.metric, gate.statistic, gate.threshold)
+        for gate in suite.gates
+    } >= {
+        (
+            "long_endurance_p95_max_heading_error",
+            "long_endurance",
+            "max_heading_error",
+            "p95",
+            0.35,
+        ),
+        ("nominal_p95_heading_error_rms", "nominal", "heading_error_rms", "p95", 0.15),
+        ("nominal_p95_yaw_rate_rms", "nominal", "yaw_rate_rms", "p95", 0.15),
+    }
+
+
+def test_balance_dev_v2_includes_fast_heading_screen():
+    suite = load_suite(Path("benchmarks/suites/balance_dev_v2.toml"))
+
+    assert suite.suite_id == "balance_dev_v2"
+    assert {gate.metric for gate in suite.gates} >= {"heading_error_rms", "yaw_rate_rms"}
+
+
 def test_specialist_suites_cover_binary_hold_and_shaping_metrics():
     recovery = load_suite(Path("benchmarks/suites/recovery_gate_v1.toml"))
     jump = load_suite(Path("benchmarks/suites/jump_gate_v1.toml"))

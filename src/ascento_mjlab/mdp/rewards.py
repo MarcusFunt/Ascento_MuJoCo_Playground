@@ -12,7 +12,12 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from ascento_mjlab.geometry import projected_gravity_tilt
 from ascento_mjlab.physics import PHYSICS_PROFILE
 
-from .events import world_target_xy
+from .events import (
+    world_target_xy,
+    world_target_yaw,
+    wrapped_angle_difference,
+    yaw_from_quaternion_wxyz,
+)
 from .metrics import controller_requested_effort
 
 if TYPE_CHECKING:
@@ -94,6 +99,52 @@ def world_target_proximity(
     return torch.exp(-torch.sum(torch.square(error), dim=1) / (std * std))
 
 
+def world_target_heading(
+    env: ManagerBasedRlEnv,
+    std: float = 0.35,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Reward holding the reset-relative world-frame heading target."""
+    if std <= 0.0:
+        raise ValueError("std must be positive")
+    asset: Entity = env.scene[asset_cfg.name]
+    current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
+    error = wrapped_angle_difference(world_target_yaw(env), current_yaw)
+    # Yaw is ill-defined once the robot has fallen. Keep this dense objective
+    # focused on supported balancing, as in the position target objective.
+    upright_factor = torch.clamp(-asset.data.projected_gravity_b[:, 2], min=0.0, max=1.0)
+    return torch.exp(-torch.square(error) / (std * std)) * upright_factor
+
+
+def track_world_target_yaw_rate(
+    env: ManagerBasedRlEnv,
+    std: float = 0.25,
+    heading_control_stiffness: float = 0.60,
+    max_target_rate: float = 1.0,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Track a bounded yaw-rate target derived from reset-heading error.
+
+    This is a small outer heading servo, not a controller-contract change. It
+    gives the policy the correct sign while it is returning to target heading,
+    and commands zero yaw rate exactly at target so a persistent spin cannot
+    be a reward-neutral balance strategy.
+    """
+    if std <= 0.0 or heading_control_stiffness <= 0.0 or max_target_rate <= 0.0:
+        raise ValueError("yaw-rate tracking parameters must be positive")
+    asset: Entity = env.scene[asset_cfg.name]
+    current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
+    heading_error = wrapped_angle_difference(world_target_yaw(env), current_yaw)
+    target_rate = torch.clamp(
+        heading_control_stiffness * heading_error,
+        min=-max_target_rate,
+        max=max_target_rate,
+    )
+    rate_error = asset.data.root_link_ang_vel_b[:, 2] - target_rate
+    upright_factor = torch.clamp(-asset.data.projected_gravity_b[:, 2], min=0.0, max=1.0)
+    return torch.exp(-torch.square(rate_error) / (std * std)) * upright_factor
+
+
 def leg_pose_symmetry_penalty(
     env: ManagerBasedRlEnv,
     beta: float = 0.15,
@@ -158,7 +209,11 @@ def settled_balance(
     asset: Entity = env.scene[asset_cfg.name]
     tilt_sq = torch.square(projected_gravity_tilt(asset.data.projected_gravity_b))
     planar_speed_sq = torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=1)
-    angular_speed_sq = torch.sum(torch.square(asset.data.root_link_ang_vel_b[:, :2]), dim=1)
+    angular_speed_sq = torch.sum(torch.square(asset.data.root_link_ang_vel_b), dim=1)
+    current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
+    heading_error_sq = torch.square(
+        wrapped_angle_difference(world_target_yaw(env), current_yaw)
+    )
     height_error_sq = torch.square(asset.data.root_link_pos_w[:, 2] - 0.75)
     left = env.scene["left_wheel_contact"].data.found
     right = env.scene["right_wheel_contact"].data.found
@@ -167,6 +222,7 @@ def settled_balance(
     score = torch.exp(-tilt_sq / 0.08**2)
     score *= torch.exp(-planar_speed_sq / 0.10**2)
     score *= torch.exp(-angular_speed_sq / 0.25**2)
+    score *= torch.exp(-heading_error_sq / 0.35**2)
     score *= torch.exp(-height_error_sq / 0.05**2)
     return score * supported.float()
 

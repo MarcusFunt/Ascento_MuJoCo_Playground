@@ -20,6 +20,39 @@ def _resolved_env_ids(env, env_ids: torch.Tensor | slice | None) -> torch.Tensor
     return env_ids.reshape(-1).to(dtype=torch.long, device=env.device)
 
 
+def yaw_from_quaternion_wxyz(quaternion_wxyz: torch.Tensor) -> torch.Tensor:
+    """Return the world-frame yaw for WXYZ quaternions.
+
+    Balance targets intentionally retain the yaw that was sampled at reset, so
+    an arbitrary world heading remains valid without making rotation free.
+    """
+    w, x, y, z = quaternion_wxyz.unbind(dim=-1)
+    return torch.atan2(
+        2.0 * (w * z + x * y),
+        1.0 - 2.0 * (y.square() + z.square()),
+    )
+
+
+def wrapped_angle_difference(target: torch.Tensor, current: torch.Tensor) -> torch.Tensor:
+    """Return ``target - current`` wrapped to the closed yaw principal branch."""
+    difference = target - current
+    return torch.atan2(torch.sin(difference), torch.cos(difference))
+
+
+def _world_target_state(env, *, asset_name: str = "robot") -> dict[str, torch.Tensor]:
+    """Return initialized position-and-heading target state for every world."""
+    asset = env.scene[asset_name]
+    state = getattr(env, "ascento_world_target_state", None)
+    if state is None:
+        state = {}
+        env.ascento_world_target_state = state
+    if "target_xy" not in state:
+        state["target_xy"] = asset.data.root_link_pos_w[:, :2].clone()
+    if "target_yaw" not in state:
+        state["target_yaw"] = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w).clone()
+    return state
+
+
 def flat_ground_wheel_bottom_heights(
     env,
     *,
@@ -159,24 +192,23 @@ def initialize_world_target(
     *,
     asset_name: str = "robot",
 ) -> None:
-    """Set each reset slot's world-frame XY target to its supported root pose.
+    """Set each reset slot's world-frame position and heading targets.
 
     The balance task randomizes its initial XY position slightly.  Tracking the
     actual post-reset position, rather than an environment-grid origin, keeps the
-    target free of reset-dependent bias. This is deliberately general state:
-    navigation can later replace ``target_xy`` with the next world-frame gate
-    without changing observations or rewards.
+    target free of reset-dependent bias. The matching reset yaw is retained as
+    a heading target: a balance policy must not spin while holding position,
+    yet each yaw-randomized reset remains equally valid. Navigation can later
+    replace both targets with the next directional world-frame gate without
+    changing observations or rewards.
     """
     ids = _resolved_env_ids(env, env_ids)
     if ids.numel() == 0:
         return
-    if not hasattr(env, "ascento_world_target_state"):
-        env.ascento_world_target_state = {
-            "target_xy": torch.zeros((env.num_envs, 2), dtype=torch.float32, device=env.device)
-        }
-    target_xy = env.ascento_world_target_state["target_xy"]
     asset = env.scene[asset_name]
-    target_xy[ids] = asset.data.root_link_pos_w[ids, :2]
+    state = _world_target_state(env, asset_name=asset_name)
+    state["target_xy"][ids] = asset.data.root_link_pos_w[ids, :2]
+    state["target_yaw"][ids] = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[ids])
 
 
 def world_target_xy(env) -> torch.Tensor:
@@ -187,11 +219,12 @@ def world_target_xy(env) -> torch.Tensor:
     an initial observation are finite; the reset event replaces it with the
     exact supported pose before the first rollout step.
     """
-    if not hasattr(env, "ascento_world_target_state"):
-        env.ascento_world_target_state = {
-            "target_xy": env.scene["robot"].data.root_link_pos_w[:, :2].clone()
-        }
-    return env.ascento_world_target_state["target_xy"]
+    return _world_target_state(env)["target_xy"]
+
+
+def world_target_yaw(env) -> torch.Tensor:
+    """Return the reset-relative world-frame heading target for each environment."""
+    return _world_target_state(env)["target_yaw"]
 
 
 class OneShotPlanarVelocityPush:
@@ -252,5 +285,8 @@ __all__ = [
     "reset_to_default_supported",
     "reset_root_state_supported",
     "reset_root_state_uniform",
+    "wrapped_angle_difference",
     "world_target_xy",
+    "world_target_yaw",
+    "yaw_from_quaternion_wxyz",
 ]

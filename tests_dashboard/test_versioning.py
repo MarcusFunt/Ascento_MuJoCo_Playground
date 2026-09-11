@@ -2,11 +2,14 @@ import json
 
 from dashboard.versioning import (
     classify_run_plant_contract,
+    classify_run_task_contract,
     classify_run_version,
     current_repository_version,
     run_repository_provenance,
 )
 from scripts.stamp_run_provenance import stamp_missing_runs
+
+from ascento_mjlab.task_contract import current_task_contract_for_task
 
 
 def _set_current(monkeypatch, commit="newcommit", branch="main"):
@@ -37,6 +40,21 @@ def test_runs_without_a_plant_contract_are_legacy(tmp_path):
 
     assert result["status"] == "legacy"
     assert result["is_compatible"] is False
+
+
+def test_current_task_contract_is_classified_independently_of_git(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    contract = current_task_contract_for_task("Ascento-Balance-Flat")
+    (run / "experiment_manifest.json").write_text(
+        json.dumps({"task": "Ascento-Balance-Flat", "task_contract": contract}),
+        encoding="utf-8",
+    )
+
+    result = classify_run_task_contract(run, tmp_path)
+
+    assert result["status"] == "current"
+    assert result["is_compatible"] is True
 
 
 def test_same_branch_mismatch_is_flagged_outdated(monkeypatch, tmp_path):

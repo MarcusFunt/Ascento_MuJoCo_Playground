@@ -417,6 +417,9 @@ function RunsPage() {
                 <div><span>Horizon windows</span><strong>{fmtNumber(detail.run_info?.horizon_qualified_windows, 0)} qualified / {fmtNumber(detail.run_info?.horizon_failed_windows, 0)} failed</strong></div>
                 <div><span>Final-phase windows</span><strong>{fmtNumber(detail.run_info?.horizon_top_windows, 0)} stable / {fmtNumber(detail.run_info?.horizon_stage_windows, 0)} at stage</strong></div>
                 <div><span>Last horizon transition</span><strong>{detail.run_info?.horizon_transition || '—'}</strong></div>
+                <div><span>Task topology ABI</span><strong>{detail.task_contract?.status || 'legacy'}</strong></div>
+                <div><span>Action-controller ABI</span><strong>{detail.action_contract?.status || 'legacy'}</strong></div>
+                <div><span>Plant ABI</span><strong>{detail.plant_contract?.status || 'legacy'}</strong></div>
               </div>
               {detail.run_info?.long_horizon_candidate_checkpoint && <p className="runs-hint">Long-horizon candidate: <code>{detail.run_info.long_horizon_candidate_checkpoint}</code>. Evaluate it deterministically with balance_gate_v2 before selecting it.</p>}
               {detail.run_info?.command && <details className="runs-command"><summary>Training arguments and launch command</summary><pre>{Array.isArray(detail.run_info.command) ? detail.run_info.command.join('\n') : detail.run_info.command}</pre></details>}
