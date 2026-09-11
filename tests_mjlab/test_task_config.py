@@ -19,8 +19,8 @@ def test_balance_env_is_six_target_flat_ground():
     assert cfg.scene.terrain.terrain_type == "plane"
     env = ManagerBasedRlEnv(cfg, device="cpu")
     obs, _ = env.reset()
-    assert obs["actor"].shape[-1] == 38
-    assert obs["critic"].shape[-1] == 47
+    assert obs["actor"].shape[-1] == 40
+    assert obs["critic"].shape[-1] == 49
     obs, reward, terminated, truncated, _ = env.step(torch.zeros((cfg.scene.num_envs, 6)))
     assert torch.isfinite(obs["actor"]).all()
     assert torch.isfinite(reward).all()
@@ -42,16 +42,16 @@ def test_balance_action_contract_maps_normalized_targets_and_penalizes_drift():
         "right_knee",
         "right_wheel_joint",
     )
-    assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.2)
-    assert cfg.rewards["position_hold"].weight == pytest.approx(4.0)
+    assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.05)
+    assert cfg.rewards["world_target_proximity"].weight == pytest.approx(4.0)
     assert cfg.rewards["settled_balance"].weight == pytest.approx(1.0)
     assert cfg.rewards["leg_pose_symmetry"].weight == pytest.approx(-2.0)
     assert cfg.rewards["effort"].weight == pytest.approx(-0.8)
     assert cfg.rewards["effort"].params["peak_effort_nm"] == pytest.approx(
         PHYSICS_PROFILE.peak_effort_nm
     )
-    assert "wheel_target_magnitude" not in cfg.rewards
-    assert "initialize_balance_origin" in cfg.events
+    assert "world_target_error" in cfg.observations["actor"].terms
+    assert "initialize_world_target" in cfg.events
     assert "balance_push" in cfg.events
 
     env = ManagerBasedRlEnv(cfg, device="cpu")
@@ -84,7 +84,8 @@ def test_velocity_stage_has_no_reward_that_penalizes_its_commands():
     assert set(cfg.commands) == {"twist", "height"}
     assert "height" not in cfg.rewards
     assert "planar_speed" not in cfg.rewards
-    assert "position_hold" not in cfg.rewards
+    assert "world_target_proximity" not in cfg.rewards
+    assert "world_target_error" not in cfg.observations["actor"].terms
     assert "settled_balance" not in cfg.rewards
     assert "leg_pose_symmetry" in cfg.rewards
     assert "balance_push" not in cfg.events
@@ -139,7 +140,7 @@ def test_jump_state_sync_is_first_and_base_rewards_are_phase_aware():
     assert cfg.rewards["angular_rate"].func.__name__ == "jump_angular_rate_penalty"
     assert "planar_speed" not in cfg.rewards
     assert cfg.rewards["lateral_speed"].func.__name__ == "lateral_speed_penalty"
-    assert "position_hold" not in cfg.rewards
+    assert "world_target_proximity" not in cfg.rewards
     assert "settled_balance" not in cfg.rewards
     assert "leg_pose_symmetry" in cfg.rewards
     assert "balance_push" not in cfg.events
@@ -166,11 +167,9 @@ def test_dense_specialist_shaping_can_be_disabled_for_ablation(monkeypatch):
 def test_balance_experiment_overrides_change_reward_weights(monkeypatch):
     monkeypatch.setenv("ASCENTO_BALANCE_DRIFT_PENALTY_SCALE", "2.5")
     monkeypatch.setenv("ASCENTO_BALANCE_STABILIZATION_WEIGHT", "1.75")
-    monkeypatch.setenv("ASCENTO_BALANCE_WHEEL_TARGET_PENALTY_WEIGHT", "0.125")
     cfg = ascento_balance_env_cfg()
-    assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.5)
+    assert cfg.rewards["planar_speed"].weight == pytest.approx(-0.125)
     assert cfg.rewards["settled_balance"].weight == pytest.approx(1.75)
-    assert cfg.rewards["wheel_target_magnitude"].weight == pytest.approx(-0.125)
 
 
 def test_jump_observation_contains_phase_and_remaining_distance():
@@ -179,7 +178,7 @@ def test_jump_observation_contains_phase_and_remaining_distance():
     env = ManagerBasedRlEnv(cfg, device="cpu")
     try:
         obs, _ = env.reset()
-        # Balance actor (38) + motion command (6) + jump state (6).
+        # Balance actor (38 after removing its target term) + motion command (6) + jump state (6).
         assert obs["actor"].shape[-1] == 50
     finally:
         env.close()

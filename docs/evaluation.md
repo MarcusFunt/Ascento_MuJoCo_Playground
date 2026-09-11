@@ -22,7 +22,8 @@ versioned, deterministic by default, and independent of training rewards.
 | `balance_dev_v1` | Balance | Smaller development screen before a full gate |
 | `balance_gate_v1` | Balance | Original authoritative balance baseline |
 | `balance_gate_v2` | Balance | Legacy pre-plant-contract balance gate; retained for historical artifacts |
-| `balance_gate_v3` | Balance | Current 65 Nm balance gate; adds symmetry checks and gates applied joint-space effort |
+| `balance_gate_v3` | Balance | Prior 65 Nm balance gate; retained for comparisons before world-target drift gating |
+| `balance_gate_v4` | Balance | Current world-target balance gate; adds a 120-second maximum target-error limit |
 | `velocity_gate_v1` | Velocity | Deterministic twist/height command timelines |
 | `recovery_gate_v1` | Recovery | Wide-reset recovery, strict success, time, and continuous hold |
 | `jump_gate_v1` | Jump | Takeoff, landing, recovered landing, distance, pre-impact speed, clearance, and hold |
@@ -38,7 +39,7 @@ managed run ID:
 
 ```bash
 ascento evaluate run --checkpoint logs/rsl_rl/.../model_2999.pt \
-  --suite balance_gate_v3 --batch-size 512 --device auto --render-clips
+  --suite balance_gate_v4 --batch-size 512 --device auto --render-clips
 
 ascento evaluate run --run-id <run-id> --suite recovery_gate_v1
 ```
@@ -138,7 +139,7 @@ For a frame-by-frame diagnosis of one measured scenario, replay its stored ID:
 
 ```bash
 ascento tools replay-evaluation -- <evaluation-id> \
-  --scenario balance_gate_v3/disturbance/000000 --viewer native
+  --scenario balance_gate_v4/disturbance/000000 --viewer native
 ```
 
 The replay uses the stored resolved scenario. Restart it to return to that exact

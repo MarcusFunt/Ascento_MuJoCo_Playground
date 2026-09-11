@@ -38,8 +38,10 @@ Result states:
   disturbances, and 60-second endurance.
 - `balance_gate_v2`: legacy pre-plant-contract balance gate, retained for
   historical evidence only.
-- `balance_gate_v3`: current 65 Nm plant gate with nominal mirrored-joint
+- `balance_gate_v3`: prior 65 Nm plant gate with nominal mirrored-joint
   mismatch checks and authoritative joint-space effort diagnostics.
+- `balance_gate_v4`: current world-target balance gate; it additionally caps
+  maximum 120-second target error so survival alone cannot hide drift.
 - `velocity_gate_v1`: deterministic command-timeline tracking benchmark.
 - `recovery_gate_v1`: wide-reset recovery benchmark using the canonical
   `RecoveryEnvelope` fields plus continuous stable duration.
@@ -65,7 +67,7 @@ ascento-evaluate-checkpoints 'logs/rsl_rl/.../model_*.pt' \
 ```
 
 For a balance run, include `model_best_long_horizon.pt` in the development
-screen, then run `balance_gate_v3` on the selected checkpoint. The curriculum
+screen, then run `balance_gate_v4` on the selected checkpoint. The curriculum
 retains this file after sustained 300-second training survival, but it is only a
 candidate until the deterministic gate passes.
 

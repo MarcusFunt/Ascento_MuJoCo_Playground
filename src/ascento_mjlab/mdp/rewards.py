@@ -12,6 +12,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from ascento_mjlab.geometry import projected_gravity_tilt
 from ascento_mjlab.physics import PHYSICS_PROFILE
 
+from .events import world_target_xy
 from .metrics import controller_requested_effort
 
 if TYPE_CHECKING:
@@ -80,19 +81,17 @@ def planar_speed_penalty(
     return torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=1)
 
 
-def position_hold(
+def world_target_proximity(
     env: ManagerBasedRlEnv,
-    std: float = 0.50,
+    std: float = 0.35,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """Reward remaining near the actual supported reset position in balance."""
-    if not hasattr(env, "ascento_balance_state"):
-        raise RuntimeError("balance origin must be initialized before position_hold")
+    """Reward staying near the current per-environment world-frame target."""
     if std <= 0.0:
         raise ValueError("std must be positive")
     asset: Entity = env.scene[asset_cfg.name]
-    displacement = asset.data.root_link_pos_w[:, :2] - env.ascento_balance_state["origin_xy"]
-    return torch.exp(-torch.sum(torch.square(displacement), dim=1) / (std * std))
+    error = asset.data.root_link_pos_w[:, :2] - world_target_xy(env)
+    return torch.exp(-torch.sum(torch.square(error), dim=1) / (std * std))
 
 
 def leg_pose_symmetry_penalty(
@@ -216,23 +215,6 @@ def action_rate_penalty(env: ManagerBasedRlEnv, reference_dt: float = 0.01) -> t
     delta = env.action_manager.action - env.action_manager.prev_action
     scaled_delta = delta * (reference_dt / float(env.step_dt))
     return torch.mean(torch.square(scaled_delta), dim=1)
-
-
-def wheel_target_magnitude_penalty(
-    env: ManagerBasedRlEnv,
-    wheel_action_indices: tuple[int, int] = (2, 5),
-) -> torch.Tensor:
-    """Penalize sustained normalized wheel-velocity targets.
-
-    Unlike ``action_rate_penalty``, this regularizer charges a constant wheel
-    command.  It is intended for balance-foundation ablations where drift from
-    a persistent high velocity target is more harmful than rapid changes alone.
-    The value is normalized and does not alter the public action/controller ABI.
-    """
-    action = env.action_manager.action
-    if action.ndim != 2 or action.shape[1] <= max(wheel_action_indices):
-        raise ValueError("wheel target magnitude requires the six-channel structured action")
-    return torch.mean(torch.square(action[:, wheel_action_indices]), dim=1)
 
 
 def track_velocity(

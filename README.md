@@ -202,7 +202,7 @@ clips, and specialist tools:
 ```bash
 uv run --extra cu128 --extra dashboard ascento evaluate suites
 uv run --extra cu128 --extra dashboard ascento evaluate run \
-  --run-id <run-id> --suite balance_gate_v3 --render-clips
+  --run-id <run-id> --suite balance_gate_v4 --render-clips
 uv run --extra dashboard ascento evaluate list
 uv run --extra dashboard ascento evaluate report <evaluation-id>
 uv run --extra dashboard ascento evaluate archive <evaluation-id>
@@ -295,7 +295,7 @@ velocity curriculum progresses through 20, 60, 120, and 300 seconds. It protects
 the final 300-second phase from stochastic training-rollout demotions and writes
 `model_best_long_horizon.pt` after sustained top-stage survival. That file is a
 candidate, not a passing result: screen it and regular checkpoints with the
-deterministic `balance_gate_v3` suite before selecting a model. Pre-contract policy
+deterministic `balance_gate_v4` suite before selecting a model. Pre-contract policy
 behavior is a diagnostic reference only, never the acceptance target.
 
 ## Tasks and sequencing

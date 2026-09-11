@@ -3,11 +3,12 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from ascento_mjlab.mdp.events import OneShotPlanarVelocityPush, initialize_balance_origin
+from ascento_mjlab.mdp.events import OneShotPlanarVelocityPush, initialize_world_target
+from ascento_mjlab.mdp.observations import world_target_error_body
 from ascento_mjlab.mdp.rewards import (
     leg_pose_hold_penalty,
     leg_pose_symmetry_penalty,
-    position_hold,
+    world_target_proximity,
     settled_balance,
     upright,
 )
@@ -18,6 +19,7 @@ def _env():
         joint_names=("left_hip", "left_knee", "left_wheel", "right_hip", "right_knee", "right_wheel"),
         data=SimpleNamespace(
             root_link_pos_w=torch.tensor([[0.02, -0.01, 0.75]]),
+            root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
             projected_gravity_b=torch.tensor([[0.0, 0.0, -1.0]]),
             root_link_lin_vel_b=torch.zeros((1, 3)),
             root_link_ang_vel_b=torch.zeros((1, 3)),
@@ -32,21 +34,40 @@ def _env():
     )
 
 
-def test_balance_origin_tracks_the_actual_supported_reset_position():
+def test_world_target_tracks_the_actual_supported_reset_position():
     env = _env()
-    initialize_balance_origin(env)
+    initialize_world_target(env)
 
-    assert torch.allclose(env.ascento_balance_state["origin_xy"], torch.tensor([[0.02, -0.01]]))
+    assert torch.allclose(
+        env.ascento_world_target_state["target_xy"], torch.tensor([[0.02, -0.01]])
+    )
 
 
-def test_position_hold_is_reset_relative_and_decays_with_drift():
+def test_world_target_proximity_decays_with_absolute_world_drift():
     env = _env()
-    initialize_balance_origin(env)
+    initialize_world_target(env)
     asset_cfg = SimpleNamespace(name="robot")
 
-    assert position_hold(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
+    assert world_target_proximity(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
     env.scene["robot"].data.root_link_pos_w[0, 0] += 0.5
-    assert position_hold(env, asset_cfg=asset_cfg).item() == pytest.approx(torch.exp(torch.tensor(-1.0)).item())
+    assert world_target_proximity(env, asset_cfg=asset_cfg).item() == pytest.approx(
+        torch.exp(torch.tensor(-(0.5 / 0.35) ** 2)).item()
+    )
+
+
+def test_world_target_observation_is_yaw_invariant_but_target_is_world_framed():
+    env = _env()
+    initialize_world_target(env)
+    asset_cfg = SimpleNamespace(name="robot")
+    env.ascento_world_target_state["target_xy"][0] += torch.tensor([1.0, 0.0])
+
+    assert torch.allclose(world_target_error_body(env, asset_cfg), torch.tensor([[1.0, 0.0]]))
+    env.scene["robot"].data.root_link_quat_w[0] = torch.tensor(
+        [2**-0.5, 0.0, 0.0, 2**-0.5]
+    )
+    assert torch.allclose(
+        world_target_error_body(env, asset_cfg), torch.tensor([[0.0, -1.0]]), atol=1.0e-6
+    )
 
 
 def test_soft_leg_symmetry_penalty_distinguishes_a_persistent_knee_offset():

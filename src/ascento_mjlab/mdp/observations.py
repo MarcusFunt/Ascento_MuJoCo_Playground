@@ -9,6 +9,8 @@ from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
 
+from .events import world_target_xy
+
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
@@ -21,6 +23,30 @@ def base_height(env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg) -> torch.Tens
 def actuator_effort(env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     asset: Entity = env.scene[asset_cfg.name]
     return asset.data.actuator_force[:, asset_cfg.actuator_ids]
+
+
+def world_target_error_body(
+    env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """Express the world-frame target displacement in the robot's yaw frame.
+
+    The target remains an absolute, per-environment world coordinate. Rotating
+    only this observation prevents a yaw-randomized policy from relearning the
+    same return-to-target behavior for every world orientation.
+    """
+    asset: Entity = env.scene[asset_cfg.name]
+    error_w = world_target_xy(env) - asset.data.root_link_pos_w[:, :2]
+    quat_wxyz = asset.data.root_link_quat_w
+    w, x, y, z = quat_wxyz.unbind(dim=1)
+    sin_yaw = 2.0 * (w * z + x * y)
+    cos_yaw = 1.0 - 2.0 * (y.square() + z.square())
+    return torch.stack(
+        [
+            cos_yaw * error_w[:, 0] + sin_yaw * error_w[:, 1],
+            -sin_yaw * error_w[:, 0] + cos_yaw * error_w[:, 1],
+        ],
+        dim=1,
+    )
 
 
 def wheel_contacts(

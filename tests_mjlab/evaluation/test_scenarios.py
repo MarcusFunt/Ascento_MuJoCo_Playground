@@ -62,6 +62,18 @@ def test_balance_gate_v3_uses_authoritative_joint_applied_effort_metrics():
     assert "joint_applied_saturation_fraction" in metrics
 
 
+def test_balance_gate_v4_rejects_long_horizon_world_target_drift():
+    suite = load_suite(Path("benchmarks/suites/balance_gate_v4.toml"))
+
+    assert suite.suite_id == "balance_gate_v4"
+    assert {
+        (gate.gate_id, gate.family, gate.metric, gate.statistic, gate.threshold)
+        for gate in suite.gates
+    } >= {
+        ("long_endurance_p95_max_target_error", "long_endurance", "max_target_error", "p95", 0.75)
+    }
+
+
 def test_specialist_suites_cover_binary_hold_and_shaping_metrics():
     recovery = load_suite(Path("benchmarks/suites/recovery_gate_v1.toml"))
     jump = load_suite(Path("benchmarks/suites/jump_gate_v1.toml"))

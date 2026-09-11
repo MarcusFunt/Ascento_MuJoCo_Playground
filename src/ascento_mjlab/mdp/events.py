@@ -150,32 +150,48 @@ def reset_to_default_supported(
     asset.write_root_link_pose_to_sim(pose, env_ids=ids)
     env.sim.forward()
     env.sim.sense()
-    initialize_balance_origin(env, ids, asset_name=asset_name)
+    initialize_world_target(env, ids, asset_name=asset_name)
 
 
-def initialize_balance_origin(
+def initialize_world_target(
     env,
     env_ids: torch.Tensor | slice | None = None,
     *,
     asset_name: str = "robot",
 ) -> None:
-    """Remember the supported root XY pose used as this episode's balance target.
+    """Set each reset slot's world-frame XY target to its supported root pose.
 
     The balance task randomizes its initial XY position slightly.  Tracking the
-    actual post-reset position, rather than the environment-grid origin, keeps a
-    position-hold reward free of a reset-dependent bias.  The state is stored on
-    the environment because rewards run after the reset event has completed.
+    actual post-reset position, rather than an environment-grid origin, keeps the
+    target free of reset-dependent bias. This is deliberately general state:
+    navigation can later replace ``target_xy`` with the next world-frame gate
+    without changing observations or rewards.
     """
     ids = _resolved_env_ids(env, env_ids)
     if ids.numel() == 0:
         return
-    if not hasattr(env, "ascento_balance_state"):
-        env.ascento_balance_state = {
-            "origin_xy": torch.zeros((env.num_envs, 2), dtype=torch.float32, device=env.device)
+    if not hasattr(env, "ascento_world_target_state"):
+        env.ascento_world_target_state = {
+            "target_xy": torch.zeros((env.num_envs, 2), dtype=torch.float32, device=env.device)
         }
-    origin_xy = env.ascento_balance_state["origin_xy"]
+    target_xy = env.ascento_world_target_state["target_xy"]
     asset = env.scene[asset_name]
-    origin_xy[ids] = asset.data.root_link_pos_w[ids, :2]
+    target_xy[ids] = asset.data.root_link_pos_w[ids, :2]
+
+
+def world_target_xy(env) -> torch.Tensor:
+    """Return the current per-environment world-frame XY target.
+
+    Observation-manager construction queries terms before reset events run. In
+    that phase, seed the target from the current robot pose so construction and
+    an initial observation are finite; the reset event replaces it with the
+    exact supported pose before the first rollout step.
+    """
+    if not hasattr(env, "ascento_world_target_state"):
+        env.ascento_world_target_state = {
+            "target_xy": env.scene["robot"].data.root_link_pos_w[:, :2].clone()
+        }
+    return env.ascento_world_target_state["target_xy"]
 
 
 class OneShotPlanarVelocityPush:
@@ -231,9 +247,10 @@ __all__ = [
     "DEFAULT_WHEEL_HALF_WIDTH_M",
     "DEFAULT_WHEEL_RADIUS_M",
     "flat_ground_wheel_bottom_heights",
-    "initialize_balance_origin",
+    "initialize_world_target",
     "OneShotPlanarVelocityPush",
     "reset_to_default_supported",
     "reset_root_state_supported",
     "reset_root_state_uniform",
+    "world_target_xy",
 ]

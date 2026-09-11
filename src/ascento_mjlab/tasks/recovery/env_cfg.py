@@ -13,9 +13,12 @@ from ascento_mjlab.tasks.balance.env_cfg import ascento_balance_env_cfg
 
 def ascento_recovery_env_cfg(play: bool = False, num_envs: int = 512):
     cfg = ascento_balance_env_cfg(play=play, num_envs=num_envs)
-    cfg.rewards.pop("position_hold", None)
+    cfg.rewards.pop("world_target_proximity", None)
     cfg.rewards.pop("settled_balance", None)
     cfg.events.pop("balance_push", None)
+    cfg.events.pop("initialize_world_target", None)
+    cfg.observations["actor"].terms.pop("world_target_error", None)
+    cfg.observations["critic"].terms.pop("world_target_error", None)
     cfg.events["reset_supported_pose"].params["pose_range"].update(
         {"roll": (-0.35, 0.35), "pitch": (-0.45, 0.45)}
     )

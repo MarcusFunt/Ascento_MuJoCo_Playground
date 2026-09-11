@@ -69,7 +69,8 @@
         "balance_dev_v1",
         "balance_gate_v1",
         "balance_gate_v2",
-        "balance_gate_v3"
+        "balance_gate_v3",
+        "balance_gate_v4"
       ],
       "runner": "HorizonCurriculumRunner"
     },
@@ -147,6 +148,14 @@
         "scenario_count": 3840,
         "family_count": 6,
         "gate_count": 15
+      },
+      {
+        "id": "balance_gate_v4",
+        "task": "Ascento-Balance-Flat",
+        "policy_mode": "deterministic",
+        "scenario_count": 3840,
+        "family_count": 6,
+        "gate_count": 16
       },
       {
         "id": "velocity_gate_v1",

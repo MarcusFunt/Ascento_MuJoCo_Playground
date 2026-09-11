@@ -100,6 +100,11 @@ def _observations(play: bool) -> dict[str, ObservationGroupCfg]:
             scale=1.0 / effort_limit,
         ),
         "actions": ObservationTermCfg(func=mdp.last_action),
+        "world_target_error": ObservationTermCfg(
+            func=ascento_mdp.observations.world_target_error_body,
+            params={"asset_cfg": ROBOT_CFG},
+            clip=(-5.0, 5.0),
+        ),
     }
     critic_terms = {
         **actor_terms,
@@ -134,11 +139,8 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
     """Build the validated flat-ground balance configuration."""
     drift_scale = float(os.environ.get("ASCENTO_BALANCE_DRIFT_PENALTY_SCALE", "1.0"))
     stabilization_scale = float(os.environ.get("ASCENTO_BALANCE_STABILIZATION_WEIGHT", "1.0"))
-    wheel_target_penalty_weight = float(
-        os.environ.get("ASCENTO_BALANCE_WHEEL_TARGET_PENALTY_WEIGHT", "0.0")
-    )
-    if drift_scale <= 0.0 or stabilization_scale <= 0.0 or wheel_target_penalty_weight < 0.0:
-        raise ValueError("balance reward scales must be positive and wheel target penalty non-negative")
+    if drift_scale <= 0.0 or stabilization_scale <= 0.0:
+        raise ValueError("balance reward scales must be positive")
     events = {
         "reset_scene_to_default": EventTermCfg(func=mdp.reset_scene_to_default, mode="reset"),
         "reset_supported_pose": EventTermCfg(
@@ -164,8 +166,8 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
                 "asset_cfg": ROBOT_CFG,
             },
         ),
-        "initialize_balance_origin": EventTermCfg(
-            func=ascento_mdp.events.initialize_balance_origin,
+        "initialize_world_target": EventTermCfg(
+            func=ascento_mdp.events.initialize_world_target,
             mode="reset",
             params={"asset_name": "robot"},
         ),
@@ -211,13 +213,13 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
         ),
         "planar_speed": RewardTermCfg(
             func=ascento_mdp.rewards.planar_speed_penalty,
-            weight=-0.2 * drift_scale,
+            weight=-0.05 * drift_scale,
             params={"asset_cfg": ROBOT_CFG},
         ),
-        "position_hold": RewardTermCfg(
-            func=ascento_mdp.rewards.position_hold,
+        "world_target_proximity": RewardTermCfg(
+            func=ascento_mdp.rewards.world_target_proximity,
             weight=4.0,
-            params={"std": 0.50, "asset_cfg": ROBOT_CFG},
+            params={"std": 0.35, "asset_cfg": ROBOT_CFG},
         ),
         "settled_balance": RewardTermCfg(
             func=ascento_mdp.rewards.settled_balance,
@@ -255,12 +257,6 @@ def ascento_balance_env_cfg(play: bool = False, num_envs: int = 512) -> ManagerB
             func=ascento_mdp.rewards.action_rate_penalty, weight=-0.02
         ),
     }
-    if wheel_target_penalty_weight > 0.0:
-        rewards["wheel_target_magnitude"] = RewardTermCfg(
-            func=ascento_mdp.rewards.wheel_target_magnitude_penalty,
-            weight=-wheel_target_penalty_weight,
-        )
-
     cfg = ManagerBasedRlEnvCfg(
         decimation=PHYSICS_PROFILE.decimation,
         scene=_scene(1 if play else num_envs),

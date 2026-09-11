@@ -17,7 +17,11 @@ from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul
 
 import ascento_mjlab.tasks  # noqa: F401
 from ascento_mjlab.control_contract import current_action_contract, require_current_action_contract
-from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights, initialize_balance_origin
+from ascento_mjlab.mdp.events import (
+    flat_ground_wheel_bottom_heights,
+    initialize_world_target,
+    world_target_xy,
+)
 from ascento_mjlab.mdp.metrics import controller_requested_effort
 from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
 from ascento_mjlab.plant_contract import current_plant_contract
@@ -166,7 +170,7 @@ def _exact_reset(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec]) -> 
         base_env.sim.forward()
         base_env.sim.sense()
 
-    initialize_balance_origin(base_env, env_ids, asset_name="robot")
+    initialize_world_target(base_env, env_ids, asset_name="robot")
 
     return positions[:, :2].clone()
 
@@ -451,6 +455,7 @@ def _run_batch(
     max_tilt = torch.zeros(count, device=dev)
     sum_planar_speed_sq = torch.zeros(count, device=dev)
     max_planar_speed = torch.zeros(count, device=dev)
+    max_target_error = torch.zeros(count, device=dev)
     sum_height = torch.zeros(count, device=dev)
     min_height = torch.full((count,), float("inf"), device=dev)
     sum_effort_abs = torch.zeros(count, device=dev)
@@ -607,6 +612,7 @@ def _run_batch(
                 - robot.data.joint_pos[:, joint_indices["right_knee"]]
             )
             xy = robot.data.root_link_pos_w[:, :2]
+            target_error = torch.linalg.vector_norm(xy - world_target_xy(base_env), dim=1)
             segment = torch.linalg.vector_norm(xy - prev_xy, dim=1)
             prev_xy = xy.clone()
 
@@ -638,6 +644,9 @@ def _run_batch(
             sum_planar_speed_sq += planar_speed.square() * weight
             max_planar_speed = torch.maximum(
                 max_planar_speed, torch.where(active, planar_speed, torch.zeros_like(planar_speed))
+            )
+            max_target_error = torch.maximum(
+                max_target_error, torch.where(active, target_error, torch.zeros_like(target_error))
             )
             sum_height += height * weight
             min_height = torch.minimum(min_height, torch.where(active, height, min_height))
@@ -839,6 +848,7 @@ def _run_batch(
             "max_tilt": max_tilt,
             "planar_speed_rms": torch.sqrt(sum_planar_speed_sq / denom),
             "max_planar_speed": max_planar_speed,
+            "max_target_error": max_target_error,
             "height_mean": sum_height / denom,
             "height_min": min_height,
             "effort_mean_abs": sum_effort_abs / denom,

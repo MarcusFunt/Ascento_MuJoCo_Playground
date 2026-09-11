@@ -101,12 +101,10 @@ cd /root/Ascento_MuJoCo_Playground
   --foreground --interval 60 --json
 ```
 
-For the wheel-target magnitude ablation, set the opt-in reward weight only for
-that shell before the command above:
-
-```bash
-export ASCENTO_BALANCE_WHEEL_TARGET_PENALTY_WEIGHT=0.01
-```
+Balance uses a per-environment world target initialized at the supported reset
+pose. Do not add a wheel-target magnitude penalty: it conflicts with recovery
+and target-return behavior. Use `ASCENTO_BALANCE_DRIFT_PENALTY_SCALE` only to
+adjust the small instantaneous-speed regularizer in a named ablation.
 
 The command prints the managed run ID. In a second Ubuntu WSL terminal, inspect
 it without disturbing training:
