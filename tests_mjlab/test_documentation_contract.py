@@ -114,3 +114,14 @@ def test_cli_inventory_tracks_first_class_option_sets() -> None:
 def test_mcp_inventory_tracks_decorated_tool_functions() -> None:
     documented = {item["name"] for item in _json("mcp-tools.json")["tools"]}
     assert documented == _mcp_tool_names()
+
+
+def test_runs_page_matches_the_current_curriculum_and_selection_gate() -> None:
+    source = (ROOT / "dashboard" / "frontend" / "src" / "RunsPage.jsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert "six consecutive 512-episode windows" in source
+    assert "balance_gate_v5 before selecting it" in source
+    assert "three 512-episode windows" not in source
+    assert "balance_gate_v2 before selecting it" not in source

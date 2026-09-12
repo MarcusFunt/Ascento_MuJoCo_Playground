@@ -433,7 +433,7 @@
               "name": "--output",
               "type": "path",
               "default": null,
-              "description": "JSON output below evaluation root unless absolute."
+              "description": "JSON output must remain below the evaluation root."
             }
           ]
         },

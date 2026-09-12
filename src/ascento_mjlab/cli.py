@@ -243,15 +243,26 @@ def _compare_evaluations(args: argparse.Namespace) -> int:
     candidate = resolve_evaluation_dir(args.candidate, output)
     payload = compare(baseline, candidate)
     if args.output is not None:
-        path = Path(args.output).expanduser()
-        if not path.is_absolute():
-            path = output / path
-        path = path.resolve()
+        path = _comparison_output_path(args.output, output)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         payload["output"] = str(path)
     _print(payload, args.json)
     return 0
+
+
+def _comparison_output_path(value: str, output_root: Path) -> Path:
+    """Resolve a comparison JSON path without escaping its evidence root."""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = output_root / path
+    path = path.resolve()
+    root = output_root.resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as error:
+        raise ValueError(f"comparison output must be below evaluation root {root}") from error
+    return path
 
 
 def _preflight(args: argparse.Namespace) -> int:
@@ -505,7 +516,8 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_sub = evaluate.add_subparsers(dest="evaluate_command", required=True)
     evaluate_common = argparse.ArgumentParser(add_help=False)
     evaluate_common.add_argument("--artifact-root")
-    evaluate_common.add_argument("--output-root", default="evaluations")
+    # Leave this unset so evaluation_root() can honor ASCENTO_EVALUATION_ROOT.
+    evaluate_common.add_argument("--output-root")
     evaluate_common.add_argument("--json", action="store_true")
     evaluation = evaluate_sub.add_parser(
         "run", parents=[evaluate_common], help="evaluate a checkpoint or managed run"

@@ -1,3 +1,6 @@
+import pytest
+
+from ascento_mjlab import cli
 from ascento_mjlab.cli import build_parser
 
 
@@ -70,3 +73,23 @@ def test_unified_cli_exposes_evaluation_capture_and_metadata_operations():
     assert archive.evaluation == "example-evaluation"
     assert capture.video_dir == "videos"
     assert annotate.tag == ["baseline"]
+
+
+def test_cli_evaluation_output_root_defers_to_the_environment(monkeypatch, tmp_path):
+    configured_root = tmp_path / "configured-evaluations"
+    monkeypatch.setenv("ASCENTO_EVALUATION_ROOT", str(configured_root))
+
+    args = build_parser().parse_args(["evaluate", "list"])
+
+    assert args.output_root is None
+    assert cli.evaluation_root(args.output_root) == configured_root.resolve()
+
+
+def test_comparison_output_must_remain_below_evaluation_root(tmp_path):
+    output_root = tmp_path / "evaluations"
+
+    assert cli._comparison_output_path("comparisons/candidate.json", output_root) == (
+        output_root / "comparisons" / "candidate.json"
+    ).resolve()
+    with pytest.raises(ValueError, match="below evaluation root"):
+        cli._comparison_output_path(str(tmp_path / "outside.json"), output_root)

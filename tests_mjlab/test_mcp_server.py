@@ -1,6 +1,17 @@
 import pytest
 
-from ascento_mjlab import mcp_server
+from ascento_mjlab import mcp_server, operations
+
+
+def test_mcp_artifact_root_resolves_relative_paths_from_the_checkout(monkeypatch, tmp_path):
+    checkout = tmp_path / "checkout"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("ASCENTO_ARTIFACT_ROOT", "managed-runs")
+    monkeypatch.setattr(operations, "repo_root", lambda: checkout)
+
+    assert mcp_server._root() == (checkout / "managed-runs").resolve()
 
 
 def test_mcp_exposes_run_and_evaluation_operations_when_the_optional_extra_is_present():

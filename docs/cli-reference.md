@@ -168,6 +168,8 @@ candidate set, then run the authoritative suite on selected checkpoints.
 `EVALUATION` can be an ID relative to the output root or an absolute directory
 below it. Archive creation is recoverable: it overwrites/creates the ZIP but
 does not delete source evidence.
+Comparison JSON is likewise confined to the output root; an output path outside
+that root is rejected.
 
 ### `evaluate preflight`
 

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 from ascento_mjlab.operations import (
     archive_evaluation,
+    artifact_root,
     default_capture_dir,
     ensure_checkout_import_path,
     evaluation_details,
@@ -37,7 +37,8 @@ except ImportError as error:  # pragma: no cover - exercised when extra is absen
 
 
 def _root() -> Path:
-    return Path(os.environ.get("ASCENTO_ARTIFACT_ROOT", "logs/rsl_rl")).expanduser().resolve()
+    """Resolve managed artifacts exactly as the CLI does, independent of CWD."""
+    return artifact_root()
 
 
 def _service() -> RunService:
