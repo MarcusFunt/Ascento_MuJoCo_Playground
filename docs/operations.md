@@ -238,6 +238,12 @@ profile first; registration refuses to proceed when that native launcher does
 not exist. The launcher uses the project’s WSL virtual environment and reserves
 stdout for MCP JSON-RPC. Use `-Distro <name>` for another distribution.
 
+> [!WARNING]
+> Run the registration helper from Windows PowerShell, but run `uv` only from
+> the native Ubuntu/WSL shell. Invoking `uv` from PowerShell against the WSL
+> checkout selects Windows Python and can fail while modifying the Linux
+> `.venv`.
+
 Open a new Codex task or restart the app after registration: an already-running
 task cannot acquire a newly registered MCP tool surface.
 

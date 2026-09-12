@@ -79,6 +79,11 @@ result from partial files.
 Use one compute extra only. A partial or mixed Torch environment can produce
 import or CUDA mismatches. Reconcile it from the locked project definition:
 
+> [!WARNING]
+> Run this command from the native Ubuntu/WSL shell, not from Windows
+> PowerShell against the WSL checkout. PowerShell selects Windows Python for
+> `uv`, which can fail while manipulating the project's Linux `.venv`.
+
 ```bash
 uv sync --frozen --all-groups --extra cu128 --extra dashboard --extra mcp
 ```

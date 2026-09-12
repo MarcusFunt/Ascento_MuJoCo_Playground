@@ -180,6 +180,14 @@ commands or use the environment created by `uv sync --extra cu128`.
 
 The unified `ascento` CLI uses the same run service as the dashboard:
 
+> [!WARNING]
+> On Windows, do **not** run `uv` directly from PowerShell against the WSL
+> checkout (for example, `\\wsl.localhost\Ubuntu\root\Ascento_MuJoCo_Playground`).
+> It selects Windows Python and can fail while manipulating the Linux
+> `.venv`. Run `uv` commands inside Ubuntu/WSL instead. The PowerShell
+> `scripts/register_codex_mcp.ps1` helper is the intentional exception: it
+> launches the MCP server in WSL for Codex.
+
 ```bash
 uv run --extra dashboard ascento run start --task Ascento-Balance-Flat \
   --display-name "Balance baseline" --envs 512 --iterations 10000 --seed 123

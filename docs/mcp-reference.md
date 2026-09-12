@@ -78,3 +78,9 @@ server's managed-run root to
 refer to the same artifacts as the native WSL CLI. The native profile must be
 maintained before registration. It does not register tools in an already-running
 conversation; open a new task or restart Codex Desktop afterward.
+
+> [!WARNING]
+> Run `scripts/register_codex_mcp.ps1` from PowerShell, but do not run `uv`
+> there against the WSL checkout. That selects Windows Python and can fail while
+> manipulating the WSL project's Linux `.venv`. Use an Ubuntu/WSL shell for all
+> `uv sync` and `uv run` commands.
