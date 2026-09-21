@@ -64,3 +64,33 @@ def test_hook_installer_uses_the_common_git_directory_for_a_worktree(tmp_path):
     assert Path(hook_path).read_text(encoding="utf-8") == hook_source.read_text(encoding="utf-8")
     assert installation.stdout.endswith("\n")
     assert not installation.stdout.endswith("\\n")
+
+
+def test_hook_installer_preserves_an_existing_user_hook(tmp_path):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", str(repo)], check=True)
+    scripts = repo / "scripts"
+    (scripts / "git-hooks").mkdir(parents=True)
+    copy2(REPOSITORY_ROOT / "scripts/git-hooks/pre-commit", scripts / "git-hooks/pre-commit")
+    installer = scripts / "install_git_hooks.sh"
+    copy2(REPOSITORY_ROOT / "scripts/install_git_hooks.sh", installer)
+    hook_path = Path(
+        subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--git-path", "hooks/pre-commit"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    if not hook_path.is_absolute():
+        hook_path = repo / hook_path
+    hook_path.parent.mkdir(parents=True, exist_ok=True)
+    hook_path.write_text("#!/bin/sh\necho user-hook\n", encoding="utf-8")
+
+    installation = subprocess.run(
+        ["bash", str(installer)], cwd=repo, check=False, capture_output=True, text=True
+    )
+
+    assert installation.returncode != 0
+    assert "preserving the existing hook" in installation.stderr
+    assert hook_path.read_text(encoding="utf-8") == "#!/bin/sh\necho user-hook\n"

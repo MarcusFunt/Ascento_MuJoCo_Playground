@@ -272,6 +272,30 @@ def test_launcher_uses_injected_repository_version_without_git(monkeypatch):
     assert metadata["branch"] == "main"
 
 
+def test_clean_container_provenance_is_marked_as_an_image_build(monkeypatch, tmp_path):
+    monkeypatch.setattr(launch, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("ASCENTO_REPOSITORY_COMMIT", "container-commit")
+    monkeypatch.setenv("ASCENTO_REPOSITORY_BRANCH", "main")
+    monkeypatch.setenv("ASCENTO_REPOSITORY_DIRTY", "0")
+
+    provenance = launch.validate_source_provenance(
+        tmp_path, allow_dirty_provenance=False
+    )
+
+    assert provenance == {
+        "mode": "clean_image_build",
+        "commit": "container-commit",
+        "branch": "main",
+    }
+
+
+def test_compose_bakes_clean_build_status_without_runtime_override():
+    compose = (launch.REPO_ROOT / "docker" / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "REPOSITORY_DIRTY: ${ASCENTO_REPOSITORY_DIRTY:-unknown}" in compose
+    assert "\n      ASCENTO_REPOSITORY_DIRTY:" not in compose
+
+
 def test_startup_validation_reports_bad_artifact_root(tmp_path):
     bad_root = tmp_path / "artifact-file"
     bad_root.write_text("not a directory", encoding="utf-8")

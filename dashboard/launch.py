@@ -127,7 +127,8 @@ def validate_source_provenance(destination: Path, *, allow_dirty_provenance: boo
     if not state.is_dirty:
         if state.commit is None:
             raise ValueError("managed runs require a Git commit for source provenance")
-        return {"mode": "clean_commit", "commit": state.commit, "branch": state.branch}
+        mode = "clean_image_build" if state.source == "image" else "clean_commit"
+        return {"mode": mode, "commit": state.commit, "branch": state.branch}
     if not allow_dirty_provenance:
         raise ValueError(
             "working tree is dirty; rerun with --allow-dirty-provenance to archive it explicitly"
@@ -370,6 +371,7 @@ def _write_experiment_manifest(
                 "ASCENTO_ARTIFACT_ROOT",
                 "ASCENTO_REPOSITORY_COMMIT",
                 "ASCENTO_REPOSITORY_BRANCH",
+                "ASCENTO_REPOSITORY_DIRTY",
             }
         },
         "seed": _number(_training_arg_value(training_args, "--seed", "--agent.seed")),
@@ -497,7 +499,10 @@ def main() -> int:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = args.name or f"{stamp}_{stage}"
     run_dir = (args.artifact_root.expanduser().resolve() / run_name).resolve()
-    source_state = working_tree_state(REPO_ROOT)
+    try:
+        source_state = working_tree_state(REPO_ROOT)
+    except ValueError as error:
+        parser.error(str(error))
     if source_state.is_dirty and not args.allow_dirty_provenance:
         parser.error("working tree is dirty; rerun with --allow-dirty-provenance to archive it explicitly")
 

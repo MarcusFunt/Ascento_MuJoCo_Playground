@@ -108,6 +108,7 @@ jobs:
           ASCENTO_COMPUTE_EXTRA=cpu
           ASCENTO_REPOSITORY_COMMIT=testcommit
           ASCENTO_REPOSITORY_BRANCH=main
+          ASCENTO_REPOSITORY_DIRTY=0
           ASCENTO_DASHBOARD_PORT=8000
           EOF
       - run: docker compose --env-file .maintenance/compose.env -f docker/compose.yaml config >/dev/null

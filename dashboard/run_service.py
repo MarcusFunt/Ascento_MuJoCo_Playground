@@ -213,6 +213,8 @@ class RunService:
             self.resolve(str(parent_run_id))
 
         source_state = working_tree_state(REPO_ROOT)
+        if source_state.commit is None:
+            raise ValueError("managed runs require a Git commit for source provenance")
         allow_dirty_provenance = bool(request.get("allow_dirty_provenance", False))
         if source_state.is_dirty and not allow_dirty_provenance:
             raise ValueError(

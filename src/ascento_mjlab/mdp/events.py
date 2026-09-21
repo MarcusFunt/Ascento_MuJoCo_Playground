@@ -432,7 +432,14 @@ def _apply_cardinal_planar_push(
     signs = torch.where(
         torch.rand(ids.numel(), device=env.device) < 0.5, 1.0, -1.0
     ).to(dtype=velocity.dtype)
-    delta[torch.arange(ids.numel(), device=env.device), axes] = magnitudes * signs
+    body_direction = torch.zeros_like(delta)
+    body_direction[torch.arange(ids.numel(), device=env.device), axes] = signs
+    world_direction = quat_apply(asset.data.root_link_quat_w[ids], body_direction)
+    planar_direction = world_direction[:, :2]
+    planar_norm = torch.linalg.vector_norm(planar_direction, dim=1, keepdim=True).clamp_min(
+        torch.finfo(velocity.dtype).eps
+    )
+    delta[:, :2] = planar_direction / planar_norm * magnitudes.unsqueeze(1)
     velocity[:, :3] += delta
     asset.write_root_link_velocity_to_sim(velocity, env_ids=ids)
 

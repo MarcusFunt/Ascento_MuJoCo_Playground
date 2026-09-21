@@ -188,6 +188,20 @@ def test_create_rejects_dirty_source_before_creating_artifacts(monkeypatch, tmp_
     assert not artifact_root.exists()
 
 
+def test_create_rejects_source_without_commit_before_creating_artifacts(monkeypatch, tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    monkeypatch.setattr(
+        "dashboard.run_service.working_tree_state",
+        lambda _: WorkingTreeState(None, None, (), ()),
+    )
+    service = RunService(artifact_root)
+
+    with pytest.raises(ValueError, match="managed runs require a Git commit"):
+        service.create({"display_name": "must not start"})
+
+    assert not artifact_root.exists()
+
+
 def test_stop_marks_stopping_before_signalling(monkeypatch, tmp_path):
     run = _run(tmp_path, "active", state="running")
     service = RunService(tmp_path)

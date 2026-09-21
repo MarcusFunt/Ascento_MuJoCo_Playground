@@ -8,6 +8,7 @@ services:
         COMPUTE_EXTRA: ${ASCENTO_COMPUTE_EXTRA:-cpu}
         REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
         REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
+        REPOSITORY_DIRTY: ${ASCENTO_REPOSITORY_DIRTY:-unknown}
     volumes:
       - ../logs:/workspace/logs
       - ../checkpoints:/workspace/checkpoints
@@ -25,6 +26,7 @@ services:
         COMPUTE_EXTRA: ${ASCENTO_COMPUTE_EXTRA:-cpu}
         REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
         REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
+        REPOSITORY_DIRTY: ${ASCENTO_REPOSITORY_DIRTY:-unknown}
     command: ["python", "-m", "uvicorn", "dashboard.app:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
