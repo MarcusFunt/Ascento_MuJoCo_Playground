@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from dashboard.config import REPO_ROOT
 from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
+from dashboard.provenance import working_tree_state
 from dashboard.versioning import annotate_run_summary
 
 RUN_METADATA = "run_metadata.json"
@@ -211,6 +212,13 @@ class RunService:
         if parent_run_id:
             self.resolve(str(parent_run_id))
 
+        source_state = working_tree_state(REPO_ROOT)
+        allow_dirty_provenance = bool(request.get("allow_dirty_provenance", False))
+        if source_state.is_dirty and not allow_dirty_provenance:
+            raise ValueError(
+                "working tree is dirty; rerun with --allow-dirty-provenance to archive it explicitly"
+            )
+
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         if not os.access(self.artifact_root, os.W_OK | os.X_OK):
             raise PermissionError(f"artifact root is not writable: {self.artifact_root}")
@@ -271,6 +279,8 @@ class RunService:
             display_name,
             "--preinitialized",
         ]
+        if allow_dirty_provenance:
+            command.append("--allow-dirty-provenance")
         notes = str(request.get("notes") or "").strip()
         purpose = str(request.get("purpose") or "").strip()
         parent_checkpoint = str(request.get("parent_checkpoint") or "").strip()

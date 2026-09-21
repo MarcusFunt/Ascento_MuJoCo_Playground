@@ -55,6 +55,7 @@ class RunCreateRequest(BaseModel):
     parent_run_id: str | None = None
     parent_checkpoint: str | None = None
     episode_horizon_s: float | None = Field(default=None)
+    allow_dirty_provenance: bool = False
     training_args: list[str] = Field(default_factory=list)
 
 

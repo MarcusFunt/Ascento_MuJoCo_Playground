@@ -225,6 +225,7 @@ if FastMCP is not None:
         iterations: int | None = None,
         seed: int | None = None,
         episode_horizon_s: float | None = None,
+        allow_dirty_provenance: bool = False,
         training_args: list[str] | None = None,
     ) -> dict[str, Any]:
         """Start a managed training run and return its stable run ID."""
@@ -244,6 +245,7 @@ if FastMCP is not None:
             "parent_run_id": parent_run_id,
             "parent_checkpoint": parent_checkpoint,
             "episode_horizon_s": episode_horizon_s,
+            "allow_dirty_provenance": allow_dirty_provenance,
             "training_args": args,
         })
 

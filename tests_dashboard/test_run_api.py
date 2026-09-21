@@ -2,6 +2,8 @@ import importlib
 import subprocess
 from types import SimpleNamespace
 
+from dashboard.provenance import WorkingTreeState
+
 
 def _load_app(monkeypatch, artifact_root):
     monkeypatch.setenv("ASCENTO_ARTIFACT_ROOT", str(artifact_root))
@@ -52,6 +54,16 @@ def test_create_request_preserves_lineage_and_training_args(monkeypatch, tmp_pat
     assert captured["training_args"][-1] == "12000"
 
 
+def test_create_request_preserves_explicit_dirty_provenance_override(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    captured = {}
+    monkeypatch.setattr(module.RUN_SERVICE, "create", lambda payload: captured.update(payload) or payload)
+
+    module.create_run(module.RunCreateRequest(display_name="override", allow_dirty_provenance=True))
+
+    assert captured["allow_dirty_provenance"] is True
+
+
 def test_created_run_is_immediately_discoverable(monkeypatch, tmp_path):
     """The create response must not point at a run the detail route cannot read."""
     module = _load_app(monkeypatch, tmp_path)
@@ -62,6 +74,10 @@ def test_created_run_is_immediately_discoverable(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "dashboard.run_service.subprocess",
         SimpleNamespace(Popen=lambda *args, **kwargs: FakeProcess(), DEVNULL=subprocess.DEVNULL),
+    )
+    monkeypatch.setattr(
+        "dashboard.run_service.working_tree_state",
+        lambda _: WorkingTreeState("abc123", "main", (), ()),
     )
     created = module.create_run(
         module.RunCreateRequest(

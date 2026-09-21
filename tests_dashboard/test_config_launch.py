@@ -12,6 +12,7 @@ from dashboard.launch import (
     _training_arg,
     build_parser,
 )
+from dashboard.provenance import WorkingTreeState
 
 from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract
@@ -24,6 +25,26 @@ def test_launcher_uses_same_default_artifact_root_as_dashboard(monkeypatch, tmp_
     args = build_parser().parse_args([])
 
     assert args.artifact_root == config.artifact_root == tmp_path.resolve()
+
+
+def _dirty_state() -> WorkingTreeState:
+    return WorkingTreeState("abc123", "main", ("tracked.py",), ("new.py",))
+
+
+def test_launcher_rejects_dirty_tree_without_override(monkeypatch, tmp_path):
+    monkeypatch.setattr(launch, "working_tree_state", lambda _: _dirty_state())
+
+    with pytest.raises(ValueError, match="allow-dirty-provenance"):
+        launch.validate_source_provenance(tmp_path, allow_dirty_provenance=False)
+
+
+def test_launcher_writes_bundle_only_when_explicitly_allowed(monkeypatch, tmp_path):
+    monkeypatch.setattr(launch, "working_tree_state", lambda _: _dirty_state())
+    monkeypatch.setattr(launch, "write_dirty_source_bundle", lambda *_: {"recorded": True})
+
+    provenance = launch.validate_source_provenance(tmp_path, allow_dirty_provenance=True)
+
+    assert provenance["mode"] == "dirty_bundle"
 
 
 def test_launcher_argument_metadata_parser_supports_both_cli_forms():

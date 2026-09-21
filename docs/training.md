@@ -129,6 +129,11 @@ uv run --frozen --extra cu128 --extra dashboard ascento run start \
   -- --agent.save-interval 250 --agent.logger tensorboard
 ```
 
+Managed training rejects a dirty working tree before creating an artifact
+directory. Keep source committed; only an intentional exploratory exception
+may use `--allow-dirty-provenance`, which records the exact patch, untracked
+files, and hashes with the run.
+
 `--parent-run-id` and `--parent-checkpoint` record lineage. Use them whenever a
 run continues or branches from a previous policy. Metadata can be corrected
 without moving artifacts:

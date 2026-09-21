@@ -60,12 +60,18 @@ ascento run start [options] [-- <native trainer arguments>]
 | `--notes TEXT` | empty | Free-text run notes |
 | `--parent-run-id ID` | — | Parent managed run for lineage |
 | `--parent-checkpoint PATH` | — | Parent checkpoint for lineage |
+| `--allow-dirty-provenance` | false | Explicitly archive tracked and untracked source changes with the run; clean source is required otherwise |
 | `--envs N` | — | Adds `--env.scene.num-envs N` to trainer args |
 | `--iterations N` | — | Adds `--agent.max-iterations N` to trainer args |
 | `--seed N` | — | Adds `--agent.seed N` to trainer args |
 | `--episode-horizon-s S` | — | Records configured horizon metadata |
 | `--foreground` | false | Poll until completion instead of returning after creation |
 | `--interval S` | `15.0` | Foreground polling interval |
+
+Managed runs require a clean Git working tree. In the exceptional case where
+an exploratory dirty-tree run is intentional, `--allow-dirty-provenance`
+stores a complete patch, untracked-file archive, and hash manifest beneath the
+run before training begins.
 
 Everything after `--` is forwarded unchanged to the mjlab trainer. Prefer the
 first-class options when available because they also create clear metadata.

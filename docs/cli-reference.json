@@ -78,6 +78,12 @@
               "default": null
             },
             {
+              "name": "--allow-dirty-provenance",
+              "type": "boolean",
+              "default": false,
+              "effect": "Archives complete dirty-source provenance before launch."
+            },
+            {
               "name": "--envs",
               "type": "integer",
               "default": null,

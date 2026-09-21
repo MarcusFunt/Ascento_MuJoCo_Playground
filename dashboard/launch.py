@@ -21,6 +21,7 @@ from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract
 from ascento_mjlab.task_contract import current_task_contract_for_task
 from dashboard.config import REPO_ROOT, load_config
+from dashboard.provenance import working_tree_state, write_dirty_source_bundle
 
 TRAINING_RUNTIME_RE = re.compile(
     r"Training with:\s*device=([^,\s]+),\s*seed=([^,\s]+),\s*rank=(\d+)"
@@ -118,6 +119,21 @@ def git_metadata() -> dict[str, Any]:
     except (OSError, subprocess.SubprocessError):
         pass
     return {"commit": commit, "branch": branch, "dirty": dirty}
+
+
+def validate_source_provenance(destination: Path, *, allow_dirty_provenance: bool) -> dict[str, Any]:
+    """Return reproducible source provenance or reject an implicit dirty launch."""
+    state = working_tree_state(REPO_ROOT)
+    if not state.is_dirty:
+        if state.commit is None:
+            raise ValueError("managed runs require a Git commit for source provenance")
+        return {"mode": "clean_commit", "commit": state.commit, "branch": state.branch}
+    if not allow_dirty_provenance:
+        raise ValueError(
+            "working tree is dirty; rerun with --allow-dirty-provenance to archive it explicitly"
+        )
+    bundle = write_dirty_source_bundle(REPO_ROOT, destination / "source_provenance")
+    return {"mode": "dirty_bundle", "bundle": bundle}
 
 
 def _training_arg(training_args: list[str], *names: str) -> str | None:
@@ -336,6 +352,7 @@ def _write_experiment_manifest(
     run_dir: Path,
     sim_timestep: int | float | str | None,
     device: str | None,
+    source_provenance: dict[str, Any],
 ) -> None:
     env_count = _training_arg_value(training_args, "--env.scene.num-envs", "--num-envs")
     manifest = {
@@ -361,6 +378,7 @@ def _write_experiment_manifest(
         "device": device,
         "packages": _package_versions(),
         "git": git,
+        "source_provenance": source_provenance,
         "checkpoint": {
             "path": None,
             "sha256": None,
@@ -430,6 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="reuse the empty run directory initialized synchronously by the dashboard API",
     )
+    parser.add_argument("--allow-dirty-provenance", action="store_true")
     parser.add_argument("--display-name", help="human-readable run name shown by the dashboard")
     parser.add_argument("--notes", default="", help="human notes stored with the run")
     parser.add_argument("--tag", action="append", default=[], help="repeatable run tag")
@@ -478,6 +497,9 @@ def main() -> int:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = args.name or f"{stamp}_{stage}"
     run_dir = (args.artifact_root.expanduser().resolve() / run_name).resolve()
+    source_state = working_tree_state(REPO_ROOT)
+    if source_state.is_dirty and not args.allow_dirty_provenance:
+        parser.error("working tree is dirty; rerun with --allow-dirty-provenance to archive it explicitly")
 
     try:
         expected_files = {"run_metadata.json", "run_status.json"}
@@ -493,6 +515,12 @@ def main() -> int:
     status_path = run_dir / "run_status.json"
     metadata_path = run_dir / "run_metadata.json"
     log_path = run_dir / "training.log"
+    try:
+        source_provenance = validate_source_provenance(
+            run_dir, allow_dirty_provenance=args.allow_dirty_provenance
+        )
+    except ValueError as error:
+        parser.error(str(error))
     try:
         _prepare_parent_resume_link(
             run_dir,
@@ -591,6 +619,7 @@ def main() -> int:
         run_dir=run_dir,
         sim_timestep=sim_timestep,
         device=device,
+        source_provenance=source_provenance,
     )
 
     exit_code = 127

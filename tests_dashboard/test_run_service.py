@@ -3,6 +3,7 @@ import signal
 from pathlib import Path
 
 import pytest
+from dashboard.provenance import WorkingTreeState
 from dashboard.run_service import RunService
 
 
@@ -121,6 +122,10 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
         return FakeProcess()
 
     monkeypatch.setattr("dashboard.run_service.subprocess.Popen", fake_popen)
+    monkeypatch.setattr(
+        "dashboard.run_service.working_tree_state",
+        lambda _: WorkingTreeState("abc123", "main", (), ()),
+    )
     service = RunService(tmp_path)
 
     created = service.create(
@@ -167,6 +172,20 @@ def test_create_rejects_horizon_for_non_progressive_tasks(tmp_path):
                 "episode_horizon_s": 60,
             }
         )
+
+
+def test_create_rejects_dirty_source_before_creating_artifacts(monkeypatch, tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    monkeypatch.setattr(
+        "dashboard.run_service.working_tree_state",
+        lambda _: WorkingTreeState("abc123", "main", ("tracked.py",), ()),
+    )
+    service = RunService(artifact_root)
+
+    with pytest.raises(ValueError, match="allow-dirty-provenance"):
+        service.create({"display_name": "must not start"})
+
+    assert not artifact_root.exists()
 
 
 def test_stop_marks_stopping_before_signalling(monkeypatch, tmp_path):
