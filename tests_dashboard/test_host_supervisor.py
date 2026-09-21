@@ -1,7 +1,6 @@
 import json
 
 import pytest
-
 from scripts import host_supervisor
 from scripts.host_supervisor import HostSupervisor
 

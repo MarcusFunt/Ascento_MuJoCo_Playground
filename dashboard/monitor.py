@@ -183,7 +183,9 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
     if not event_files:
         return []
     try:
-        from tensorboard.backend.event_processing.event_file_loader import LegacyEventFileLoader  # noqa: F401
+        from tensorboard.backend.event_processing.event_file_loader import (
+            LegacyEventFileLoader,  # noqa: F401
+        )
     except ImportError:
         return []
 
