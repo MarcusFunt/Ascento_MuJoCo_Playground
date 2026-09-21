@@ -14,9 +14,13 @@ from typing import Any
 import torch
 from mjlab.tasks.registry import load_env_cfg
 
+from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
 from ascento_mjlab.control_contract import action_contracts_compatible, current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract, plant_contracts_compatible
-from ascento_mjlab.task_contract import current_task_contract_for_task, task_contracts_compatible
+from ascento_mjlab.task_contract import (
+    classify_task_contract_compatibility,
+    current_task_contract_for_task,
+)
 
 from .consistency import check_collection
 from .gates import evaluate_gates
@@ -164,6 +168,79 @@ def _manifest(
     }
 
 
+def _checkpoint_contract_preflight(checkpoint: Path, task: str) -> dict[str, Any]:
+    """Read and validate checkpoint contracts before allocating a simulator world."""
+    try:
+        payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        return {
+            "status": "invalid",
+            "reason": f"cannot read checkpoint contracts: {error}",
+            "task_contract": None,
+        }
+    infos = payload.get("infos") if isinstance(payload, dict) else None
+    checkpoint_task_contract = infos.get("task_contract") if isinstance(infos, dict) else None
+    try:
+        import ascento_mjlab.tasks  # noqa: F401
+
+        cfg = load_env_cfg(task, play=False)
+        compatibility = classify_task_contract_compatibility(
+            checkpoint_task_contract, current_task_contract_for_task(task)
+        )
+        require_current_checkpoint_contracts(infos, cfg)
+    except (OSError, RuntimeError, ValueError) as error:
+        return {
+            "status": "invalid",
+            "reason": str(error),
+            "task_contract": compatibility.to_dict() if "compatibility" in locals() else None,
+        }
+    return {
+        "status": "passed",
+        "reason": "checkpoint contracts are compatible with the requested task",
+        "task_contract": compatibility.to_dict(),
+    }
+
+
+def _write_invalid_preflight_artifacts(
+    output_dir: Path, manifest: dict[str, Any], preflight: dict[str, Any]
+) -> None:
+    manifest["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
+    manifest["preflight"] = preflight
+    task_contract = preflight.get("task_contract")
+    if isinstance(task_contract, dict):
+        manifest["checkpoint_task_compatibility"] = task_contract.get("status")
+        manifest["checkpoint_task_compatibility_detail"] = task_contract
+    gate_payload = {
+        "status": EvaluationStatus.INVALID.value,
+        "reason": preflight["reason"],
+        "gates": [],
+    }
+    write_json(output_dir / "manifest.json", manifest)
+    write_json(output_dir / "summary.json", {})
+    write_json(
+        output_dir / "consistency.json",
+        {
+            "passed": False,
+            "checks": [
+                {
+                    "id": "checkpoint_contract_preflight",
+                    "passed": False,
+                    "reason": preflight["reason"],
+                }
+            ],
+        },
+    )
+    write_json(output_dir / "gate.json", gate_payload)
+    write_json(output_dir / "failures.json", {})
+    render_html(
+        output_dir / "report.html",
+        manifest=manifest,
+        summary={},
+        gate_payload=gate_payload,
+        worst={},
+    )
+
+
 def evaluate(
     *,
     checkpoint: Path,
@@ -215,6 +292,11 @@ def evaluate(
         )
         return EvaluationStatus.INCOMPLETE, output_dir
 
+    preflight = _checkpoint_contract_preflight(checkpoint, suite.task)
+    if preflight["status"] != "passed":
+        _write_invalid_preflight_artifacts(output_dir, manifest, preflight)
+        return EvaluationStatus.INVALID, output_dir
+
     deterministic = suite.policy_mode == "deterministic"
     results, runtime = run_scenarios(
         suite.task,
@@ -237,6 +319,7 @@ def evaluate(
     manifest["checkpoint_plant_contract"] = checkpoint_contract
     manifest["checkpoint_action_contract"] = checkpoint_action_contract
     manifest["checkpoint_task_contract"] = checkpoint_task_contract
+    manifest["preflight"] = preflight
     manifest["checkpoint_plant_compatibility"] = (
         "current"
         if plant_contracts_compatible(checkpoint_contract, current_plant_contract())
@@ -251,15 +334,11 @@ def evaluate(
         if checkpoint_action_contract is None
         else "incompatible"
     )
-    manifest["checkpoint_task_compatibility"] = (
-        "current"
-        if task_contracts_compatible(
-            checkpoint_task_contract, current_task_contract_for_task(suite.task)
-        )
-        else "legacy"
-        if checkpoint_task_contract is None
-        else "incompatible"
+    task_compatibility = classify_task_contract_compatibility(
+        checkpoint_task_contract, current_task_contract_for_task(suite.task)
     )
+    manifest["checkpoint_task_compatibility"] = task_compatibility.status.value
+    manifest["checkpoint_task_compatibility_detail"] = task_compatibility.to_dict()
     manifest["capabilities"] = sorted(capabilities)
     write_json(output_dir / "manifest.json", manifest)
     write_results_database(output_dir / "results.sqlite", scenarios, results)

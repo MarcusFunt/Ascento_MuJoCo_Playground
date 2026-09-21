@@ -1,3 +1,7 @@
+import hashlib
+import json
+from copy import deepcopy
+
 import dashboard.launch as launch
 import pytest
 import torch
@@ -59,6 +63,29 @@ def test_launcher_prepares_parent_checkpoint_link_before_resume(monkeypatch, tmp
     assert link.resolve() == checkpoint.parent.resolve()
 
 
+def test_launcher_uses_the_task_rl_experiment_name_for_locomotion_resume(monkeypatch, tmp_path):
+    checkpoint = (
+        tmp_path / "parent" / "ascento_locomotion_flat" / "source" / "model_0.pt"
+    )
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+    run_dir = tmp_path / "child"
+    run_dir.mkdir()
+    monkeypatch.setattr(launch, "_validate_parent_checkpoint", lambda *_args: None)
+
+    _prepare_parent_resume_link(
+        run_dir,
+        parent_checkpoint=str(checkpoint),
+        training_args=["--agent.resume", "True", "--agent.load-run", "_resume_parent"],
+        stage="locomotion",
+        task="Ascento-Locomotion-Flat",
+    )
+
+    link = run_dir / "ascento_locomotion_flat" / "_resume_parent"
+    assert link.is_symlink()
+    assert link.resolve() == checkpoint.parent.resolve()
+
+
 def test_launcher_rejects_ambiguous_managed_resume(tmp_path):
     checkpoint = tmp_path / "ascento_balance" / "source" / "model_7999.pt"
     checkpoint.parent.mkdir(parents=True)
@@ -106,6 +133,53 @@ def test_launcher_accepts_parent_checkpoint_with_current_contracts(tmp_path):
     )
 
     launch._validate_parent_checkpoint(checkpoint, "Ascento-Balance-Flat")
+
+
+def test_final_manifest_uses_actual_checkpoint_contracts_and_preserves_launch_contracts(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    current = current_task_contract_for_task("Ascento-Balance-Flat")
+    checkpoint_task = deepcopy(current)
+    checkpoint_task["topology"]["task_id"] = None
+    checkpoint_task["topology_sha256"] = hashlib.sha256(
+        json.dumps(checkpoint_task["topology"], sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    checkpoint = run_dir / "model_10.pt"
+    torch.save(
+        {
+            "infos": {
+                "plant_contract": current_plant_contract(),
+                "action_contract": current_action_contract(),
+                "task_contract": checkpoint_task,
+            }
+        },
+        checkpoint,
+    )
+    manifest_path = run_dir / "experiment_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "plant_contract": current_plant_contract(),
+                "action_contract": current_action_contract(),
+                "task_contract": current,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    launch._finalize_experiment_manifest(manifest_path, run_dir)
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["launch_contracts"]["task_contract"] == current
+    assert manifest["task_contract"] == checkpoint_task
+    assert manifest["checkpoint"]["task_contract"] == checkpoint_task
+
+
+def test_compose_does_not_override_image_build_provenance_at_runtime():
+    compose = (launch.REPO_ROOT / "docker" / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "\n      ASCENTO_REPOSITORY_COMMIT:" not in compose
+    assert "\n      ASCENTO_REPOSITORY_BRANCH:" not in compose
 
 
 def test_launcher_accepts_dashboard_horizon_after_training_separator():

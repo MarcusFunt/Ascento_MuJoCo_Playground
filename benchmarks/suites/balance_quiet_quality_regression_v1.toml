@@ -1,0 +1,136 @@
+schema_version = 1
+suite_id = "balance_quiet_quality_regression_v1"
+task = "Ascento-Balance-Quiet-Flat"
+root_seed = 884921
+policy_mode = "deterministic"
+required_capabilities = ["balance", "exact_reset", "deterministic_policy"]
+
+# Versioned counterpart of balance_quality_regression_v1. It keeps the frozen
+# reference task evaluable while providing the same quality limits to an
+# anti-rocking continuation with a new reward ABI.
+[[families]]
+id = "nominal"
+kind = "uniform_reset"
+count = 256
+horizon_s = 20.0
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+id = "nominal_stationary_tilt"
+family = "nominal"
+metric = "stationary_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.04
+
+[[gates]]
+id = "nominal_stationary_drift"
+family = "nominal"
+metric = "stationary_planar_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "nominal_stationary_heading"
+family = "nominal"
+metric = "stationary_heading_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "nominal_stationary_effort"
+family = "nominal"
+metric = "stationary_effort_rms"
+statistic = "p95"
+op = "<="
+threshold = 3.2
+
+[[gates]]
+id = "nominal_stationary_action_rate"
+family = "nominal"
+metric = "stationary_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.01
+
+[[gates]]
+id = "nominal_stationary_action_second_difference"
+family = "nominal"
+metric = "stationary_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.01
+
+[[gates]]
+id = "nominal_stationary_high_frequency_action_power"
+family = "nominal"
+metric = "stationary_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "nominal_stationary_nyquist_action_power"
+family = "nominal"
+metric = "stationary_nyquist_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.01
+
+[[gates]]
+id = "nominal_stationary_body_rocking"
+family = "nominal"
+metric = "stationary_body_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.02
+
+[[gates]]
+id = "nominal_stationary_roll_pitch_reversals"
+family = "nominal"
+metric = "stationary_roll_pitch_reversal_rate_hz"
+statistic = "p95"
+op = "<="
+threshold = 0.50
+
+[[gates]]
+id = "nominal_settling_time"
+family = "nominal"
+metric = "settling_time_s"
+statistic = "p95"
+op = "<="
+threshold = 1.50
+
+[[gates]]
+id = "nominal_post_settle_angular_velocity"
+family = "nominal"
+metric = "post_settle_angular_velocity_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.02
+
+[[gates]]
+id = "nominal_stationary_contact_quality"
+family = "nominal"
+metric = "stationary_both_supported_fraction"
+statistic = "p05"
+op = ">="
+threshold = 0.99
+
+[[gates]]
+id = "nominal_stationary_net_displacement"
+family = "nominal"
+metric = "stationary_net_displacement"
+statistic = "p95"
+op = "<="
+threshold = 0.05

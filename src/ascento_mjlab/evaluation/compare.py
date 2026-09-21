@@ -61,6 +61,76 @@ def _action_contract(path: Path, key: str = "action_contract") -> dict | None:
     return contract if isinstance(contract, dict) else None
 
 
+def _quality_gate_report(path: Path) -> dict | None:
+    """Load a completed suite verdict when the artifact provides one."""
+    try:
+        payload = json.loads((path / "gate.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("gates"), list):
+        return None
+    return payload
+
+
+def _suite_id(path: Path) -> str | None:
+    try:
+        payload = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = payload.get("suite_id") if isinstance(payload, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def quality_baseline_verdict(base: Path, candidate: Path) -> dict | None:
+    """Classify a candidate against an accepted quality-gated baseline.
+
+    This deliberately makes a failed hard gate decisive.  A passing candidate
+    is not called better simply because it survives: it must be compared on
+    the paired metrics by the caller or a task-specific selection policy.
+    """
+    baseline = _quality_gate_report(base)
+    contender = _quality_gate_report(candidate)
+    if baseline is None or contender is None:
+        return None
+    baseline_suite = _suite_id(base)
+    candidate_suite = _suite_id(candidate)
+    if baseline_suite is not None and candidate_suite is not None and baseline_suite != candidate_suite:
+        return None
+
+    baseline_status = baseline.get("status")
+    candidate_status = contender.get("status")
+    if not isinstance(baseline_status, str) or not isinstance(candidate_status, str):
+        return None
+    failed = [
+        str(gate.get("gate_id", "unknown"))
+        for gate in contender["gates"]
+        if isinstance(gate, dict) and gate.get("hard") and not gate.get("passed")
+    ]
+    if candidate_status != "PASS":
+        return {
+            "baseline_status": baseline_status,
+            "candidate_status": candidate_status,
+            "verdict": "WORSE",
+            "reason": "candidate failed hard quality gates",
+            "failed_hard_gates": failed,
+        }
+    if baseline_status != "PASS":
+        return {
+            "baseline_status": baseline_status,
+            "candidate_status": candidate_status,
+            "verdict": "BETTER",
+            "reason": "candidate passed while the baseline did not",
+            "failed_hard_gates": [],
+        }
+    return {
+        "baseline_status": baseline_status,
+        "candidate_status": candidate_status,
+        "verdict": "NOT_PROVEN_BETTER",
+        "reason": "both policies passed; inspect paired quality deltas before promotion",
+        "failed_hard_gates": [],
+    }
+
+
 def ensure_compatible_plants(base: Path, candidate: Path) -> None:
     """Reject quantitative comparison unless both artifacts share one plant."""
     left = _plant_contract(base)
@@ -112,6 +182,9 @@ def compare(base: Path, candidate: Path) -> dict:
         else []
     )
     output = {"paired_scenarios": len(common), "metrics": {}}
+    verdict = quality_baseline_verdict(base, candidate)
+    if verdict is not None:
+        output["quality_baseline_verdict"] = verdict
     for metric_index, metric in enumerate(metrics):
         delta = np.asarray(
             [right[sid][metric] - left[sid][metric] for sid in common],

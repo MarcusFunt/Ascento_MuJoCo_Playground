@@ -421,6 +421,9 @@ function RunsPage() {
                 <div><span>Action-controller ABI</span><strong>{detail.action_contract?.status || 'legacy'}</strong></div>
                 <div><span>Plant ABI</span><strong>{detail.plant_contract?.status || 'legacy'}</strong></div>
               </div>
+              {detail.task_contract?.status !== 'current' && detail.task_contract?.compatibility?.reason && (
+                <p className="runs-hint">Task-contract status: {detail.task_contract.compatibility.reason}</p>
+              )}
               {detail.run_info?.long_horizon_candidate_checkpoint && <p className="runs-hint">Long-horizon candidate: <code>{detail.run_info.long_horizon_candidate_checkpoint}</code>. Evaluate it deterministically with balance_gate_v5 before selecting it.</p>}
               {detail.run_info?.command && <details className="runs-command"><summary>Training arguments and launch command</summary><pre>{Array.isArray(detail.run_info.command) ? detail.run_info.command.join('\n') : detail.run_info.command}</pre></details>}
               {active && <button className="runs-button danger full" disabled={busy || detail.state === 'stopping'} onClick={stopRun}>{detail.state === 'stopping' ? 'Stopping…' : 'Graceful stop'}</button>}

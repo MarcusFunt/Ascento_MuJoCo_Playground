@@ -599,6 +599,11 @@ def build_parser() -> argparse.ArgumentParser:
         ("rank-motion", "ascento_mjlab.tools.motion_quality", "rank captures for visual review"),
         ("reward-probe", "ascento_mjlab.tools.reward_probe", "inspect reward terms"),
         (
+            "initialize-transfer",
+            "ascento_mjlab.tools.initialize_transfer",
+            "create a new task checkpoint from compatible actor weights",
+        ),
+        (
             "controller-probe",
             "ascento_mjlab.tools.controller_probe",
             "characterize neutral hold, wheel signs, and PI reset",

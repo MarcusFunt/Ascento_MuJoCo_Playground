@@ -1,5 +1,6 @@
 import importlib
 import json
+from types import SimpleNamespace
 
 
 def _load_app(monkeypatch, artifact_root):
@@ -83,3 +84,23 @@ def test_run_summary_download_is_json_safe(monkeypatch, tmp_path):
     assert payload["run_info"]["task"] == "Ascento-Balance-Flat"
     assert payload["training_health"]["non_finite_updates"] == 1
     assert payload["telemetry"]["metrics"]["Train/mean_reward"] is None
+
+
+def test_sampled_telemetry_reports_canonical_coverage(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(module, "_run", lambda _run_id: SimpleNamespace(path=tmp_path))
+    monkeypatch.setattr(
+        module,
+        "load_training_records",
+        lambda *_args, **_kwargs: [
+            {"completed_steps": 1, "metrics": {"Train/mean_reward": 1.0}},
+            {"completed_steps": 2, "metrics": {"Train/mean_reward": 2.0}},
+            {"completed_steps": 3, "metrics": {"Train/mean_reward": 3.0}},
+        ],
+    )
+
+    payload = module.telemetry("run", max_points=2)
+
+    assert len(payload["records"]) == 2
+    assert payload["coverage"]["reward"] == {"present": 2, "missing": 0}
+    assert payload["coverage"]["ppo_loss"] == {"present": 0, "missing": 2}

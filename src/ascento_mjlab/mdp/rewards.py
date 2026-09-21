@@ -273,6 +273,43 @@ def action_rate_penalty(env: ManagerBasedRlEnv, reference_dt: float = 0.01) -> t
     return torch.mean(torch.square(scaled_delta), dim=1)
 
 
+def settled_action_second_difference_penalty(
+    env: ManagerBasedRlEnv,
+    reference_dt: float = 0.01,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Penalize alternating actions only after the robot has reached equilibrium.
+
+    A first-order action-rate cost cannot distinguish a smooth correction from
+    an A-B-A-B command sequence with the same average action.  The discrete
+    second difference exposes that alternating component.  Multiplying it by
+    :func:`settled_balance` leaves genuine disturbance recovery largely
+    unregularized: tilt, translational speed, angular speed, target-heading
+    error, height error, or loss of wheel support all reduce the penalty.
+    """
+    if reference_dt <= 0.0 or env.step_dt <= 0.0:
+        raise ValueError("time steps must be positive")
+    acceleration = (
+        env.action_manager.action
+        - 2.0 * env.action_manager.prev_action
+        + env.action_manager.prev_prev_action
+    )
+    scaled_acceleration = acceleration * (reference_dt / float(env.step_dt)) ** 2
+    return settled_balance(env, asset_cfg=asset_cfg) * torch.mean(
+        torch.square(scaled_acceleration), dim=1
+    )
+
+
+def settled_body_rocking_penalty(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Penalize roll/pitch rocking only in the supported, near-static state."""
+    asset: Entity = env.scene[asset_cfg.name]
+    rocking_energy = torch.mean(torch.square(asset.data.root_link_ang_vel_b[:, :2]), dim=1)
+    return settled_balance(env, asset_cfg=asset_cfg) * rocking_energy
+
+
 def track_velocity(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",

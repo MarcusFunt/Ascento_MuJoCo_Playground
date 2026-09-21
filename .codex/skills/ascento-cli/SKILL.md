@@ -72,10 +72,12 @@ calling it acceptable. Training reward, horizon-reaching episode length, and
 clips alone are not pass criteria.
 
 An evaluator directory with `suite.json` but no `manifest.json` is
-`INCOMPLETE`, usually because it was interrupted or is still running. Do not
-infer a gate result from it. Inspect with `evaluate report` or rerun after
-repairing the underlying issue. Archive copies are constrained below the
-evaluation root and do not delete source evidence.
+`INCOMPLETE`, usually because it was interrupted or is still running. A
+checkpoint-contract rejection instead writes a complete `INVALID` artifact
+with its preflight reason and returns exit code 2. Do not infer a gate result
+from either state. Inspect with `evaluate report` or rerun after repairing the
+underlying issue. Archive copies are constrained below the evaluation root and
+do not delete source evidence.
 
 Use `evaluate screen` to reduce a candidate set and `evaluate compare` only for
 compatible completed evaluation artifacts. Use `evaluate preflight` before a

@@ -370,7 +370,7 @@
           ],
           "exit_codes": {
             "0": "PASS",
-            "2": "Valid non-PASS evaluator status"
+            "2": "Valid non-PASS evaluator status or invalid checkpoint preflight"
           },
           "mutates": [
             "evaluation evidence directory",
@@ -415,7 +415,7 @@
           ]
         },
         "compare": {
-          "description": "Compute paired metric deltas for two completed evaluations.",
+          "description": "Compute paired metric deltas for two completed evaluations. Includes quality_baseline_verdict when both artifacts contain gate reports; a failed hard candidate gate is WORSE.",
           "positionals": [
             {
               "name": "baseline",
@@ -621,6 +621,15 @@
         "reward-probe": {
           "module": "ascento_mjlab.tools.reward_probe",
           "arguments": []
+        },
+        "initialize-transfer": {
+          "module": "ascento_mjlab.tools.initialize_transfer",
+          "arguments": [
+            "--source CHECKPOINT (required)",
+            "--task TASK (required)",
+            "--output CHECKPOINT (required)"
+          ],
+          "result": "Copies only compatible actor weights and actor observation normalization; critic, optimizer, iteration, and environment state are fresh."
         },
         "controller-probe": {
           "module": "ascento_mjlab.tools.controller_probe",

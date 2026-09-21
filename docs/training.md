@@ -23,13 +23,75 @@ commands when the active environment is not already configured for it.
 | Stage | Task | Learns | Training-only conditions | Acceptance suite |
 | --- | --- | --- | --- | --- |
 | 1 | `Ascento-Balance-Flat` | Supported balance at a per-environment world position and heading target, controlled effort, recovery from planar pushes | Curriculum through 20, 60, 120, and 300 s; a cardinal push between 4–6 s | `balance_gate_v5` |
-| 2 | `Ascento-Velocity-Flat` | Linear velocity, yaw-rate, and height tracking | Random twist/height resampling every 3–6 s | `velocity_gate_v1` |
-| 3 | `Ascento-Recovery-Flat` | Wide-reset stabilization and recovery after a physical push | Broad initial roll/pitch/velocity envelope; interval push only during training | `recovery_gate_v1` |
-| 4 | `Ascento-Jump-Flat` | Commanded crouch, takeoff, flight, landing, distance, and post-landing stabilization | Flat-ground compound motion command | `jump_gate_v1` |
+| 2 | `Ascento-Locomotion-Flat` | Standing and world-target locomotion through the balance actor interface | Settle → mild push → recover → 5–20 cm target step → stop | `locomotion_sequence_gate_v1` |
+| 3 | `Ascento-Velocity-Flat` | Linear velocity, yaw-rate, and height tracking | Random twist/height resampling every 3–6 s | `velocity_gate_v1` |
+| 4 | `Ascento-Recovery-Flat` | Wide-reset stabilization and recovery after a physical push | Broad initial roll/pitch/velocity envelope; interval push only during training | `recovery_gate_v1` |
+| 5 | `Ascento-Jump-Flat` | Commanded crouch, takeoff, flight, landing, distance, and post-landing stabilization | Flat-ground compound motion command | `jump_gate_v1` |
 
 The task configurations are the source of exact reward weights and reset
 ranges. Training changes must be evaluated against their gates, not accepted
 from scalar reward or episode length alone.
+
+## Frozen quiet-balance baseline and transfer
+
+[`model_79999.pt` frozen baseline](../benchmarks/baselines/on_run_iter_79999.md)
+from the `on_run` balance run is the behavioral reference;
+`model_best_long_horizon.pt` is a known oscillatory negative fixture. Freeze
+the original checkpoint and evaluate it with `balance_gate_v5` before changing
+the original balance task. The stationary-quality suites additionally measure
+tilt, drift, heading, effort, action-rate and second-difference RMS,
+high-frequency and Nyquist action power, body rocking, roll/pitch reversals,
+contact quality, settling time, and post-settle angular velocity.
+
+Reward changes are a task-ABI change. Do not bypass the task-contract checker
+to resume 79,999 into `Ascento-Balance-Quiet-Flat`. Initialize a fresh PPO
+lineage that copies only compatible actor weights and observation
+normalization; the critic, optimizer, iteration count, and environment state
+are deliberately new:
+
+```bash
+ascento tools initialize-transfer -- \
+  --source logs/rsl_rl/<on-run>/ascento_balance/<run>/model_79999.pt \
+  --task Ascento-Balance-Quiet-Flat \
+  --output logs/transfers/balance_79999_to_quiet/model_000000.pt
+```
+
+Evaluate that transfer and every continuation on the same fixed-seed quiet
+suite, then compare the two completed artifacts. `evaluate compare` now emits
+a `quality_baseline_verdict`: a hard-gate failure is `WORSE`; two passing
+policies are `NOT_PROVEN_BETTER` until their paired quality deltas justify
+promotion.
+
+```bash
+ascento evaluate run --checkpoint logs/transfers/balance_79999_to_quiet/model_000000.pt \
+  --suite balance_quiet_quality_regression_v1 --batch-size 256 --device cuda:0
+ascento evaluate run --checkpoint <quiet-candidate.pt> \
+  --suite balance_quiet_quality_regression_v1 --batch-size 256 --device cuda:0
+ascento evaluate compare <reference-evaluation> <candidate-evaluation> --json
+```
+
+The anti-rocking reward keeps the action-rate term and adds state-weighted
+action second-difference and body-rocking terms. Their weight is highest only
+inside the settled-balance envelope, so recovery maneuvers remain available.
+The [v1 offline calibration](../benchmarks/baselines/quiet_reward_calibration_v1.md)
+records the 79,999/oscillation-fixture separation used for the initial weights.
+
+`Ascento-Locomotion-Flat` retains the balance actor's world-position and
+world-heading target channels. Its first curriculum is deliberately narrow:
+wait for 0.5–1 s of settled balance, apply a 0.05–0.15 m/s mostly fore/aft
+push, require recovery, step the target 5–20 cm, and stop. Transfer 79,999
+with the same command above but `--task Ascento-Locomotion-Flat`; only expand
+to arbitrary go-to-pose, waypoint chains, and disturbances while travelling
+after this fixed-seed gate passes and improves target completion without a
+balance-quality regression:
+
+```bash
+ascento evaluate run --checkpoint <79999-locomotion-transfer.pt> \
+  --suite locomotion_sequence_gate_v1 --batch-size 256 --device cuda:0
+ascento evaluate run --checkpoint <locomotion-candidate.pt> \
+  --suite locomotion_sequence_gate_v1 --batch-size 256 --device cuda:0
+ascento evaluate compare <transfer-evaluation> <candidate-evaluation> --json
+```
 
 Before starting or materially changing balance training, run the deterministic
 controller characterization on the intended compute backend:

@@ -34,6 +34,7 @@ HORIZON_CURRICULUM_RE = re.compile(
     r"(?:\s+top_horizon_windows=(?P<top_windows>\d+))?"
     r"(?:\s+transition=(?P<transition>\S+))?"
     r"(?:\s+timeout_fraction=(?P<timeout>\S+))?"
+    r"(?:\s+quality_fraction=(?P<quality>\S+))?"
     r"(?:\s+candidate_checkpoint=(?P<candidate>\S+))?"
 )
 
@@ -175,7 +176,14 @@ def _prepare_parent_resume_link(
     checkpoint = Path(parent_checkpoint).expanduser().resolve()
     if not checkpoint.is_file():
         raise ValueError(f"parent checkpoint does not exist: {checkpoint}")
-    expected_experiment = f"ascento_{stage}"
+    # The task configuration owns the log/experiment name.  Deriving it from
+    # the display-stage name would reject compatible transitions such as
+    # Ascento-Locomotion-Flat -> ascento_locomotion_flat.
+    from mjlab.tasks.registry import load_rl_cfg
+
+    import ascento_mjlab.tasks  # noqa: F401
+
+    expected_experiment = str(load_rl_cfg(task).experiment_name)
     if checkpoint.parent.parent.name != expected_experiment:
         raise ValueError(
             "parent checkpoint must be inside the matching managed experiment "
@@ -228,6 +236,8 @@ def _runtime_status_from_line(line: str) -> dict[str, Any]:
             values["horizon_transition"] = horizon.group("transition")
         if horizon.group("timeout") is not None:
             values["horizon_timeout_fraction"] = float(horizon.group("timeout"))
+        if horizon.group("quality") is not None:
+            values["horizon_stationary_quality_fraction"] = float(horizon.group("quality"))
         if horizon.group("candidate") is not None:
             values["long_horizon_candidate_checkpoint"] = horizon.group("candidate")
     return values
@@ -262,6 +272,24 @@ def _file_sha256(path: Path) -> str | None:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _checkpoint_contracts(path: Path) -> tuple[dict[str, Any], str | None]:
+    """Read runtime-produced contracts from a finished checkpoint."""
+    try:
+        import torch
+
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        return {}, str(error)
+    infos = payload.get("infos") if isinstance(payload, dict) else None
+    if not isinstance(infos, dict):
+        return {}, "checkpoint has no provenance infos payload"
+    return {
+        key: infos.get(key)
+        for key in ("plant_contract", "action_contract", "task_contract")
+        if isinstance(infos.get(key), dict)
+    }, None
 
 
 def _package_versions() -> dict[str, str]:
@@ -360,13 +388,24 @@ def _finalize_experiment_manifest(path: Path, run_dir: Path) -> None:
     checkpoint = _latest_checkpoint(run_dir)
     if checkpoint:
         checkpoint_path = run_dir / checkpoint
+        launch_contracts = {
+            key: manifest.get(key)
+            for key in ("plant_contract", "action_contract", "task_contract")
+        }
+        contracts, contract_error = _checkpoint_contracts(checkpoint_path)
         manifest["checkpoint"] = {
             "path": checkpoint,
             "sha256": _file_sha256(checkpoint_path),
-            "plant_contract": manifest.get("plant_contract"),
-            "action_contract": manifest.get("action_contract"),
-            "task_contract": manifest.get("task_contract"),
+            "plant_contract": contracts.get("plant_contract"),
+            "action_contract": contracts.get("action_contract"),
+            "task_contract": contracts.get("task_contract"),
         }
+        if contract_error is not None:
+            manifest["checkpoint"]["contract_read_error"] = contract_error
+        if contracts:
+            manifest["launch_contracts"] = launch_contracts
+            for key, value in contracts.items():
+                manifest[key] = value
     write_metadata(path, **manifest)
 
 
@@ -433,7 +472,9 @@ def main() -> int:
     if "--output" in training_args:
         parser.error("do not pass --output; dashboard.launch assigns an isolated run directory")
 
-    stage = args.task.removeprefix("Ascento-").removesuffix("-Flat").lower()
+    stage = (
+        args.task.removeprefix("Ascento-").removesuffix("-Flat").lower().replace("-", "_")
+    )
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = args.name or f"{stamp}_{stage}"
     run_dir = (args.artifact_root.expanduser().resolve() / run_name).resolve()

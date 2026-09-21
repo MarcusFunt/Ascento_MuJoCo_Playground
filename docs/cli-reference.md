@@ -140,9 +140,10 @@ ascento evaluate run (--checkpoint PATH | --run-id RUN_ID) --suite ID_OR_TOML [o
 | `--clip-takes N` | `3` | Capture takes when rendering clips |
 | `--clip-steps N` | `600` | Steps per rendered capture |
 
-The command returns zero only for `PASS`, returns 2 for a valid non-pass, and
-prints the completed artifact details. It must not be used to infer a policy
-result from a partial directory.
+The command returns zero only for `PASS` and returns 2 for a valid non-pass or
+an invalid checkpoint preflight. Contract rejection still writes a completed,
+inspectable artifact with the compatibility decision and reason; it must not be
+used to infer a policy result from a partial directory.
 
 ### `evaluate screen`
 
@@ -159,7 +160,7 @@ candidate set, then run the authoritative suite on selected checkpoints.
 
 | Command | Arguments | Extra options | Result |
 | --- | --- | --- | --- |
-| `evaluate compare` | `BASELINE CANDIDATE` | `--output PATH` | Paired deltas for compatible stored scenarios; optionally writes JSON below output root |
+| `evaluate compare` | `BASELINE CANDIDATE` | `--output PATH` | Paired deltas for compatible stored scenarios; optionally writes JSON below output root. When both artifacts contain gate reports, includes a hard-gate baseline verdict (`WORSE`, `BETTER`, or `NOT_PROVEN_BETTER`) |
 | `evaluate list` | none | `--limit N` (50) | Newest complete and incomplete report summaries |
 | `evaluate report` | `EVALUATION` | — | Manifest, gates, consistency, failures, suite, and clips payload |
 | `evaluate archive` | `EVALUATION` | `--output FILE.zip` | ZIP copy of one evaluation directory; output must remain below output root |
@@ -221,6 +222,7 @@ Use the separator so their flags cannot be parsed as outer CLI options.
 | `tools clip-motion -- INPUT.npz` | `tools.clip_motion` | `--output PATH`, `--fps FPS`, `--event all|takeoff|landing`, `--pre-roll S` (0.5), `--post-roll S` (0.5) |
 | `tools rank-motion -- INPUT…` | `tools.motion_quality` | one or more NPZ files/directories; `--top N`, `--output PATH` |
 | `tools reward-probe` | `tools.reward_probe` | no arguments; prints deterministic reward-geometry checks |
+| `tools initialize-transfer --` | `tools.initialize_transfer` | `--source CHECKPOINT`, `--task TASK`, `--output CHECKPOINT`; copies only compatible actor weights and actor normalization into a fresh task lineage |
 | `tools controller-probe` | `tools.controller_probe` | `--device DEVICE` (CPU), `--duration-s S` (20), `--direction-duration-s S` (0.1), `--wheel-action A` (0.05), `--json`; records neutral behavior and checks wheel directions plus indexed PI reset |
 | `tools replay-evaluation -- EVAL_DIR` | `evaluation.replay` | `--scenario ID` required, `--checkpoint PATH`, `--viewer native|viser`, `--device DEVICE` |
 
@@ -229,6 +231,8 @@ Examples:
 ```bash
 ascento tools clip-motion -- captures/run/take_000.npz --event landing --fps 24
 ascento tools rank-motion -- captures/run --top 5 --output captures/run/ranking.json
+ascento tools initialize-transfer -- --source model_79999.pt \
+  --task Ascento-Locomotion-Flat --output logs/transfers/locomotion/model_000000.pt
 ascento tools controller-probe -- --device cuda:0 --json
 ascento tools replay-evaluation -- evaluations/<id> \
   --scenario recovery_gate_v1/recovery_random/000000 --viewer native

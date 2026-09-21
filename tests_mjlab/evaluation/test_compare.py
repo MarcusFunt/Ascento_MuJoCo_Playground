@@ -3,7 +3,7 @@ import json
 import pytest
 
 from ascento_mjlab.control_contract import current_action_contract
-from ascento_mjlab.evaluation.compare import ensure_compatible_plants
+from ascento_mjlab.evaluation.compare import ensure_compatible_plants, quality_baseline_verdict
 from ascento_mjlab.plant_contract import current_plant_contract
 
 
@@ -40,3 +40,46 @@ def test_comparison_accepts_exact_matching_plant_contracts(tmp_path):
     _manifest(candidate, contract)
 
     ensure_compatible_plants(base, candidate)
+
+
+def test_quality_baseline_verdict_rejects_a_candidate_that_fails_a_hard_gate(tmp_path):
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    base.mkdir()
+    candidate.mkdir()
+    (base / "gate.json").write_text(
+        json.dumps({"status": "PASS", "gates": []}), encoding="utf-8"
+    )
+    (candidate / "gate.json").write_text(
+        json.dumps(
+            {
+                "status": "FAIL",
+                "gates": [{"gate_id": "heading", "hard": True, "passed": False}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert quality_baseline_verdict(base, candidate) == {
+        "baseline_status": "PASS",
+        "candidate_status": "FAIL",
+        "verdict": "WORSE",
+        "reason": "candidate failed hard quality gates",
+        "failed_hard_gates": ["heading"],
+    }
+
+
+def test_quality_baseline_verdict_requires_matching_known_suites(tmp_path):
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    base.mkdir()
+    candidate.mkdir()
+    for directory, suite in ((base, "quality_v1"), (candidate, "other_quality_v1")):
+        (directory / "gate.json").write_text(
+            json.dumps({"status": "PASS", "gates": []}), encoding="utf-8"
+        )
+        (directory / "manifest.json").write_text(
+            json.dumps({"suite_id": suite}), encoding="utf-8"
+        )
+
+    assert quality_baseline_verdict(base, candidate) is None

@@ -17,6 +17,7 @@ BINARY_METRICS = {
     "jump_takeoff",
     "jump_landing",
     "jump_recovered_landing",
+    "target_arrived",
 }
 
 

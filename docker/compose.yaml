@@ -15,8 +15,6 @@ services:
       - ../evaluations:/workspace/evaluations
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
-      ASCENTO_REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
-      ASCENTO_REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
 
   dashboard:
     image: ascento-mjlab:local
@@ -43,7 +41,5 @@ services:
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
       ASCENTO_ARTIFACT_ROOT: /workspace/logs/rsl_rl
-      ASCENTO_REPOSITORY_COMMIT: ${ASCENTO_REPOSITORY_COMMIT:-unknown}
-      ASCENTO_REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
       ASCENTO_SUPERVISOR_SOCKET: /run/ascento-supervisor/supervisor.sock
     restart: unless-stopped
