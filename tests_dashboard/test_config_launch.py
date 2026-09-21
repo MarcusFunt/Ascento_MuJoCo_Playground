@@ -1,5 +1,6 @@
 import hashlib
 import json
+import pickle
 from copy import deepcopy
 
 import dashboard.launch as launch
@@ -154,6 +155,49 @@ def test_launcher_accepts_parent_checkpoint_with_current_contracts(tmp_path):
     )
 
     launch._validate_parent_checkpoint(checkpoint, "Ascento-Balance-Flat")
+
+
+@pytest.mark.parametrize(
+    "load_error",
+    [EOFError("truncated checkpoint"), pickle.UnpicklingError("invalid checkpoint")],
+)
+def test_launcher_rejects_parent_checkpoint_deserialization_errors(
+    tmp_path, monkeypatch, load_error
+):
+    checkpoint = tmp_path / "parent.pt"
+    checkpoint.write_bytes(b"invalid")
+
+    def fail_load(*_args, **_kwargs):
+        raise load_error
+
+    monkeypatch.setattr(torch, "load", fail_load)
+
+    with pytest.raises(ValueError, match="cannot read parent checkpoint contracts"):
+        launch._validate_parent_checkpoint(checkpoint, "Ascento-Balance-Flat")
+
+
+@pytest.mark.parametrize(
+    "load_error",
+    [EOFError("truncated checkpoint"), pickle.UnpicklingError("invalid checkpoint")],
+)
+def test_finalization_records_checkpoint_deserialization_errors(
+    tmp_path, monkeypatch, load_error
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "model_10.pt").write_bytes(b"invalid")
+    manifest_path = run_dir / "experiment_manifest.json"
+    manifest_path.write_text(json.dumps({"task": "synthetic"}), encoding="utf-8")
+
+    def fail_load(*_args, **_kwargs):
+        raise load_error
+
+    monkeypatch.setattr(torch, "load", fail_load)
+
+    launch._finalize_experiment_manifest(manifest_path, run_dir)
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert str(load_error) in manifest["checkpoint"]["contract_read_error"]
 
 
 def test_final_manifest_uses_actual_checkpoint_contracts_and_preserves_launch_contracts(tmp_path):

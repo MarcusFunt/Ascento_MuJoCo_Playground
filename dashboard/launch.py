@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import pickle
 import re
 import signal
 import subprocess
@@ -38,6 +39,7 @@ HORIZON_CURRICULUM_RE = re.compile(
     r"(?:\s+quality_fraction=(?P<quality>\S+))?"
     r"(?:\s+candidate_checkpoint=(?P<candidate>\S+))?"
 )
+CHECKPOINT_READ_ERRORS = (EOFError, OSError, pickle.UnpicklingError, RuntimeError, ValueError)
 
 
 def write_status(path: Path, **values: Any) -> None:
@@ -158,7 +160,7 @@ def _validate_parent_checkpoint(checkpoint: Path, task: str) -> None:
 
     try:
         payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    except (OSError, RuntimeError, ValueError) as error:
+    except CHECKPOINT_READ_ERRORS as error:
         raise ValueError(f"cannot read parent checkpoint contracts: {checkpoint}: {error}") from error
     infos = payload.get("infos") if isinstance(payload, dict) else None
     require_current_checkpoint_contracts(infos, load_env_cfg(task, play=False))
@@ -297,7 +299,7 @@ def _checkpoint_contracts(path: Path) -> tuple[dict[str, Any], str | None]:
         import torch
 
         payload = torch.load(path, map_location="cpu", weights_only=True)
-    except (OSError, RuntimeError, ValueError) as error:
+    except CHECKPOINT_READ_ERRORS as error:
         return {}, str(error)
     infos = payload.get("infos") if isinstance(payload, dict) else None
     if not isinstance(infos, dict):
