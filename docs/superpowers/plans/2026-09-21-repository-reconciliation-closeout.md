@@ -140,7 +140,7 @@ Expected: Vite exits successfully and creates only its normal ignored build outp
 
 **Interfaces:** Produces an approved PR from `hygiene/recovery` to `main`; no remote branch is rewritten.
 
-- [ ] **Step 1: Review the complete PR diff**
+- [x] **Step 1: Review the complete PR diff**
 
 Check the file list and diff against the refreshed `origin/main`. Confirm generated reports, checkpoints, transfers, logs, evaluations, and captures are absent from version control. Confirm the run-provenance and dirty-tree guard paths are tested at CLI, API/MCP, and launcher boundaries.
 
