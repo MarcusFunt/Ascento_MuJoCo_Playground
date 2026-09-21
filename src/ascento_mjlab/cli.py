@@ -79,7 +79,7 @@ def _start(args: argparse.Namespace) -> int:
         "parent_run_id": args.parent_run_id,
         "parent_checkpoint": args.parent_checkpoint,
         "episode_horizon_s": args.episode_horizon_s,
-        "allow_dirty_provenance": args.allow_dirty_provenance,
+        "allow_dirty_provenance": bool(getattr(args, "allow_dirty_provenance", False)),
         "training_args": training_args,
     }
     created = _service(root).create(request)
