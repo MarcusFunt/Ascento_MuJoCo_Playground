@@ -17,6 +17,7 @@ MUJOCO_LOG.TXT
 .codex-remote-attachments/
 /.codex/recovery
 .worktrees/
+/.worktrees
 
 # Dashboard frontend build/install output
 dashboard/frontend/node_modules/

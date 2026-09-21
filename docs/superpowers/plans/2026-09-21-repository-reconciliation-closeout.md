@@ -110,17 +110,17 @@ Expected: the recovery worktree contains only intentional source/docs/tests/poli
 
 **Interfaces:** Produces test, lint, and frontend-build results attached to the PR review.
 
-- [ ] **Step 1: Compare the archived dirty source with the integrated branch**
+- [x] **Step 1: Compare the archived dirty source with the integrated branch**
 
 Compare each path in `source-status-porcelain.txt`, `untracked-paths.zlist`, and `untracked-archive-members.txt` with the integrated recovery branch. Confirm each source/test/doc/suite change is either represented in the branch or explicitly classified as local generated data. If any source change is missing or differs, recover that exact path from the archive into the recovery worktree, test it, and commit it before proceeding.
 
-- [ ] **Step 2: Run the full Python test suite**
+- [x] **Step 2: Run the full Python test suite**
 
 Run from the recovery worktree: `uv run --frozen --extra cpu --extra dashboard pytest -q tests_mjlab tests_dashboard`
 
 Expected: all tests pass. Investigate and fix failures on the recovery branch; do not weaken assertions to obtain a pass.
 
-- [ ] **Step 3: Run lint and whitespace checks**
+- [x] **Step 3: Run lint and whitespace checks**
 
 Run: `uv run --frozen --extra cpu --extra dashboard ruff check .`
 
@@ -128,7 +128,7 @@ Run: `git diff --check`
 
 Expected: both pass with no unreviewed generated files in the diff.
 
-- [ ] **Step 4: Build the dashboard frontend**
+- [x] **Step 4: Build the dashboard frontend**
 
 Run from `dashboard/frontend`: `npm ci && npm run build`
 
