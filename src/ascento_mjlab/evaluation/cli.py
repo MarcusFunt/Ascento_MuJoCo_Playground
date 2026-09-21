@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import pickle
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -172,7 +173,7 @@ def _checkpoint_contract_preflight(checkpoint: Path, task: str) -> dict[str, Any
     """Read and validate checkpoint contracts before allocating a simulator world."""
     try:
         payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    except (OSError, RuntimeError, ValueError) as error:
+    except (EOFError, OSError, pickle.UnpicklingError, RuntimeError, ValueError) as error:
         return {
             "status": "invalid",
             "reason": f"cannot read checkpoint contracts: {error}",

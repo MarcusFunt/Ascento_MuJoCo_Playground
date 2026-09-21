@@ -1,5 +1,7 @@
+import pickle
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from ascento_mjlab.evaluation import cli as evaluation_cli
@@ -7,7 +9,13 @@ from ascento_mjlab.evaluation.schema import EvaluationStatus, ScenarioSpec, Suit
 from ascento_mjlab.task_contract import current_task_contract
 
 
-def test_rejected_checkpoint_writes_complete_invalid_evaluation_artifacts(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "load_error",
+    [None, EOFError("truncated checkpoint"), pickle.UnpicklingError("invalid checkpoint")],
+)
+def test_rejected_checkpoint_writes_complete_invalid_evaluation_artifacts(
+    monkeypatch, tmp_path, load_error
+):
     cfg = SimpleNamespace(
         task_id="synthetic",
         decimation=5,
@@ -31,6 +39,12 @@ def test_rejected_checkpoint_writes_complete_invalid_evaluation_artifacts(monkey
     )
     checkpoint = tmp_path / "model_1.pt"
     torch.save({"infos": {}}, checkpoint)
+    if load_error is not None:
+        monkeypatch.setattr(
+            evaluation_cli.torch,
+            "load",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(load_error),
+        )
     scenario = ScenarioSpec(
         scenario_id="scenario",
         family="nominal",
@@ -74,3 +88,4 @@ def test_rejected_checkpoint_writes_complete_invalid_evaluation_artifacts(monkey
     assert (output / "gate.json").is_file()
     assert (output / "consistency.json").is_file()
     assert (output / "report.html").is_file()
+    assert '"status": "invalid"' in (output / "manifest.json").read_text(encoding="utf-8")

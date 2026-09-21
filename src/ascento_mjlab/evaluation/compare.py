@@ -94,7 +94,7 @@ def quality_baseline_verdict(base: Path, candidate: Path) -> dict | None:
         return None
     baseline_suite = _suite_id(base)
     candidate_suite = _suite_id(candidate)
-    if baseline_suite is not None and candidate_suite is not None and baseline_suite != candidate_suite:
+    if baseline_suite is None or candidate_suite is None or baseline_suite != candidate_suite:
         return None
 
     baseline_status = baseline.get("status")

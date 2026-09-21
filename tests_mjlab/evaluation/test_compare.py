@@ -59,6 +59,10 @@ def test_quality_baseline_verdict_rejects_a_candidate_that_fails_a_hard_gate(tmp
         ),
         encoding="utf-8",
     )
+    for directory in (base, candidate):
+        (directory / "manifest.json").write_text(
+            json.dumps({"suite_id": "quality_v1"}), encoding="utf-8"
+        )
 
     assert quality_baseline_verdict(base, candidate) == {
         "baseline_status": "PASS",
@@ -81,5 +85,22 @@ def test_quality_baseline_verdict_requires_matching_known_suites(tmp_path):
         (directory / "manifest.json").write_text(
             json.dumps({"suite_id": suite}), encoding="utf-8"
         )
+
+    assert quality_baseline_verdict(base, candidate) is None
+
+
+def test_quality_baseline_verdict_requires_both_suite_ids(tmp_path):
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    base.mkdir()
+    candidate.mkdir()
+    for directory in (base, candidate):
+        (directory / "gate.json").write_text(
+            json.dumps({"status": "PASS", "gates": []}), encoding="utf-8"
+        )
+    (base / "manifest.json").write_text(
+        json.dumps({"suite_id": "quality_v1"}), encoding="utf-8"
+    )
+    (candidate / "manifest.json").write_text("{}", encoding="utf-8")
 
     assert quality_baseline_verdict(base, candidate) is None

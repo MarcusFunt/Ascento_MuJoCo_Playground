@@ -51,13 +51,19 @@ def working_tree_state(repo_root: Path) -> WorkingTreeState:
     """Describe all nonignored source changes relative to the current commit."""
     root = repo_root.expanduser().resolve()
     if not (root / ".git").exists():
-        commit = os.environ.get("ASCENTO_REPOSITORY_COMMIT") or None
-        branch = os.environ.get("ASCENTO_REPOSITORY_BRANCH") or None
+        commit = os.environ.get("ASCENTO_REPOSITORY_COMMIT", "").strip() or None
+        branch = os.environ.get("ASCENTO_REPOSITORY_BRANCH", "").strip() or None
         build_status = os.environ.get("ASCENTO_REPOSITORY_DIRTY", "").strip().lower()
-        if not commit or build_status not in {"0", "false", "clean"}:
+        if (
+            not commit
+            or commit.lower() == "unknown"
+            or not branch
+            or branch.lower() == "unknown"
+            or build_status not in {"0", "false", "clean"}
+        ):
             raise ValueError(
                 "repository Git metadata is unavailable; managed runs require a known commit "
-                "from a verified clean image provenance build"
+                "and branch from a verified clean image provenance build"
             )
         return WorkingTreeState(commit, branch, (), (), source="image")
 

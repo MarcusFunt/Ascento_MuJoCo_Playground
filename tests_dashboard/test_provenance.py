@@ -42,6 +42,34 @@ def test_state_uses_verified_image_provenance_without_git_metadata(tmp_path, mon
     assert not state.is_dirty
 
 
+@pytest.mark.parametrize(
+    ("commit", "branch"),
+    [
+        (None, "main"),
+        ("", "main"),
+        ("unknown", "main"),
+        ("image-commit", None),
+        ("image-commit", ""),
+        ("image-commit", "unknown"),
+    ],
+)
+def test_state_rejects_image_provenance_without_known_commit_and_branch(
+    tmp_path, monkeypatch, commit, branch
+):
+    if commit is None:
+        monkeypatch.delenv("ASCENTO_REPOSITORY_COMMIT", raising=False)
+    else:
+        monkeypatch.setenv("ASCENTO_REPOSITORY_COMMIT", commit)
+    if branch is None:
+        monkeypatch.delenv("ASCENTO_REPOSITORY_BRANCH", raising=False)
+    else:
+        monkeypatch.setenv("ASCENTO_REPOSITORY_BRANCH", branch)
+    monkeypatch.setenv("ASCENTO_REPOSITORY_DIRTY", "0")
+
+    with pytest.raises(ValueError, match="verified clean image provenance"):
+        working_tree_state(tmp_path)
+
+
 @pytest.mark.parametrize("dirty_status", [None, "1", "unknown"])
 def test_state_rejects_unverified_image_provenance(tmp_path, monkeypatch, dirty_status):
     monkeypatch.setenv("ASCENTO_REPOSITORY_COMMIT", "image-commit")
