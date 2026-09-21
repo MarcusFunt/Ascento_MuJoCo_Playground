@@ -276,12 +276,192 @@ class OneShotPlanarVelocityPush:
         self._pushed[ids] = True
 
 
+class SettleTriggeredLocomotionSequence:
+    """One settled-state push followed by one nearby world-frame target step.
+
+    The event is evaluated at a fixed short interval, but neither transition is
+    clock-triggered.  Each environment must hold the same low-motion/support
+    envelope used by the balance objective before it receives its mild push,
+    and must settle again before its 5--20 cm target changes.  This produces a
+    clean first locomotion curriculum: settle -> push -> recover -> go-to-pose
+    -> stop.
+    """
+
+    _PHASE_WAITING_FOR_INITIAL_SETTLE = 0
+    _PHASE_WAITING_FOR_RECOVERY = 1
+    _PHASE_WAITING_FOR_TARGET_STOP = 2
+    _PHASE_COMPLETE = 3
+
+    def __init__(self, cfg, env) -> None:
+        del cfg
+        self._phase = torch.zeros(env.num_envs, dtype=torch.int64, device=env.device)
+        self._settled_time_s = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+
+    def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+        if env_ids is None:
+            self._phase.zero_()
+            self._settled_time_s.zero_()
+            return
+        ids = _resolved_env_ids_placeholder(env_ids, self._phase.device, self._phase.numel())
+        self._phase[ids] = self._PHASE_WAITING_FOR_INITIAL_SETTLE
+        self._settled_time_s[ids] = 0.0
+
+    def __call__(
+        self,
+        env,
+        env_ids: torch.Tensor | slice | None,
+        *,
+        settle_hold_s: float = 0.75,
+        min_delta_v: float = 0.05,
+        max_delta_v: float = 0.15,
+        fore_aft_probability: float = 0.75,
+        min_target_distance_m: float = 0.05,
+        max_target_distance_m: float = 0.20,
+        target_reached_distance_m: float = 0.035,
+        asset_cfg: SceneEntityCfg,
+    ) -> None:
+        if settle_hold_s <= 0.0:
+            raise ValueError("settle_hold_s must be positive")
+        if not 0.0 < min_delta_v <= max_delta_v:
+            raise ValueError("locomotion push requires 0 < min_delta_v <= max_delta_v")
+        if not 0.0 < fore_aft_probability <= 1.0:
+            raise ValueError("fore_aft_probability must be in (0, 1]")
+        if not 0.0 < min_target_distance_m <= max_target_distance_m:
+            raise ValueError("target distance requires 0 < min <= max")
+        if target_reached_distance_m <= 0.0:
+            raise ValueError("target_reached_distance_m must be positive")
+
+        ids = _resolved_env_ids(env, env_ids)
+        if ids.numel() == 0:
+            return
+        asset = env.scene[asset_cfg.name]
+        settled = _is_settled_for_locomotion(env, asset, ids)
+        self._settled_time_s[ids] = torch.where(
+            settled,
+            self._settled_time_s[ids] + float(env.step_dt),
+            torch.zeros_like(self._settled_time_s[ids]),
+        )
+        eligible = ids[self._settled_time_s[ids] >= settle_hold_s]
+        if eligible.numel() == 0:
+            return
+        # Snapshot phases so a transition cannot cascade (settle -> push ->
+        # target) within one event tick.
+        eligible_phase = self._phase[eligible].clone()
+
+        initial = eligible[eligible_phase == self._PHASE_WAITING_FOR_INITIAL_SETTLE]
+        if initial.numel() > 0:
+            _apply_cardinal_planar_push(
+                env,
+                asset,
+                initial,
+                min_delta_v=min_delta_v,
+                max_delta_v=max_delta_v,
+                fore_aft_probability=fore_aft_probability,
+            )
+            self._phase[initial] = self._PHASE_WAITING_FOR_RECOVERY
+            self._settled_time_s[initial] = 0.0
+
+        recovered = eligible[eligible_phase == self._PHASE_WAITING_FOR_RECOVERY]
+        if recovered.numel() > 0:
+            _set_nearby_world_targets(
+                env,
+                asset,
+                recovered,
+                min_distance_m=min_target_distance_m,
+                max_distance_m=max_target_distance_m,
+            )
+            self._phase[recovered] = self._PHASE_WAITING_FOR_TARGET_STOP
+            self._settled_time_s[recovered] = 0.0
+
+        stopping = eligible[eligible_phase == self._PHASE_WAITING_FOR_TARGET_STOP]
+        if stopping.numel() > 0:
+            distance = torch.linalg.vector_norm(
+                asset.data.root_link_pos_w[stopping, :2] - world_target_xy(env)[stopping], dim=1
+            )
+            complete = stopping[distance <= target_reached_distance_m]
+            self._phase[complete] = self._PHASE_COMPLETE
+
+
+def _resolved_env_ids_placeholder(
+    env_ids: torch.Tensor | slice, device: torch.device, num_envs: int
+) -> torch.Tensor:
+    """Resolve ids for an EventTerm.reset callback, which lacks ``env``."""
+    ids = torch.arange(num_envs, dtype=torch.long, device=device)
+    if isinstance(env_ids, slice):
+        return ids[env_ids]
+    return env_ids.reshape(-1).to(dtype=torch.long, device=device)
+
+
+def _is_settled_for_locomotion(env, asset, ids: torch.Tensor) -> torch.Tensor:
+    """Boolean low-motion/support envelope matching ``settled_balance``."""
+    tilt = torch.acos((-asset.data.projected_gravity_b[ids, 2]).clamp(-1.0, 1.0))
+    planar_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_b[ids, :2], dim=1)
+    angular_speed = torch.linalg.vector_norm(asset.data.root_link_ang_vel_b[ids], dim=1)
+    heading_error = wrapped_angle_difference(
+        world_target_yaw(env)[ids], yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[ids])
+    ).abs()
+    height_error = (asset.data.root_link_pos_w[ids, 2] - 0.75).abs()
+    left = env.scene["left_wheel_contact"].data.found[ids].flatten(start_dim=1).any(dim=1)
+    right = env.scene["right_wheel_contact"].data.found[ids].flatten(start_dim=1).any(dim=1)
+    return (
+        (tilt <= 0.08)
+        & (planar_speed <= 0.10)
+        & (angular_speed <= 0.25)
+        & (heading_error <= 0.35)
+        & (height_error <= 0.05)
+        & left
+        & right
+    )
+
+
+def _apply_cardinal_planar_push(
+    env,
+    asset,
+    ids: torch.Tensor,
+    *,
+    min_delta_v: float,
+    max_delta_v: float,
+    fore_aft_probability: float,
+) -> None:
+    velocity = asset.data.root_link_vel_w[ids].clone()
+    magnitudes = torch.empty(ids.numel(), device=env.device).uniform_(min_delta_v, max_delta_v)
+    delta = torch.zeros((ids.numel(), 3), dtype=velocity.dtype, device=env.device)
+    # Use the longitudinal axis most often during the first curriculum phase,
+    # while retaining some lateral recovery examples.
+    axes = (torch.rand(ids.numel(), device=env.device) >= fore_aft_probability).long()
+    signs = torch.where(
+        torch.rand(ids.numel(), device=env.device) < 0.5, 1.0, -1.0
+    ).to(dtype=velocity.dtype)
+    body_direction = torch.zeros_like(delta)
+    body_direction[torch.arange(ids.numel(), device=env.device), axes] = signs
+    world_direction = quat_apply(asset.data.root_link_quat_w[ids], body_direction)
+    planar_direction = world_direction[:, :2]
+    planar_norm = torch.linalg.vector_norm(planar_direction, dim=1, keepdim=True).clamp_min(
+        torch.finfo(velocity.dtype).eps
+    )
+    delta[:, :2] = planar_direction / planar_norm * magnitudes.unsqueeze(1)
+    velocity[:, :3] += delta
+    asset.write_root_link_velocity_to_sim(velocity, env_ids=ids)
+
+
+def _set_nearby_world_targets(
+    env, asset, ids: torch.Tensor, *, min_distance_m: float, max_distance_m: float
+) -> None:
+    state = _world_target_state(env)
+    angles = torch.empty(ids.numel(), device=env.device).uniform_(-torch.pi, torch.pi)
+    distances = torch.empty(ids.numel(), device=env.device).uniform_(min_distance_m, max_distance_m)
+    offset = distances.unsqueeze(1) * torch.stack((torch.cos(angles), torch.sin(angles)), dim=1)
+    state["target_xy"][ids] = asset.data.root_link_pos_w[ids, :2] + offset
+    state["target_yaw"][ids] = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[ids])
+
+
 __all__ = [
     "DEFAULT_WHEEL_HALF_WIDTH_M",
     "DEFAULT_WHEEL_RADIUS_M",
     "flat_ground_wheel_bottom_heights",
     "initialize_world_target",
     "OneShotPlanarVelocityPush",
+    "SettleTriggeredLocomotionSequence",
     "reset_to_default_supported",
     "reset_root_state_supported",
     "reset_root_state_uniform",

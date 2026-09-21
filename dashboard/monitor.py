@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import threading
 import time
@@ -37,9 +38,16 @@ RUN_MARKERS = (
     "run_status.json",
     "training_manifest.json",
 )
-_TENSORBOARD_CACHE: dict[Path, tuple[tuple[int, int], Any]] = {}
+@dataclass
+class _TensorboardFileCache:
+    signature: tuple[int, int, int]
+    loader: Any
+    records: dict[int, dict[str, Any]]
+
+
+_TENSORBOARD_CACHE: dict[Path, _TensorboardFileCache] = {}
 _TENSORBOARD_RECORD_CACHE: dict[
-    Path, tuple[tuple[tuple[str, int, int], ...], int | None, list[dict[str, Any]]]
+    Path, tuple[tuple[tuple[str, int, int, int], ...], int | None, list[dict[str, Any]]]
 ] = {}
 _TENSORBOARD_LOCK = threading.Lock()
 _DISCOVERY_CACHE: dict[Path, tuple[float, list["RunRef"]]] = {}
@@ -101,25 +109,91 @@ def _training_limit(run_dir: Path) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _dashboard_scalar_tags() -> frozenset[str]:
+    """Return the TensorBoard tags that can affect dashboard health or charts."""
+    # Import lazily: dashboard.health imports this module for record loading.
+    from dashboard.health import ALIASES
+
+    return frozenset(alias for aliases in ALIASES.values() for alias in aliases)
+
+
+def _tensorboard_signature(event_file: Path) -> tuple[int, int, int] | None:
+    try:
+        stat = event_file.stat()
+    except OSError:
+        return None
+    return stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+
+def _read_tensorboard_scalars(cache: _TensorboardFileCache, selected_tags: frozenset[str]) -> None:
+    """Append new chart/health scalar events without reservoir sampling."""
+    for event in cache.loader.Load():
+        if not event.HasField("summary"):
+            continue
+        for value in event.summary.value:
+            if not value.HasField("simple_value"):
+                continue
+            scalar = float(value.simple_value)
+            tag = str(value.tag)
+            # Keep every displayed/health metric.  For all other metrics, only
+            # retain non-finite observations so global training health remains
+            # truthful without caching every TensorBoard series in memory.
+            if tag not in selected_tags and math.isfinite(scalar):
+                continue
+            step = int(event.step)
+            record = cache.records.setdefault(
+                step,
+                {"completed_steps": step, "metrics": {}},
+            )
+            record["metrics"][tag] = scalar
+            record["wall_time"] = float(event.wall_time)
+
+
+def _tensorboard_file_records(
+    event_file: Path, signature: tuple[int, int, int], selected_tags: frozenset[str]
+) -> dict[int, dict[str, Any]]:
+    cached = _TENSORBOARD_CACHE.get(event_file)
+    # An inode change or shrink means a TensorBoard writer was replaced; replay
+    # the new file rather than retaining stale scalar history.
+    if (
+        cached is None
+        or cached.signature[0] != signature[0]
+        or signature[2] < cached.signature[2]
+    ):
+        from tensorboard.backend.event_processing.event_file_loader import LegacyEventFileLoader
+
+        cached = _TensorboardFileCache(
+            signature=signature,
+            loader=LegacyEventFileLoader(str(event_file)),
+            records={},
+        )
+        _TENSORBOARD_CACHE[event_file] = cached
+        _read_tensorboard_scalars(cached, selected_tags)
+    elif cached.signature != signature:
+        _read_tensorboard_scalars(cached, selected_tags)
+        cached.signature = signature
+    return cached.records
+
+
 def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
-    """Convert native RSL-RL TensorBoard scalars to the dashboard schema."""
+    """Convert relevant TensorBoard scalars to aligned dashboard records."""
     # RSL-RL stores TensorBoard events inside its timestamped experiment
     # directory, not necessarily at the managed run root.
     event_files = sorted(run_dir.rglob("events.out.tfevents.*"))
     if not event_files:
         return []
     try:
-        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+        from tensorboard.backend.event_processing.event_file_loader import (
+            LegacyEventFileLoader,  # noqa: F401
+        )
     except ImportError:
         return []
 
     signatures = []
     for event_file in event_files:
-        try:
-            stat = event_file.stat()
-        except OSError:
-            continue
-        signatures.append((str(event_file), stat.st_mtime_ns, stat.st_size))
+        signature = _tensorboard_signature(event_file)
+        if signature is not None:
+            signatures.append((str(event_file), *signature))
     signature_key = tuple(signatures)
     total = _training_limit(run_dir)
 
@@ -133,36 +207,23 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
         active_files = set(event_files)
         for cached_file in set(_TENSORBOARD_CACHE) - active_files:
             del _TENSORBOARD_CACHE[cached_file]
+        selected_tags = _dashboard_scalar_tags()
         for event_file in event_files:
             try:
-                stat = event_file.stat()
-                signature = (stat.st_mtime_ns, stat.st_size)
-                cached = _TENSORBOARD_CACHE.get(event_file)
-                if cached is None:
-                    accumulator = EventAccumulator(
-                        str(event_file), size_guidance={"scalars": 20_000}
-                    )
-                    accumulator.Reload()
-                    _TENSORBOARD_CACHE[event_file] = (signature, accumulator)
-                else:
-                    cached_signature, accumulator = cached
-                    if cached_signature != signature:
-                        accumulator.Reload()
-                        _TENSORBOARD_CACHE[event_file] = (signature, accumulator)
+                signature = _tensorboard_signature(event_file)
+                if signature is None:
+                    continue
+                file_records = _tensorboard_file_records(event_file, signature, selected_tags)
             except (KeyError, OSError, RuntimeError, ValueError):
                 continue
-            for tag in accumulator.Tags().get("scalars", []):
-                try:
-                    events = accumulator.Scalars(tag)
-                except (KeyError, RuntimeError):
-                    continue
-                for event in events:
-                    record = by_step.setdefault(
-                        int(event.step),
-                        {"completed_steps": int(event.step), "metrics": {}},
-                    )
-                    record["metrics"][tag] = float(event.value)
-                    record["wall_time"] = float(event.wall_time)
+            for step, source in file_records.items():
+                record = by_step.setdefault(
+                    step,
+                    {"completed_steps": step, "metrics": {}},
+                )
+                record["metrics"].update(source["metrics"])
+                if "wall_time" in source:
+                    record["wall_time"] = source["wall_time"]
 
         records = [by_step[step] for step in sorted(by_step)]
     if total is not None:

@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import pickle
 import re
 import signal
 import subprocess
@@ -21,6 +22,7 @@ from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract
 from ascento_mjlab.task_contract import current_task_contract_for_task
 from dashboard.config import REPO_ROOT, load_config
+from dashboard.provenance import working_tree_state, write_dirty_source_bundle
 
 TRAINING_RUNTIME_RE = re.compile(
     r"Training with:\s*device=([^,\s]+),\s*seed=([^,\s]+),\s*rank=(\d+)"
@@ -34,8 +36,10 @@ HORIZON_CURRICULUM_RE = re.compile(
     r"(?:\s+top_horizon_windows=(?P<top_windows>\d+))?"
     r"(?:\s+transition=(?P<transition>\S+))?"
     r"(?:\s+timeout_fraction=(?P<timeout>\S+))?"
+    r"(?:\s+quality_fraction=(?P<quality>\S+))?"
     r"(?:\s+candidate_checkpoint=(?P<candidate>\S+))?"
 )
+CHECKPOINT_READ_ERRORS = (EOFError, OSError, pickle.UnpicklingError, RuntimeError, ValueError)
 
 
 def write_status(path: Path, **values: Any) -> None:
@@ -119,6 +123,22 @@ def git_metadata() -> dict[str, Any]:
     return {"commit": commit, "branch": branch, "dirty": dirty}
 
 
+def validate_source_provenance(destination: Path, *, allow_dirty_provenance: bool) -> dict[str, Any]:
+    """Return reproducible source provenance or reject an implicit dirty launch."""
+    state = working_tree_state(REPO_ROOT)
+    if not state.is_dirty:
+        if state.commit is None:
+            raise ValueError("managed runs require a Git commit for source provenance")
+        mode = "clean_image_build" if state.source == "image" else "clean_commit"
+        return {"mode": mode, "commit": state.commit, "branch": state.branch}
+    if not allow_dirty_provenance:
+        raise ValueError(
+            "working tree is dirty; rerun with --allow-dirty-provenance to archive it explicitly"
+        )
+    bundle = write_dirty_source_bundle(REPO_ROOT, destination / "source_provenance")
+    return {"mode": "dirty_bundle", "bundle": bundle}
+
+
 def _training_arg(training_args: list[str], *names: str) -> str | None:
     """Return the last value supplied for one of the CLI option names."""
     value: str | None = None
@@ -140,7 +160,7 @@ def _validate_parent_checkpoint(checkpoint: Path, task: str) -> None:
 
     try:
         payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    except (OSError, RuntimeError, ValueError) as error:
+    except CHECKPOINT_READ_ERRORS as error:
         raise ValueError(f"cannot read parent checkpoint contracts: {checkpoint}: {error}") from error
     infos = payload.get("infos") if isinstance(payload, dict) else None
     require_current_checkpoint_contracts(infos, load_env_cfg(task, play=False))
@@ -175,7 +195,14 @@ def _prepare_parent_resume_link(
     checkpoint = Path(parent_checkpoint).expanduser().resolve()
     if not checkpoint.is_file():
         raise ValueError(f"parent checkpoint does not exist: {checkpoint}")
-    expected_experiment = f"ascento_{stage}"
+    # The task configuration owns the log/experiment name.  Deriving it from
+    # the display-stage name would reject compatible transitions such as
+    # Ascento-Locomotion-Flat -> ascento_locomotion_flat.
+    from mjlab.tasks.registry import load_rl_cfg
+
+    import ascento_mjlab.tasks  # noqa: F401
+
+    expected_experiment = str(load_rl_cfg(task).experiment_name)
     if checkpoint.parent.parent.name != expected_experiment:
         raise ValueError(
             "parent checkpoint must be inside the matching managed experiment "
@@ -228,6 +255,8 @@ def _runtime_status_from_line(line: str) -> dict[str, Any]:
             values["horizon_transition"] = horizon.group("transition")
         if horizon.group("timeout") is not None:
             values["horizon_timeout_fraction"] = float(horizon.group("timeout"))
+        if horizon.group("quality") is not None:
+            values["horizon_stationary_quality_fraction"] = float(horizon.group("quality"))
         if horizon.group("candidate") is not None:
             values["long_horizon_candidate_checkpoint"] = horizon.group("candidate")
     return values
@@ -262,6 +291,24 @@ def _file_sha256(path: Path) -> str | None:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _checkpoint_contracts(path: Path) -> tuple[dict[str, Any], str | None]:
+    """Read runtime-produced contracts from a finished checkpoint."""
+    try:
+        import torch
+
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+    except CHECKPOINT_READ_ERRORS as error:
+        return {}, str(error)
+    infos = payload.get("infos") if isinstance(payload, dict) else None
+    if not isinstance(infos, dict):
+        return {}, "checkpoint has no provenance infos payload"
+    return {
+        key: infos.get(key)
+        for key in ("plant_contract", "action_contract", "task_contract")
+        if isinstance(infos.get(key), dict)
+    }, None
 
 
 def _package_versions() -> dict[str, str]:
@@ -308,6 +355,7 @@ def _write_experiment_manifest(
     run_dir: Path,
     sim_timestep: int | float | str | None,
     device: str | None,
+    source_provenance: dict[str, Any],
 ) -> None:
     env_count = _training_arg_value(training_args, "--env.scene.num-envs", "--num-envs")
     manifest = {
@@ -325,6 +373,7 @@ def _write_experiment_manifest(
                 "ASCENTO_ARTIFACT_ROOT",
                 "ASCENTO_REPOSITORY_COMMIT",
                 "ASCENTO_REPOSITORY_BRANCH",
+                "ASCENTO_REPOSITORY_DIRTY",
             }
         },
         "seed": _number(_training_arg_value(training_args, "--seed", "--agent.seed")),
@@ -333,6 +382,7 @@ def _write_experiment_manifest(
         "device": device,
         "packages": _package_versions(),
         "git": git,
+        "source_provenance": source_provenance,
         "checkpoint": {
             "path": None,
             "sha256": None,
@@ -360,13 +410,24 @@ def _finalize_experiment_manifest(path: Path, run_dir: Path) -> None:
     checkpoint = _latest_checkpoint(run_dir)
     if checkpoint:
         checkpoint_path = run_dir / checkpoint
+        launch_contracts = {
+            key: manifest.get(key)
+            for key in ("plant_contract", "action_contract", "task_contract")
+        }
+        contracts, contract_error = _checkpoint_contracts(checkpoint_path)
         manifest["checkpoint"] = {
             "path": checkpoint,
             "sha256": _file_sha256(checkpoint_path),
-            "plant_contract": manifest.get("plant_contract"),
-            "action_contract": manifest.get("action_contract"),
-            "task_contract": manifest.get("task_contract"),
+            "plant_contract": contracts.get("plant_contract"),
+            "action_contract": contracts.get("action_contract"),
+            "task_contract": contracts.get("task_contract"),
         }
+        if contract_error is not None:
+            manifest["checkpoint"]["contract_read_error"] = contract_error
+        if contracts:
+            manifest["launch_contracts"] = launch_contracts
+            for key, value in contracts.items():
+                manifest[key] = value
     write_metadata(path, **manifest)
 
 
@@ -391,6 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="reuse the empty run directory initialized synchronously by the dashboard API",
     )
+    parser.add_argument("--allow-dirty-provenance", action="store_true")
     parser.add_argument("--display-name", help="human-readable run name shown by the dashboard")
     parser.add_argument("--notes", default="", help="human notes stored with the run")
     parser.add_argument("--tag", action="append", default=[], help="repeatable run tag")
@@ -433,10 +495,18 @@ def main() -> int:
     if "--output" in training_args:
         parser.error("do not pass --output; dashboard.launch assigns an isolated run directory")
 
-    stage = args.task.removeprefix("Ascento-").removesuffix("-Flat").lower()
+    stage = (
+        args.task.removeprefix("Ascento-").removesuffix("-Flat").lower().replace("-", "_")
+    )
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = args.name or f"{stamp}_{stage}"
     run_dir = (args.artifact_root.expanduser().resolve() / run_name).resolve()
+    try:
+        source_state = working_tree_state(REPO_ROOT)
+    except ValueError as error:
+        parser.error(str(error))
+    if source_state.is_dirty and not args.allow_dirty_provenance:
+        parser.error("working tree is dirty; rerun with --allow-dirty-provenance to archive it explicitly")
 
     try:
         expected_files = {"run_metadata.json", "run_status.json"}
@@ -452,6 +522,12 @@ def main() -> int:
     status_path = run_dir / "run_status.json"
     metadata_path = run_dir / "run_metadata.json"
     log_path = run_dir / "training.log"
+    try:
+        source_provenance = validate_source_provenance(
+            run_dir, allow_dirty_provenance=args.allow_dirty_provenance
+        )
+    except ValueError as error:
+        parser.error(str(error))
     try:
         _prepare_parent_resume_link(
             run_dir,
@@ -550,6 +626,7 @@ def main() -> int:
         run_dir=run_dir,
         sim_timestep=sim_timestep,
         device=device,
+        source_provenance=source_provenance,
     )
 
     exit_code = 127

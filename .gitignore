@@ -15,10 +15,15 @@ __pycache__/
 MUJOCO_LOG.TXT
 .maintenance/
 .codex-remote-attachments/
+/.codex/recovery
+.worktrees/
+/.worktrees
 
 # Dashboard frontend build/install output
 dashboard/frontend/node_modules/
 dashboard/frontend/dist/
+/reports
+/transfers
 
 # Generated training and evaluation output
 logs/

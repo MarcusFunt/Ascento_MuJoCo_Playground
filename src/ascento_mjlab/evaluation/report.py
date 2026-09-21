@@ -17,6 +17,7 @@ BINARY_METRICS = {
     "jump_takeoff",
     "jump_landing",
     "jump_recovered_landing",
+    "target_arrived",
 }
 
 
@@ -80,6 +81,10 @@ def render_html(
     worst: dict[str, list[str]],
 ) -> None:
     status = escape(str(gate_payload.get("status", "UNKNOWN")))
+    reason = gate_payload.get("reason")
+    reason_html = (
+        f"<p><strong>Reason:</strong> {escape(str(reason))}</p>" if reason is not None else ""
+    )
     rows: list[str] = []
     for gate in gate_payload.get("gates", []):
         observed = gate.get("observed")
@@ -118,6 +123,7 @@ pre {{ overflow: auto; background: #f4f4f4; padding: 1rem; }}
 <body>
 <h1>Ascento quantitative evaluation</h1>
 <div class="status">{status}</div>
+{reason_html}
 <p><strong>Suite:</strong> {escape(str(manifest.get("suite_id")))}</p>
 <p><strong>Checkpoint:</strong> <code>{escape(str(manifest.get("checkpoint")))}</code></p>
 <h2>Gates</h2>

@@ -99,14 +99,6 @@ function shortCommit(value) {
   return String(value).slice(0, 10)
 }
 
-function sampleRecords(records, maxPoints) {
-  if (records.length <= maxPoints) return records
-  const lastIndex = records.length - 1
-  return Array.from({ length: maxPoints }, (_, index) => (
-    records[Math.round(index * lastIndex / (maxPoints - 1))]
-  ))
-}
-
 function StateBadge({ state }) {
   return <span className={`state-badge state-${state || 'unknown'}`}>{state || 'unknown'}</span>
 }
@@ -203,6 +195,7 @@ function App() {
   const [detail, setDetail] = useState(null)
   const [telemetry, setTelemetry] = useState([])
   const [telemetrySourceCount, setTelemetrySourceCount] = useState(0)
+  const [telemetryCoverage, setTelemetryCoverage] = useState({})
   const [telemetryLoading, setTelemetryLoading] = useState(false)
   const [logs, setLogs] = useState([])
   const [health, setHealth] = useState(null)
@@ -262,6 +255,7 @@ function App() {
       setDetail(null)
       setTelemetry([])
       setTelemetrySourceCount(0)
+      setTelemetryCoverage({})
       setTelemetryLoading(false)
       return
     }
@@ -286,6 +280,7 @@ function App() {
         const records = points.records || []
         setTelemetry(records)
         setTelemetrySourceCount(points.source_records ?? records.length)
+        setTelemetryCoverage(points.coverage || {})
       } else if (run.telemetry) {
         setTelemetry((current) => {
           const next = [...current]
@@ -383,8 +378,17 @@ function App() {
       ...(record.metrics || {}),
       ...(record.canonical_metrics || {}),
     })).filter((record) => Number.isFinite(Number(record.iteration)))
-    return sampleRecords(records, CHART_RENDER_POINTS)
+    return records
   }, [telemetry])
+
+  const coreChartCoverage = useMemo(() => {
+    const relevant = CANONICAL_CHARTS
+      .map(({ key }) => telemetryCoverage[key])
+      .filter(Boolean)
+    if (!relevant.length) return null
+    const missing = relevant.reduce((total, value) => total + Number(value.missing || 0), 0)
+    return missing === 0 ? 'All displayed core metrics are aligned.' : `${missing} genuine core-metric gap(s).`
+  }, [telemetryCoverage])
 
   const availableCharts = useMemo(
     () => [...CANONICAL_CHARTS, ...ADVANCED_CHARTS].filter(({ key }) => (
@@ -530,6 +534,7 @@ function App() {
                 <div className="history-summary">
                   <span>{fmtNumber(telemetrySourceCount, 0)} source points</span>
                   <strong>{fmtNumber(chartRecords.length, 0)} drawn</strong>
+                  {coreChartCoverage && <small>{coreChartCoverage}</small>}
                   {!selectedRunIsLive && (
                     <button
                       type="button"

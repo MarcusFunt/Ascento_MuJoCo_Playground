@@ -208,9 +208,9 @@ prepare_checkout() {
     [[ -n "$OLD_BRANCH" ]] || OLD_BRANCH="$checkout_branch"
 
     local dirty
-    dirty="$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=no)"
+    dirty="$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=all)"
     if [[ -n "$dirty" && "$FORCE" -ne 1 ]]; then
-      die "Tracked files have local modifications. Commit/stash them or rerun with --force. Runs are never removed."
+      die "Tracked or untracked source files have local changes. Commit/stash them or rerun with --force for tracked changes; untracked files are never removed. Runs are never removed."
     fi
     git -C "$INSTALL_DIR" fetch --prune origin
     git -C "$INSTALL_DIR" rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1 \
@@ -223,6 +223,9 @@ prepare_checkout() {
     fi
     if (( FORCE )); then git -C "$INSTALL_DIR" reset --hard HEAD; fi
     git -C "$INSTALL_DIR" checkout -B "$BRANCH" "origin/$BRANCH"
+    local remaining
+    remaining="$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=all)"
+    [[ -z "$remaining" ]] || die "Nonignored untracked files remain after checkout; move them out of the build context before building. No files were removed."
   else
     if [[ -e "$INSTALL_DIR" && -n "$(ls -A "$INSTALL_DIR" 2>/dev/null || true)" ]]; then
       die "Install directory exists but is not a Git checkout: $INSTALL_DIR"
@@ -308,6 +311,9 @@ write_maintenance_state() {
   local commit branch
   commit="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
   branch="$(git -C "$INSTALL_DIR" branch --show-current)"
+  local dirty
+  dirty="$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=all)"
+  [[ -z "$dirty" ]] || die "Refusing to bake repository provenance from a dirty or untracked source tree."
   cat >"$state/repository-version.json" <<EOF
 {
   "commit": "$commit",
@@ -320,6 +326,7 @@ EOF
 ASCENTO_COMPUTE_EXTRA=$COMPUTE
 ASCENTO_REPOSITORY_COMMIT=$commit
 ASCENTO_REPOSITORY_BRANCH=$branch
+ASCENTO_REPOSITORY_DIRTY=0
 ASCENTO_DASHBOARD_PORT=${ASCENTO_DASHBOARD_PORT:-8000}
 EOF
 }

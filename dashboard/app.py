@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import threading
 import time
@@ -54,6 +55,7 @@ class RunCreateRequest(BaseModel):
     parent_run_id: str | None = None
     parent_checkpoint: str | None = None
     episode_horizon_s: float | None = Field(default=None)
+    allow_dirty_provenance: bool = False
     training_args: list[str] = Field(default_factory=list)
 
 
@@ -91,6 +93,38 @@ def _sample_records(records: list[dict], max_points: int) -> list[dict]:
         records[round(index * last_index / (max_points - 1))]
         for index in range(max_points)
     ]
+
+
+def _telemetry_coverage(records: list[dict]) -> dict[str, dict[str, int]]:
+    """Describe which canonical series are genuinely available after sampling."""
+    keys = sorted(
+        {
+            str(key)
+            for record in records
+            for key in (record.get("canonical_metrics") or {})
+        }
+    )
+    return {
+        key: {
+            "present": sum(
+                1
+                for record in records
+                if isinstance((record.get("canonical_metrics") or {}).get(key), (int, float))
+                and not isinstance((record.get("canonical_metrics") or {}).get(key), bool)
+                and math.isfinite(float((record.get("canonical_metrics") or {})[key]))
+            ),
+            "missing": sum(
+                1
+                for record in records
+                if not (
+                    isinstance((record.get("canonical_metrics") or {}).get(key), (int, float))
+                    and not isinstance((record.get("canonical_metrics") or {}).get(key), bool)
+                    and math.isfinite(float((record.get("canonical_metrics") or {})[key]))
+                )
+            ),
+        }
+        for key in keys
+    }
 
 
 def _artifact_health() -> list[str]:
@@ -318,6 +352,7 @@ def telemetry(run_id: str, limit: int = 2000, max_points: int | None = None):
             "records": records,
             "source_records": source_records,
             "sampled": source_records > len(records),
+            "coverage": _telemetry_coverage(records),
         }
     limit = max(1, min(limit, 20_000))
     return {"records": load_dashboard_records(ref.path, limit=limit)}

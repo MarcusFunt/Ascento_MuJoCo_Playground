@@ -35,6 +35,8 @@ def _runner(horizon_s=20.0, log_dir=None):
     runner._top_horizon_success_windows = 0
     runner._best_top_horizon_timeout_fraction = -1.0
     runner._pending_completion_outcomes = []
+    runner._pending_quality_outcomes = []
+    runner._quality_passes_in_window = runner.completion_window_episodes
     runner.current_learning_iteration = 123
     runner.logger = SimpleNamespace(log_dir=str(log_dir) if log_dir is not None else None)
     runner.alg = SimpleNamespace(
@@ -79,6 +81,18 @@ def test_horizon_resets_the_streak_after_a_failing_window(monkeypatch):
 
     assert runner._successful_windows == 0
     assert runner.env.unwrapped.cfg.episode_length_s == HORIZON_SCHEDULE_S[0]
+
+
+def test_horizon_does_not_promote_when_stationary_quality_fails(monkeypatch):
+    runner = _runner()
+    monkeypatch.setattr(runner, "_emit_status", lambda **_: None)
+    for _ in range(runner.required_success_windows + 1):
+        runner._completed_in_window = 512
+        runner._timeouts_in_window = 512
+        runner._quality_passes_in_window = 0
+        runner._evaluate_completion_window()
+
+    assert runner.env.unwrapped.cfg.episode_length_s == 20.0
 
 
 def test_horizon_rollover_preserves_surplus_completions(monkeypatch):

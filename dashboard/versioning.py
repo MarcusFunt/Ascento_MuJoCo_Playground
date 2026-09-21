@@ -224,8 +224,8 @@ def classify_run_task_contract(run_dir: Path, root: Path) -> dict[str, Any]:
     # the newest optional contract dependency lazy so that maintenance script
     # remains usable while an environment is being rebuilt.
     from ascento_mjlab.task_contract import (
+        classify_task_contract_compatibility,
         current_task_contract_for_task,
-        task_contracts_compatible,
     )
 
     manifest_path = _parent_file(run_dir, root, "experiment_manifest.json")
@@ -240,14 +240,11 @@ def classify_run_task_contract(run_dir: Path, root: Path) -> dict[str, Any]:
             "current_contract": None,
         }
     current = current_task_contract_for_task(task)
-    compatible = task_contracts_compatible(contract, current)
+    compatibility = classify_task_contract_compatibility(contract, current)
     return {
-        "status": "current"
-        if compatible
-        else "legacy"
-        if not isinstance(contract, dict)
-        else "incompatible",
-        "is_compatible": compatible,
+        "status": compatibility.status.value,
+        "is_compatible": compatibility.is_compatible,
+        "compatibility": compatibility.to_dict(),
         "run_contract": contract if isinstance(contract, dict) else None,
         "current_contract": current,
     }

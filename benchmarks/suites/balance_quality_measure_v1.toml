@@ -1,0 +1,26 @@
+schema_version = 1
+suite_id = "balance_quality_measure_v1"
+task = "Ascento-Balance-Flat"
+root_seed = 884921
+policy_mode = "deterministic"
+required_capabilities = ["balance", "exact_reset", "deterministic_policy"]
+
+# This is intentionally an ungated calibration fixture.  It uses the exact
+# nominal reset distribution from balance_gate_v5 so quality limits can be set
+# from the frozen 79,999 controller and the known pathological checkpoint
+# before the immutable regression gate is published.
+[[families]]
+id = "nominal"
+kind = "uniform_reset"
+count = 256
+horizon_s = 20.0
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]

@@ -52,6 +52,8 @@ def task_capabilities(task: str) -> set[str]:
     }
     if "Balance" in task:
         capabilities.add("balance")
+    if "Locomotion" in task:
+        capabilities.add("locomotion")
     if "Velocity" in task:
         capabilities.update(
             {
@@ -225,8 +227,53 @@ def _is_explicit_jump_pulse(scenario: ScenarioSpec, step: int) -> bool:
     )
 
 
-def _apply_commands(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec], step: int) -> None:
+def _apply_world_target_offset(
+    base_env: ManagerBasedRlEnv,
+    updates: list[tuple[int, tuple[float, ...]]],
+) -> None:
+    """Apply one yaw-relative XY/yaw target step for evaluator scenarios."""
+    robot = base_env.scene["robot"]
+    target_xy = world_target_xy(base_env)
+    target_yaw = world_target_yaw(base_env)
+    for env_id, values in updates:
+        if len(values) != 3:
+            raise RuntimeError(
+                "Command 'world_target_offset' expects forward, lateral, and yaw-offset values"
+            )
+        forward, lateral, yaw_offset = values
+        current_yaw = yaw_from_quaternion_wxyz(robot.data.root_link_quat_w[env_id : env_id + 1])[0]
+        cos_yaw, sin_yaw = torch.cos(current_yaw), torch.sin(current_yaw)
+        offset = torch.stack(
+            (
+                cos_yaw * forward - sin_yaw * lateral,
+                sin_yaw * forward + cos_yaw * lateral,
+            )
+        ).to(dtype=target_xy.dtype)
+        target_xy[env_id] = robot.data.root_link_pos_w[env_id, :2] + offset
+        target_yaw[env_id] = torch.atan2(
+            torch.sin(current_yaw + yaw_offset), torch.cos(current_yaw + yaw_offset)
+        )
+
+
+def _apply_commands(
+    base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec], step: int
+) -> torch.Tensor:
+    target_updates = [
+        (env_id, point.values)
+        for env_id, scenario in enumerate(scenarios)
+        for point in scenario.commands
+        if point.step == step and point.name == "world_target_offset"
+    ]
+    if target_updates:
+        _apply_world_target_offset(base_env, target_updates)
+    target_commanded = torch.zeros(
+        base_env.num_envs, dtype=torch.bool, device=base_env.device
+    )
+    if target_updates:
+        target_commanded[torch.tensor([env_id for env_id, _ in target_updates], device=base_env.device)] = True
     for name, updates in _command_values_for_step(scenarios, step).items():
+        if name == "world_target_offset":
+            continue
         try:
             term = base_env.command_manager.get_term(name)
         except (KeyError, AttributeError) as exc:
@@ -244,6 +291,7 @@ def _apply_commands(base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec], 
                 and _is_explicit_jump_pulse(scenarios[env_id], step)
             ):
                 term._jump_generation[env_id] += 1
+    return target_commanded
 
 
 def _command_target(
@@ -346,6 +394,27 @@ class _EvaluationRuntime:
             torch.cuda.empty_cache()
 
 
+def _evaluation_env_cfg(task: str, *, capacity: int, max_horizon: int) -> Any:
+    """Build an evaluator world with presentation-mode task events only.
+
+    Scenario suites own all reset and interval interventions.  ``play=True``
+    keeps the actor/reward interface while omitting stochastic training events
+    such as balance pushes and locomotion's settle-triggered sequence.
+    """
+    cfg = load_env_cfg(task, play=True)
+    cfg.scene.num_envs = capacity
+    cfg.auto_reset = False
+    cfg.seed = 0
+    step_dt = physics_timestep(cfg) * int(cfg.decimation)
+    cfg.episode_length_s = (max_horizon + 2) * step_dt
+    return cfg
+
+
+def _stationary_quality_mask(active: torch.Tensor, stable_now: torch.Tensor) -> torch.Tensor:
+    """Select only samples that are quiet at the current evaluator step."""
+    return active & stable_now
+
+
 def _create_runtime(
     task: str,
     checkpoint: Path,
@@ -361,13 +430,11 @@ def _create_runtime(
     bridge during long gates. A suite needs only one task, policy, and maximum
     horizon, so all chunks safely share this native world.
     """
-    cfg = load_env_cfg(task, play=False)
-    cfg.events.pop("balance_push", None)
-    cfg.scene.num_envs = capacity
-    cfg.auto_reset = False
-    cfg.seed = 0
-    step_dt = physics_timestep(cfg) * int(cfg.decimation)
-    cfg.episode_length_s = (max_horizon + 2) * step_dt
+    # Validate against the canonical training task.  The evaluator deliberately
+    # runs a play config, so suite-owned resets and interventions are the only
+    # sources of stochasticity during a fixed-seed rollout.
+    contract_cfg = load_env_cfg(task, play=False)
+    cfg = _evaluation_env_cfg(task, capacity=capacity, max_horizon=max_horizon)
 
     base_env = ManagerBasedRlEnv(cfg, device=device, render_mode=None)
     try:
@@ -391,7 +458,7 @@ def _create_runtime(
         checkpoint_task_contract = (
             checkpoint_infos.get("task_contract") if isinstance(checkpoint_infos, dict) else None
         )
-        require_current_checkpoint_contracts(checkpoint_infos, base_env.cfg)
+        require_current_checkpoint_contracts(checkpoint_infos, contract_cfg)
         return _EvaluationRuntime(
             base_env=base_env,
             env=env,
@@ -484,6 +551,17 @@ def _run_batch(
     max_joint_applied_abs = torch.zeros(count, device=dev)
     action_clip_count = torch.zeros(count, device=dev)
     action_count = torch.zeros(count, device=dev)
+    # Action quality is evaluated from the raw policy signal.  Keep online
+    # sufficient statistics instead of retaining a (batch, time, action)
+    # tensor: the 120-second gate otherwise needs hundreds of MiB per batch.
+    action_dim = int(base_env.action_manager.total_action_dim)
+    previous_action = torch.zeros((count, action_dim), device=dev)
+    previous_previous_action = torch.zeros_like(previous_action)
+    action_history_count = torch.zeros(count, dtype=torch.long, device=dev)
+    sum_action_rate_sq = torch.zeros(count, device=dev)
+    action_rate_count = torch.zeros(count, device=dev)
+    sum_action_second_difference_sq = torch.zeros(count, device=dev)
+    action_second_difference_count = torch.zeros(count, device=dev)
     saturation_count = torch.zeros(count, device=dev)
     joint_saturation_count = torch.zeros(count, device=dev)
     request_count = torch.zeros(count, device=dev)
@@ -502,6 +580,35 @@ def _run_batch(
     sum_shaping_abs = torch.zeros(count, device=dev)
     sum_shaping_signed = torch.zeros(count, device=dev)
 
+    # "Settled" is deliberately stricter than a single quiet sample.  A state
+    # must satisfy the same physical envelope used by disturbance recovery for
+    # 0.5 seconds before its stationary metrics begin accumulating.
+    settle_stable_count = torch.zeros(count, dtype=torch.long, device=dev)
+    settled = torch.zeros(count, dtype=torch.bool, device=dev)
+    settling_time = torch.full((count,), float("nan"), device=dev)
+    settled_samples = torch.zeros(count, device=dev)
+    settled_xy = torch.zeros((count, 2), device=dev)
+    sum_stationary_tilt = torch.zeros(count, device=dev)
+    sum_stationary_tilt_sq = torch.zeros(count, device=dev)
+    sum_stationary_planar_speed_sq = torch.zeros(count, device=dev)
+    sum_stationary_heading_error_sq = torch.zeros(count, device=dev)
+    sum_stationary_effort_sq = torch.zeros(count, device=dev)
+    sum_stationary_angular_xy_sq = torch.zeros(count, device=dev)
+    stationary_support_count = torch.zeros(count, device=dev)
+    stationary_path_length = torch.zeros(count, device=dev)
+    sum_stationary_action_rate_sq = torch.zeros(count, device=dev)
+    stationary_action_rate_count = torch.zeros(count, device=dev)
+    sum_stationary_action_second_difference_sq = torch.zeros(count, device=dev)
+    stationary_action_second_difference_count = torch.zeros(count, device=dev)
+    stationary_action_sum = torch.zeros((count, action_dim), device=dev)
+    stationary_action_sq_sum = torch.zeros_like(stationary_action_sum)
+    stationary_action_alternating_sum = torch.zeros_like(stationary_action_sum)
+    stationary_high_pass = torch.zeros_like(stationary_action_sum)
+    stationary_low_pass = torch.zeros_like(stationary_action_sum)
+    stationary_high_frequency_power = torch.zeros(count, device=dev)
+    stationary_reversal_count = torch.zeros(count, device=dev)
+    previous_angular_xy = torch.zeros((count, 2), device=dev)
+
     jump_takeoff_seen = torch.zeros(count, dtype=torch.bool, device=dev)
     jump_landing_seen = torch.zeros(count, dtype=torch.bool, device=dev)
     jump_recovered_seen = torch.zeros(count, dtype=torch.bool, device=dev)
@@ -509,6 +616,14 @@ def _run_batch(
     landing_preimpact_speed = torch.full((count,), 10.0, device=dev)
     limiting_wheel_clearance = torch.zeros(count, device=dev)
     max_post_landing_hold_s = torch.zeros(count, device=dev)
+
+    target_commanded = torch.zeros(count, dtype=torch.bool, device=dev)
+    target_arrived = torch.zeros(count, dtype=torch.bool, device=dev)
+    target_arrival_time = torch.full((count,), float("nan"), device=dev)
+    final_target_error = torch.full((count,), float("nan"), device=dev)
+    sum_post_target_speed_sq = torch.zeros(count, device=dev)
+    sum_post_target_heading_error_sq = torch.zeros(count, device=dev)
+    post_target_samples = torch.zeros(count, device=dev)
 
     prev_xy = initial_xy.clone()
     final_xy_snapshot = initial_xy.clone()
@@ -555,7 +670,7 @@ def _run_batch(
                 for env_id in pending_ids.detach().cpu().tolist():
                     termination_reason[env_id] = termination_reason[env_id] or "backend_timeout"
 
-            _apply_commands(base_env, scenarios, step)
+            target_commanded |= _apply_commands(base_env, scenarios, step)
             twist_target = (
                 _command_target(scenarios, step, name="twist", dim=3, device=dev)
                 if is_velocity_task
@@ -587,6 +702,19 @@ def _run_batch(
             clipped_fraction = (torch.abs(raw_action) > clip_limit).float().mean(dim=-1)
             action_clip_count += clipped_fraction * active.float()
             action_count += active.float()
+
+            has_previous_action = active & (action_history_count >= 1)
+            has_two_previous_actions = active & (action_history_count >= 2)
+            action_rate_sq = torch.mean(torch.square(raw_action - previous_action), dim=1)
+            action_second_difference_sq = torch.mean(
+                torch.square(raw_action - 2.0 * previous_action + previous_previous_action), dim=1
+            )
+            sum_action_rate_sq += action_rate_sq * has_previous_action.float()
+            action_rate_count += has_previous_action.float()
+            sum_action_second_difference_sq += (
+                action_second_difference_sq * has_two_previous_actions.float()
+            )
+            action_second_difference_count += has_two_previous_actions.float()
 
             action = torch.where(active[:, None], raw_action, torch.zeros_like(raw_action))
             _, step_rewards, dones, _ = env.step(action)
@@ -643,6 +771,79 @@ def _run_batch(
             right = right_data.flatten(start_dim=1).any(dim=1)
             both_supported = left & right
             airborne = ~left & ~right
+
+            newly_target_arrived = (
+                active & target_commanded & ~target_arrived & (target_error <= 0.035)
+            )
+            target_arrival_time[newly_target_arrived] = (step + 1) * step_dt
+            target_arrived |= newly_target_arrived
+            final_target_error = torch.where(
+                active & target_commanded, target_error, final_target_error
+            )
+            post_target = active & target_arrived
+            post_target_weight = post_target.float()
+            sum_post_target_speed_sq += planar_speed.square() * post_target_weight
+            sum_post_target_heading_error_sq += heading_error.square() * post_target_weight
+            post_target_samples += post_target_weight
+
+            stable_now = (
+                (tilt <= 0.08)
+                & (planar_speed <= 0.10)
+                & (torch.abs(height - 0.75) <= 0.05)
+                & (angular_xy <= 0.25)
+                & (yaw_rate <= 0.25)
+                & (heading_error <= 0.15)
+                & both_supported
+            )
+            settle_stable_count = torch.where(
+                active & ~settled & stable_now,
+                settle_stable_count + 1,
+                torch.where(
+                    active & ~settled,
+                    torch.zeros_like(settle_stable_count),
+                    settle_stable_count,
+                ),
+            )
+            newly_settled = active & ~settled & (settle_stable_count >= stable_steps_required)
+            if bool(newly_settled.any().item()):
+                settled |= newly_settled
+                # Report the time at which the required confirming window has
+                # completed, not the first unverified quiet sample.
+                settling_time[newly_settled] = (step + 1) * step_dt
+                settled_xy[newly_settled] = xy[newly_settled]
+
+            # ``settled`` records that recovery occurred.  Quality metrics must
+            # instead sample only the *current* low-motion envelope; otherwise
+            # a deliberate push or target step pollutes stationary quietness.
+            stationary = _stationary_quality_mask(active, stable_now)
+            stationary_weight = stationary.float()
+            stationary_previous_action = stationary & (action_history_count >= 1)
+            stationary_two_previous_actions = stationary & (action_history_count >= 2)
+            stationary_action_samples_before = settled_samples.clone()
+            alternating_sign = torch.where(
+                stationary_action_samples_before.remainder(2) == 0,
+                torch.ones_like(stationary_action_samples_before),
+                -torch.ones_like(stationary_action_samples_before),
+            )
+            # A one-pole 10-Hz low-pass leaves its residual as a cheap,
+            # causal high-frequency action-power estimate.  Nyquist power is
+            # additionally measured exactly by the alternating-sign DFT bin.
+            lowpass_alpha = float(step_dt / (step_dt + 1.0 / (2.0 * np.pi * 10.0)))
+            stationary_low_pass = torch.where(
+                stationary[:, None],
+                stationary_low_pass + lowpass_alpha * (raw_action - stationary_low_pass),
+                stationary_low_pass,
+            )
+            stationary_high_pass = torch.where(
+                stationary[:, None],
+                raw_action - stationary_low_pass,
+                stationary_high_pass,
+            )
+            angular_xy_components = robot.data.root_link_ang_vel_b[:, :2]
+            reversals = (
+                (angular_xy_components * previous_angular_xy < 0.0)
+                & (torch.minimum(angular_xy_components.abs(), previous_angular_xy.abs()) >= 0.005)
+            ).float().sum(dim=1)
 
             weight = active.float()
             sum_reward += step_rewards * weight
@@ -705,6 +906,38 @@ def _run_batch(
             path_length += segment * weight
             sum_hip_mismatch_sq += hip_mismatch.square() * weight
             sum_knee_mismatch_sq += knee_mismatch.square() * weight
+            sum_stationary_tilt += tilt * stationary_weight
+            sum_stationary_tilt_sq += tilt.square() * stationary_weight
+            sum_stationary_planar_speed_sq += planar_speed.square() * stationary_weight
+            sum_stationary_heading_error_sq += heading_error.square() * stationary_weight
+            sum_stationary_effort_sq += actuator_output_sq * stationary_weight
+            sum_stationary_angular_xy_sq += angular_xy.square() * stationary_weight
+            stationary_support_count += both_supported.float() * stationary_weight
+            stationary_path_length += segment * stationary_weight
+            sum_stationary_action_rate_sq += action_rate_sq * stationary_previous_action.float()
+            stationary_action_rate_count += stationary_previous_action.float()
+            sum_stationary_action_second_difference_sq += (
+                action_second_difference_sq * stationary_two_previous_actions.float()
+            )
+            stationary_action_second_difference_count += stationary_two_previous_actions.float()
+            stationary_action_sum += raw_action * stationary_weight[:, None]
+            stationary_action_sq_sum += raw_action.square() * stationary_weight[:, None]
+            stationary_action_alternating_sum += (
+                raw_action * (stationary_weight * alternating_sign)[:, None]
+            )
+            stationary_high_frequency_power += (
+                torch.mean(stationary_high_pass.square(), dim=1) * stationary_weight
+            )
+            stationary_reversal_count += reversals * stationary_weight
+            settled_samples += stationary_weight
+            previous_angular_xy = torch.where(
+                active[:, None], angular_xy_components, previous_angular_xy
+            )
+            previous_previous_action = torch.where(
+                active[:, None], previous_action, previous_previous_action
+            )
+            previous_action = torch.where(active[:, None], raw_action, previous_action)
+            action_history_count += active.long()
             if twist_target is not None:
                 actual_twist = torch.stack(
                     [
@@ -785,15 +1018,6 @@ def _run_batch(
                 )
 
             after_disturbance = active & (disturbance_end >= 0) & (step >= disturbance_end)
-            stable_now = (
-                (tilt <= 0.08)
-                & (planar_speed <= 0.10)
-                & (torch.abs(height - 0.75) <= 0.05)
-                & (angular_xy <= 0.25)
-                & (yaw_rate <= 0.25)
-                & (heading_error <= 0.15)
-                & both_supported
-            )
             stable_count = torch.where(
                 after_disturbance & stable_now,
                 stable_count + 1,
@@ -870,7 +1094,44 @@ def _run_batch(
             active = torch.zeros_like(active)
 
         denom = episode_steps.clamp(min=1).float()
+        stationary_denom = settled_samples.clamp(min=1.0)
+        stationary_present = settled_samples > 0.0
+        stationary_nan = torch.full((count,), float("nan"), device=dev)
+        stationary_action_mean = stationary_action_sum / stationary_denom[:, None]
+        stationary_action_centered_power = (
+            stationary_action_sq_sum
+            - stationary_action_sum.square() / stationary_denom[:, None]
+        ).clamp(min=0.0)
+        stationary_alternating_parity_sum = torch.where(
+            settled_samples.remainder(2) == 0,
+            torch.zeros_like(settled_samples),
+            torch.ones_like(settled_samples),
+        )
+        stationary_nyquist_amplitude = (
+            stationary_action_alternating_sum
+            - stationary_action_mean * stationary_alternating_parity_sum[:, None]
+        )
+        stationary_nyquist_power = stationary_nyquist_amplitude.square() / stationary_denom[:, None]
+        stationary_action_power = stationary_action_centered_power.sum(dim=1) / (
+            stationary_denom * action_dim
+        )
+        stationary_high_frequency_power = stationary_high_frequency_power / stationary_denom
+        stationary_nyquist_power_ratio = stationary_nyquist_power.sum(dim=1) / (
+            stationary_action_centered_power.sum(dim=1).clamp(min=1.0e-12)
+        )
+        stationary_high_frequency_power_ratio = stationary_high_frequency_power / (
+            stationary_action_power.clamp(min=1.0e-12)
+        )
+        stationary_tilt_mean = sum_stationary_tilt / stationary_denom
+        stationary_tilt_rms = torch.sqrt(sum_stationary_tilt_sq / stationary_denom)
+        stationary_planar_speed_rms = torch.sqrt(sum_stationary_planar_speed_sq / stationary_denom)
+        stationary_heading_error_rms = torch.sqrt(sum_stationary_heading_error_sq / stationary_denom)
+        stationary_effort_rms = torch.sqrt(sum_stationary_effort_sq / stationary_denom)
+        stationary_body_rocking_rms = torch.sqrt(sum_stationary_angular_xy_sq / stationary_denom)
+        stationary_contact_fraction = stationary_support_count / stationary_denom
+        stationary_reversal_rate = stationary_reversal_count / (stationary_denom * step_dt)
         net_displacement = torch.linalg.vector_norm(final_xy_snapshot - initial_xy, dim=1)
+        stationary_net_displacement = torch.linalg.vector_norm(final_xy_snapshot - settled_xy, dim=1)
 
         arrays = {
             "success": finished_success,
@@ -893,6 +1154,13 @@ def _run_batch(
             "physical_request_rms": torch.sqrt(sum_request_sq / denom),
             "physical_request_max_abs": max_request_abs,
             "action_clip_fraction": action_clip_count / action_count.clamp(min=1.0),
+            "action_rate_rms": torch.sqrt(
+                sum_action_rate_sq / action_rate_count.clamp(min=1.0)
+            ),
+            "action_second_difference_rms": torch.sqrt(
+                sum_action_second_difference_sq
+                / action_second_difference_count.clamp(min=1.0)
+            ),
             "physical_saturation_fraction": saturation_count / request_count.clamp(min=1.0),
             "commanded_effort_mean_abs": sum_request_abs / denom,
             "commanded_effort_rms": torch.sqrt(sum_request_sq / denom),
@@ -909,6 +1177,65 @@ def _run_batch(
             "airborne_fraction": airborne_count / denom,
             "path_length": path_length,
             "net_displacement": net_displacement,
+            "settling_time_s": torch.where(
+                settled,
+                settling_time,
+                episode_steps.float() * step_dt,
+            ),
+            "stationary_tilt_mean": torch.where(
+                stationary_present, stationary_tilt_mean, stationary_nan
+            ),
+            "stationary_tilt_rms": torch.where(
+                stationary_present, stationary_tilt_rms, stationary_nan
+            ),
+            "stationary_planar_speed_rms": torch.where(
+                stationary_present, stationary_planar_speed_rms, stationary_nan
+            ),
+            "stationary_heading_error_rms": torch.where(
+                stationary_present, stationary_heading_error_rms, stationary_nan
+            ),
+            "stationary_effort_rms": torch.where(
+                stationary_present, stationary_effort_rms, stationary_nan
+            ),
+            "stationary_both_supported_fraction": torch.where(
+                stationary_present, stationary_contact_fraction, stationary_nan
+            ),
+            "stationary_net_displacement": torch.where(
+                stationary_present, stationary_net_displacement, stationary_nan
+            ),
+            "stationary_path_length": torch.where(
+                stationary_present, stationary_path_length, stationary_nan
+            ),
+            "stationary_action_rate_rms": torch.where(
+                stationary_action_rate_count > 0.0,
+                torch.sqrt(
+                    sum_stationary_action_rate_sq / stationary_action_rate_count.clamp(min=1.0)
+                ),
+                stationary_nan,
+            ),
+            "stationary_action_second_difference_rms": torch.where(
+                stationary_action_second_difference_count > 0.0,
+                torch.sqrt(
+                    sum_stationary_action_second_difference_sq
+                    / stationary_action_second_difference_count.clamp(min=1.0)
+                ),
+                stationary_nan,
+            ),
+            "stationary_high_frequency_action_power_ratio": torch.where(
+                stationary_present, stationary_high_frequency_power_ratio, stationary_nan
+            ),
+            "stationary_nyquist_action_power_ratio": torch.where(
+                stationary_present, stationary_nyquist_power_ratio, stationary_nan
+            ),
+            "stationary_body_rocking_rms": torch.where(
+                stationary_present, stationary_body_rocking_rms, stationary_nan
+            ),
+            "post_settle_angular_velocity_rms": torch.where(
+                stationary_present, stationary_body_rocking_rms, stationary_nan
+            ),
+            "stationary_roll_pitch_reversal_rate_hz": torch.where(
+                stationary_present, stationary_reversal_rate, stationary_nan
+            ),
             "leg_hip_mismatch_rms": torch.sqrt(sum_hip_mismatch_sq / denom),
             "leg_knee_mismatch_rms": torch.sqrt(sum_knee_mismatch_sq / denom),
             "recovered": recovered.float(),
@@ -919,6 +1246,21 @@ def _run_batch(
             "shaping_reward_abs_mean": sum_shaping_abs / denom,
             "shaping_reward_abs_ratio": sum_shaping_abs / sum_reward.abs().clamp(min=1.0e-6),
             "post_landing_hold_s": max_post_landing_hold_s,
+            "target_arrived": target_arrived.float(),
+            "target_arrival_time_s": target_arrival_time,
+            "final_target_error": final_target_error,
+            "post_target_speed_rms": torch.where(
+                post_target_samples > 0.0,
+                torch.sqrt(sum_post_target_speed_sq / post_target_samples.clamp(min=1.0)),
+                stationary_nan,
+            ),
+            "post_target_heading_error_rms": torch.where(
+                post_target_samples > 0.0,
+                torch.sqrt(
+                    sum_post_target_heading_error_sq / post_target_samples.clamp(min=1.0)
+                ),
+                stationary_nan,
+            ),
         }
         if is_velocity_task:
             arrays["velocity_tracking_rmse"] = torch.sqrt(sum_velocity_tracking_sq / denom)

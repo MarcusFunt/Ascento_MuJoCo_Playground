@@ -28,6 +28,12 @@ def test_unified_cli_exposes_operations_commands():
     assert args.training_args == ["--", "--agent.learning-rate", "0.001"]
 
 
+def test_unified_cli_requires_an_explicit_dirty_provenance_override():
+    args = build_parser().parse_args(["run", "start", "--allow-dirty-provenance"])
+
+    assert args.allow_dirty_provenance is True
+
+
 def test_unified_cli_supports_low_noise_monitoring():
     args = build_parser().parse_args(["run", "monitor", "run123", "--once", "--json"])
 

@@ -73,7 +73,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - run: uv run --frozen --extra cpu python -m pytest -q tests_mjlab
 
@@ -85,7 +85,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - run: uv run --frozen --extra cpu --extra dashboard ruff check .
       - run: bash -n scripts/run_dashboard.sh scripts/maintain.sh scripts/install_supervisor.sh scripts/setup_tailscale.sh scripts/ascento_mcp_server.sh
@@ -99,12 +99,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
       - run: |
           mkdir -p .maintenance/supervisor
           cat > .maintenance/compose.env <<'EOF'
           ASCENTO_COMPUTE_EXTRA=cpu
           ASCENTO_REPOSITORY_COMMIT=testcommit
           ASCENTO_REPOSITORY_BRANCH=main
+          ASCENTO_REPOSITORY_DIRTY=0
           ASCENTO_DASHBOARD_PORT=8000
           EOF
       - run: docker compose --env-file .maintenance/compose.env -f docker/compose.yaml config >/dev/null

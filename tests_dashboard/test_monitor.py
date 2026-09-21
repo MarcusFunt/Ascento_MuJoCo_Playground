@@ -11,7 +11,7 @@ from dashboard.health import (
     process_status,
     summarize_dashboard_run,
 )
-from dashboard.monitor import load_log_records, tail_lines
+from dashboard.monitor import load_log_records, load_tensorboard_records, tail_lines
 
 
 def test_tail_lines_reads_the_requested_suffix_without_changing_line_shape(tmp_path):
@@ -68,6 +68,60 @@ def test_log_records_preserve_structured_target_diagnostics(tmp_path):
     assert decorated["canonical_metrics"]["leg_target_offset_rms_rad"] == 0.25
     assert decorated["canonical_metrics"]["wheel_target_velocity_rms_rad_s"] == 4.5
     assert decorated["canonical_metrics"]["controller_request_saturation_fraction"] == 0.125
+
+
+def test_tensorboard_chart_metrics_are_aligned_without_reservoir_sampling(tmp_path):
+    from tensorboard.compat.proto.event_pb2 import Event
+    from tensorboard.compat.proto.summary_pb2 import Summary
+    from tensorboard.summary.writer.event_file_writer import EventFileWriter
+
+    writer = EventFileWriter(str(tmp_path))
+    try:
+        for step in range(1, 101):
+            writer.add_event(
+                Event(
+                    wall_time=float(step),
+                    step=step,
+                    summary=Summary(
+                        value=[
+                            Summary.Value(tag="Train/mean_reward", simple_value=float(step)),
+                            Summary.Value(tag="Train/mean_episode_length", simple_value=float(step * 2)),
+                            Summary.Value(tag="Loss/surrogate", simple_value=float(-step)),
+                            Summary.Value(tag="unrelated/debug", simple_value=float(step)),
+                        ]
+                    ),
+                )
+            )
+        writer.flush()
+
+        first = load_tensorboard_records(tmp_path, limit=None)
+
+        writer.add_event(
+            Event(
+                wall_time=101.0,
+                step=101,
+                summary=Summary(
+                    value=[
+                        Summary.Value(tag="Train/mean_reward", simple_value=101.0),
+                        Summary.Value(tag="Train/mean_episode_length", simple_value=202.0),
+                        Summary.Value(tag="Loss/surrogate", simple_value=-101.0),
+                    ]
+                ),
+            )
+        )
+        writer.flush()
+        second = load_tensorboard_records(tmp_path, limit=None)
+    finally:
+        writer.close()
+
+    assert len(first) == 100
+    assert len(second) == 101
+    assert all(
+        {"Train/mean_reward", "Train/mean_episode_length", "Loss/surrogate"}
+        <= set(record["metrics"])
+        for record in second
+    )
+    assert all("unrelated/debug" not in record["metrics"] for record in second)
 
 
 def test_run_list_defers_tensorboard_loading_until_a_run_is_selected(monkeypatch, tmp_path):

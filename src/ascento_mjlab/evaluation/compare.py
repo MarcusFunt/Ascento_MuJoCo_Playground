@@ -61,6 +61,105 @@ def _action_contract(path: Path, key: str = "action_contract") -> dict | None:
     return contract if isinstance(contract, dict) else None
 
 
+def _quality_gate_report(path: Path) -> dict | None:
+    """Load a completed suite verdict when the artifact provides one."""
+    try:
+        payload = json.loads((path / "gate.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("gates"), list):
+        return None
+    return payload
+
+
+def _quality_evaluation_identity(path: Path) -> tuple[str, str, str] | None:
+    """Read the immutable suite and resolved-scenario identity for a verdict."""
+    try:
+        payload = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    values = (
+        payload.get("suite_id"),
+        payload.get("suite_sha256"),
+        payload.get("resolved_scenarios_sha256"),
+    )
+    suite_id, suite_digest, scenario_digest = values
+    if (
+        not isinstance(suite_id, str)
+        or not suite_id
+        or not _is_sha256(suite_digest)
+        or not _is_sha256(scenario_digest)
+    ):
+        return None
+    return suite_id, suite_digest, scenario_digest
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value.lower())
+    )
+
+
+def quality_baseline_verdict(base: Path, candidate: Path) -> dict | None:
+    """Classify a candidate against an accepted quality-gated baseline.
+
+    This deliberately makes a failed hard gate decisive.  A passing candidate
+    is not called better simply because it survives: it must be compared on
+    the paired metrics by the caller or a task-specific selection policy.
+    """
+    baseline = _quality_gate_report(base)
+    contender = _quality_gate_report(candidate)
+    if baseline is None or contender is None:
+        return None
+    baseline_identity = _quality_evaluation_identity(base)
+    candidate_identity = _quality_evaluation_identity(candidate)
+    if baseline_identity is None or baseline_identity != candidate_identity:
+        return None
+
+    baseline_status = baseline.get("status")
+    candidate_status = contender.get("status")
+    completed_statuses = ("PASS", "FAIL")
+    if (
+        not isinstance(baseline_status, str)
+        or baseline_status not in completed_statuses
+        or not isinstance(candidate_status, str)
+        or candidate_status not in completed_statuses
+    ):
+        return None
+    failed = [
+        str(gate.get("gate_id", "unknown"))
+        for gate in contender["gates"]
+        if isinstance(gate, dict) and gate.get("hard") and not gate.get("passed")
+    ]
+    if candidate_status != "PASS":
+        return {
+            "baseline_status": baseline_status,
+            "candidate_status": candidate_status,
+            "verdict": "WORSE",
+            "reason": "candidate failed hard quality gates",
+            "failed_hard_gates": failed,
+        }
+    if baseline_status != "PASS":
+        return {
+            "baseline_status": baseline_status,
+            "candidate_status": candidate_status,
+            "verdict": "BETTER",
+            "reason": "candidate passed while the baseline did not",
+            "failed_hard_gates": [],
+        }
+    return {
+        "baseline_status": baseline_status,
+        "candidate_status": candidate_status,
+        "verdict": "NOT_PROVEN_BETTER",
+        "reason": "both policies passed; inspect paired quality deltas before promotion",
+        "failed_hard_gates": [],
+    }
+
+
 def ensure_compatible_plants(base: Path, candidate: Path) -> None:
     """Reject quantitative comparison unless both artifacts share one plant."""
     left = _plant_contract(base)
@@ -112,6 +211,9 @@ def compare(base: Path, candidate: Path) -> dict:
         else []
     )
     output = {"paired_scenarios": len(common), "metrics": {}}
+    verdict = quality_baseline_verdict(base, candidate)
+    if verdict is not None:
+        output["quality_baseline_verdict"] = verdict
     for metric_index, metric in enumerate(metrics):
         delta = np.asarray(
             [right[sid][metric] - left[sid][metric] for sid in common],

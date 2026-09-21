@@ -79,6 +79,7 @@ def _start(args: argparse.Namespace) -> int:
         "parent_run_id": args.parent_run_id,
         "parent_checkpoint": args.parent_checkpoint,
         "episode_horizon_s": args.episode_horizon_s,
+        "allow_dirty_provenance": bool(getattr(args, "allow_dirty_provenance", False)),
         "training_args": training_args,
     }
     created = _service(root).create(request)
@@ -467,6 +468,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--notes", default="")
     start.add_argument("--parent-run-id")
     start.add_argument("--parent-checkpoint")
+    start.add_argument("--allow-dirty-provenance", action="store_true")
     start.add_argument("--envs", type=int)
     start.add_argument("--iterations", type=int)
     start.add_argument("--seed", type=int)
@@ -598,6 +600,11 @@ def build_parser() -> argparse.ArgumentParser:
         ("clip-motion", "ascento_mjlab.tools.clip_motion", "trim or resample a capture"),
         ("rank-motion", "ascento_mjlab.tools.motion_quality", "rank captures for visual review"),
         ("reward-probe", "ascento_mjlab.tools.reward_probe", "inspect reward terms"),
+        (
+            "initialize-transfer",
+            "ascento_mjlab.tools.initialize_transfer",
+            "create a new task checkpoint from compatible actor weights",
+        ),
         (
             "controller-probe",
             "ascento_mjlab.tools.controller_probe",
