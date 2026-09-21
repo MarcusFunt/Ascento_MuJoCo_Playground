@@ -166,7 +166,7 @@ candidate set, then run the authoritative suite on selected checkpoints.
 
 | Command | Arguments | Extra options | Result |
 | --- | --- | --- | --- |
-| `evaluate compare` | `BASELINE CANDIDATE` | `--output PATH` | Paired deltas for compatible stored scenarios; optionally writes JSON below output root. When both artifacts contain gate reports, includes a hard-gate baseline verdict (`WORSE`, `BETTER`, or `NOT_PROVEN_BETTER`) |
+| `evaluate compare` | `BASELINE CANDIDATE` | `--output PATH` | Paired deltas for compatible stored scenarios; optionally writes JSON below output root. A hard-gate verdict (`WORSE`, `BETTER`, or `NOT_PROVEN_BETTER`) is included only for completed `PASS`/`FAIL` reports with matching suite and resolved-scenario hashes |
 | `evaluate list` | none | `--limit N` (50) | Newest complete and incomplete report summaries |
 | `evaluate report` | `EVALUATION` | — | Manifest, gates, consistency, failures, suite, and clips payload |
 | `evaluate archive` | `EVALUATION` | `--output FILE.zip` | ZIP copy of one evaluation directory; output must remain below output root |

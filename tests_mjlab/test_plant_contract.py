@@ -22,7 +22,9 @@ def test_current_plant_contract_hashes_the_real_robot_asset():
     assert plant_contracts_compatible(contract, dict(contract))
 
 
-def test_checkpoint_embeds_the_plant_contract(tmp_path):
+def test_checkpoint_embeds_the_plant_contract_and_supports_safe_actor_transfer(
+    tmp_path, monkeypatch
+):
     runner = object.__new__(AscentoProvenanceRunner)
     import ascento_mjlab.tasks  # noqa: F401
 
@@ -44,3 +46,27 @@ def test_checkpoint_embeds_the_plant_contract(tmp_path):
     assert plant_contracts_compatible(payload["infos"]["plant_contract"], current_plant_contract())
     assert payload["infos"]["action_contract"] == current_action_contract()
     assert task_contracts_compatible(payload["infos"]["task_contract"], current_task_contract(cfg))
+
+    transfer_runner = object.__new__(AscentoProvenanceRunner)
+    transfer_runner.env = runner.env
+    transfer_runner.current_learning_iteration = 12
+    transfer_runner.env.unwrapped.common_step_counter = 91
+    loaded = {}
+    transfer_runner.alg = type(
+        "Algorithm",
+        (),
+        {"load": lambda self, state, load_cfg, strict: loaded.update(state)},
+    )()
+    original_load = torch.load
+
+    def safe_load(*args, **kwargs):
+        assert kwargs.get("weights_only") is True
+        return original_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", safe_load)
+    lineage = transfer_runner.initialize_from_compatible_actor(path)
+
+    assert lineage["kind"] == "compatible_actor_transfer"
+    assert transfer_runner.current_learning_iteration == 0
+    assert transfer_runner.env.unwrapped.common_step_counter == 0
+    assert loaded["actor_state_dict"] == {}

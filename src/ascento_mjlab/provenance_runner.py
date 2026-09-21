@@ -57,7 +57,7 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
         source = Path(source_checkpoint).expanduser().resolve()
         if not source.is_file():
             raise FileNotFoundError(f"source checkpoint does not exist: {source}")
-        payload = torch.load(source, map_location="cpu", weights_only=False)
+        payload = torch.load(source, map_location="cpu", weights_only=True)
         if not isinstance(payload, dict):
             raise ValueError("source checkpoint is not a supported RSL-RL checkpoint")
         infos = payload.get("infos")

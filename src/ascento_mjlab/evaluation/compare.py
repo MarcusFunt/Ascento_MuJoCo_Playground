@@ -72,13 +72,36 @@ def _quality_gate_report(path: Path) -> dict | None:
     return payload
 
 
-def _suite_id(path: Path) -> str | None:
+def _quality_evaluation_identity(path: Path) -> tuple[str, str, str] | None:
+    """Read the immutable suite and resolved-scenario identity for a verdict."""
     try:
         payload = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    value = payload.get("suite_id") if isinstance(payload, dict) else None
-    return value if isinstance(value, str) else None
+    if not isinstance(payload, dict):
+        return None
+    values = (
+        payload.get("suite_id"),
+        payload.get("suite_sha256"),
+        payload.get("resolved_scenarios_sha256"),
+    )
+    suite_id, suite_digest, scenario_digest = values
+    if (
+        not isinstance(suite_id, str)
+        or not suite_id
+        or not _is_sha256(suite_digest)
+        or not _is_sha256(scenario_digest)
+    ):
+        return None
+    return suite_id, suite_digest, scenario_digest
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value.lower())
+    )
 
 
 def quality_baseline_verdict(base: Path, candidate: Path) -> dict | None:
@@ -92,14 +115,20 @@ def quality_baseline_verdict(base: Path, candidate: Path) -> dict | None:
     contender = _quality_gate_report(candidate)
     if baseline is None or contender is None:
         return None
-    baseline_suite = _suite_id(base)
-    candidate_suite = _suite_id(candidate)
-    if baseline_suite is None or candidate_suite is None or baseline_suite != candidate_suite:
+    baseline_identity = _quality_evaluation_identity(base)
+    candidate_identity = _quality_evaluation_identity(candidate)
+    if baseline_identity is None or baseline_identity != candidate_identity:
         return None
 
     baseline_status = baseline.get("status")
     candidate_status = contender.get("status")
-    if not isinstance(baseline_status, str) or not isinstance(candidate_status, str):
+    completed_statuses = ("PASS", "FAIL")
+    if (
+        not isinstance(baseline_status, str)
+        or baseline_status not in completed_statuses
+        or not isinstance(candidate_status, str)
+        or candidate_status not in completed_statuses
+    ):
         return None
     failed = [
         str(gate.get("gate_id", "unknown"))

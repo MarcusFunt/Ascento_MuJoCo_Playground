@@ -57,10 +57,12 @@ ascento tools initialize-transfer -- \
 ```
 
 Evaluate that transfer and every continuation on the same fixed-seed quiet
-suite, then compare the two completed artifacts. `evaluate compare` now emits
-a `quality_baseline_verdict`: a hard-gate failure is `WORSE`; two passing
-policies are `NOT_PROVEN_BETTER` until their paired quality deltas justify
-promotion.
+suite, then compare the two completed artifacts. `evaluate compare` emits a
+`quality_baseline_verdict` only for completed `PASS`/`FAIL` reports with the
+same suite definition and resolved scenarios: a hard-gate failure is `WORSE`;
+two passing policies are `NOT_PROVEN_BETTER` until their paired quality deltas
+justify promotion. Invalid, incomplete, or legacy/mismatched evaluations do not
+receive a gate verdict.
 
 ```bash
 ascento evaluate run --checkpoint logs/transfers/balance_79999_to_quiet/model_000000.pt \
