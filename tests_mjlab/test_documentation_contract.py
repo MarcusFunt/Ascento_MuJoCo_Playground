@@ -117,11 +117,12 @@ def test_mcp_inventory_tracks_decorated_tool_functions() -> None:
 
 
 def test_runs_page_matches_the_current_curriculum_and_selection_gate() -> None:
-    source = (ROOT / "dashboard" / "frontend" / "src" / "RunsPage.jsx").read_text(
-        encoding="utf-8"
-    )
+    curriculum_backend = (ROOT / "dashboard" / "curriculum.py").read_text(encoding="utf-8")
+    curriculum_ui = (
+        ROOT / "dashboard" / "frontend" / "src" / "components" / "CurriculumRail.tsx"
+    ).read_text(encoding="utf-8")
 
-    assert "six consecutive 512-episode windows" in source
-    assert "balance_gate_v5 before selecting it" in source
-    assert "three 512-episode windows" not in source
-    assert "balance_gate_v2 before selecting it" not in source
+    assert "HORIZON_SUCCESS_WINDOWS = 6" in curriculum_backend
+    assert "balance_gate_v5" in curriculum_ui
+    assert "HORIZON_SUCCESS_WINDOWS = 3" not in curriculum_backend
+    assert "balance_gate_v2" not in curriculum_ui
