@@ -100,7 +100,8 @@ def test_runtime_status_updates_loaded_checkpoint_and_lag(monkeypatch, tmp_path)
         logs_root=tmp_path / "viewer-logs",
         stable_age_seconds=0,
     )
-    monkeypatch.setattr(service, "_port_open", lambda: True)
+    port_ready = {"value": False}
+    monkeypatch.setattr(service, "_port_open", lambda: port_ready["value"])
     monkeypatch.setattr(
         run_service,
         "progress",
@@ -108,6 +109,7 @@ def test_runtime_status_updates_loaded_checkpoint_and_lag(monkeypatch, tmp_path)
     )
 
     started = service.start(run_id=run_id, checkpoint="model_100.pt")
+    port_ready["value"] = True
     status_path = tmp_path / "viewer-logs" / f"{started['id']}.json"
     status_path.write_text(
         json.dumps(
@@ -129,6 +131,19 @@ def test_runtime_status_updates_loaded_checkpoint_and_lag(monkeypatch, tmp_path)
     assert status["lag_iterations"] == 10
 
 
+def test_start_rejects_an_already_occupied_viewer_port(monkeypatch, tmp_path):
+    run_service, run_id, _ = _run(tmp_path / "artifacts")
+    service = ViewerService(
+        run_service,
+        logs_root=tmp_path / "viewer-logs",
+        stable_age_seconds=0,
+    )
+    monkeypatch.setattr(service, "_port_open", lambda: True)
+
+    with pytest.raises(ViewerBusyError, match="port 8081 is already in use"):
+        service.start(run_id=run_id)
+
+
 def test_stop_signals_only_viewer_process_group(monkeypatch, tmp_path):
     run_service, run_id, _ = _run(tmp_path / "artifacts")
     monkeypatch.setattr(
@@ -148,8 +163,10 @@ def test_stop_signals_only_viewer_process_group(monkeypatch, tmp_path):
         logs_root=tmp_path / "viewer-logs",
         stable_age_seconds=0,
     )
-    monkeypatch.setattr(service, "_port_open", lambda: True)
+    port_ready = {"value": False}
+    monkeypatch.setattr(service, "_port_open", lambda: port_ready["value"])
     started = service.start(run_id=run_id)
+    port_ready["value"] = True
 
     stopped = service.stop(started["id"])
 
