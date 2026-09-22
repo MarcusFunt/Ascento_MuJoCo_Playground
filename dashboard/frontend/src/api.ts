@@ -23,6 +23,7 @@ export const api = {
   overview: () => fetchJson<OverviewResponse>('/api/overview'),
   runs: () => fetchJson<{ runs: RunIndexRow[] }>('/api/runs/index'),
   run: (id: string) => fetchJson<RunDetail>(`/api/runs/${id}`),
+  curriculum: (id: string) => fetchJson<{ curriculum: import('./types').Curriculum | null }>(`/api/runs/${id}/curriculum`),
   tasks: () => fetchJson<{ tasks: TaskOption[] }>('/api/tasks'),
   telemetry: (id: string, maxPoints = 800) =>
     fetchJson<{ records: TelemetryRecord[]; source_records?: number; coverage?: Record<string, unknown> }>(
