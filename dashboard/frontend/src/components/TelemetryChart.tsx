@@ -1,5 +1,11 @@
-import ReactECharts from 'echarts-for-react'
+import * as echarts from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { DataZoomComponent, GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import ReactEChartsCore from 'echarts-for-react/lib/core'
 import type { TelemetryRecord } from '../types'
+
+echarts.use([LineChart, DataZoomComponent, GridComponent, TooltipComponent, CanvasRenderer])
 import { fmtNumber } from '../lib/utils'
 
 export function TelemetryChart({
@@ -85,7 +91,7 @@ export function TelemetryChart({
         </div>
         <div className="numeric text-right text-lg font-semibold">{fmtNumber(latest, 5)}</div>
       </div>
-      <ReactECharts option={option} style={{ height: 300, marginTop: 12 }} notMerge lazyUpdate />
+      <ReactEChartsCore echarts={echarts} option={option} style={{ height: 300, marginTop: 12 }} notMerge lazyUpdate />
     </section>
   )
 }
