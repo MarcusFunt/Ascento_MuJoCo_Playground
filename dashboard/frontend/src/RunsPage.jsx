@@ -183,6 +183,14 @@ function RunsPage() {
     return () => clearInterval(timer)
   }, [selectedId])
 
+  useEffect(() => {
+    if (!viewer || !['starting', 'running', 'stopping'].includes(viewer.state)) {
+      return undefined
+    }
+    const timer = setInterval(refreshViewer, 2000)
+    return () => clearInterval(timer)
+  }, [viewer?.id, viewer?.state])
+
   const parentOptions = useMemo(
     () => runs.filter((run) => run.id !== selectedId),
     [runs, selectedId],
@@ -543,10 +551,19 @@ function RunsPage() {
                 {!viewerForSelected && (
                   <>
                     {viewerActive && (
-                      <p className="runs-hint">
-                        Another run currently owns the viewer slot. Stop that viewer before
-                        starting this one.
-                      </p>
+                      <div className="policy-viewer-other-run">
+                        <p className="runs-hint">
+                          Another run currently owns the viewer slot
+                          {viewer?.run_id ? ` (${viewer.run_id})` : ''}.
+                        </p>
+                        <button
+                          className="runs-button danger"
+                          disabled={busy}
+                          onClick={stopViewer}
+                        >
+                          Stop active viewer
+                        </button>
+                      </div>
                     )}
                     <label className="policy-viewer-field">
                       Checkpoint
