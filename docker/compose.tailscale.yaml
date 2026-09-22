@@ -25,7 +25,7 @@ services:
       - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
       # Viser runs as a managed dashboard child process in the same network
       # namespace. Tailnet peers use the same MagicDNS host on this port.
-      - "127.0.0.1:${ASCENTO_VIEWER_PORT:-8081}:8081"
+      - "127.0.0.1:${ASCENTO_VIEWER_PORT:-8081}:${ASCENTO_VIEWER_PORT:-8081}"
     restart: unless-stopped
 
   dashboard:
