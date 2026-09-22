@@ -45,7 +45,9 @@ services:
     command: ["python", "-m", "uvicorn", "dashboard.app:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       dashboard-db:
-        condition: service_healthy
+        # The web UI must still start if the optional semantic index is broken.
+        # The app retries the connection briefly, then falls back to filesystem state.
+        condition: service_started
     ports:
       - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
       - "127.0.0.1:${ASCENTO_VIEWER_PORT:-8081}:${ASCENTO_VIEWER_PORT:-8081}"
