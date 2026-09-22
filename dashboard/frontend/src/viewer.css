@@ -1,0 +1,90 @@
+.policy-viewer-card {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.policy-viewer-heading,
+.policy-viewer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.policy-viewer-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.policy-viewer-kicker {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  opacity: 0.65;
+}
+
+.policy-viewer-field {
+  display: grid;
+  gap: 6px;
+}
+
+.policy-viewer-field select {
+  width: 100%;
+}
+
+.policy-viewer-follow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+}
+
+.policy-viewer-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.policy-viewer-stats > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.policy-viewer-stats span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+
+.policy-viewer-stats strong {
+  overflow-wrap: anywhere;
+}
+
+.policy-viewer-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.runs-button.disabled,
+.runs-button[aria-disabled="true"] {
+  pointer-events: none;
+  opacity: 0.48;
+}
+
+@media (max-width: 640px) {
+  .policy-viewer-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .policy-viewer-heading,
+  .policy-viewer-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

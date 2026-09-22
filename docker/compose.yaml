@@ -30,6 +30,7 @@ services:
     command: ["python", "-m", "uvicorn", "dashboard.app:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
+      - "127.0.0.1:${ASCENTO_VIEWER_PORT:-8081}:${ASCENTO_VIEWER_PORT:-8081}"
     volumes:
       # Run management writes launcher metadata, logs and checkpoints beneath
       # the shared artifact root. Other repository artifacts stay read-only.
@@ -43,5 +44,6 @@ services:
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
       ASCENTO_ARTIFACT_ROOT: /workspace/logs/rsl_rl
+      ASCENTO_VIEWER_PORT: ${ASCENTO_VIEWER_PORT:-8081}
       ASCENTO_SUPERVISOR_SOCKET: /run/ascento-supervisor/supervisor.sock
     restart: unless-stopped

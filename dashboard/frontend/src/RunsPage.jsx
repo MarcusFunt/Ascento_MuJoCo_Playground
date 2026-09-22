@@ -1,3 +1,4 @@
+import './viewer.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 const POLL_MS = 15000
@@ -69,8 +70,13 @@ function RunsPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [checkpoints, setCheckpoints] = useState([])
+  const [checkpointSelection, setCheckpointSelection] = useState('')
+  const [viewer, setViewer] = useState(null)
+  const [viewerFollow, setViewerFollow] = useState(false)
   const runsRefreshInFlight = useRef(false)
   const detailRefreshInFlight = useRef(false)
+  const viewerRefreshInFlight = useRef(false)
   const editFormRunId = useRef('')
 
   async function refreshRuns() {
@@ -119,18 +125,71 @@ function RunsPage() {
     }
   }
 
+
+  async function refreshCheckpoints(id) {
+    if (!id) {
+      setCheckpoints([])
+      setCheckpointSelection('')
+      return
+    }
+    try {
+      const data = await fetchJson(`/api/runs/${id}/checkpoints`)
+      const items = data.checkpoints || []
+      setCheckpoints(items)
+      setCheckpointSelection((current) => (
+        current && items.some((item) => item.relative_path === current)
+          ? current
+          : (data.latest || '')
+      ))
+    } catch (caught) {
+      setCheckpoints([])
+      setCheckpointSelection('')
+      setError(caught.message)
+    }
+  }
+
+  async function refreshViewer() {
+    if (viewerRefreshInFlight.current) return
+    viewerRefreshInFlight.current = true
+    try {
+      const data = await fetchJson('/api/viewers')
+      setViewer((data.viewers || [])[0] || null)
+    } catch (caught) {
+      setError(caught.message)
+    } finally {
+      viewerRefreshInFlight.current = false
+    }
+  }
+
   useEffect(() => {
     refreshRuns()
-    const timer = setInterval(refreshRuns, POLL_MS)
+    refreshViewer()
+    const timer = setInterval(() => {
+      refreshRuns()
+      refreshViewer()
+    }, POLL_MS)
     return () => clearInterval(timer)
   }, [])
 
   useEffect(() => {
     refreshDetail(selectedId)
+    refreshCheckpoints(selectedId)
     if (!selectedId) return undefined
-    const timer = setInterval(() => refreshDetail(selectedId), POLL_MS)
+    const timer = setInterval(() => {
+      refreshDetail(selectedId)
+      refreshCheckpoints(selectedId)
+      refreshViewer()
+    }, POLL_MS)
     return () => clearInterval(timer)
   }, [selectedId])
+
+  useEffect(() => {
+    if (!viewer || !['starting', 'running', 'stopping'].includes(viewer.state)) {
+      return undefined
+    }
+    const timer = setInterval(refreshViewer, 2000)
+    return () => clearInterval(timer)
+  }, [viewer?.id, viewer?.state])
 
   const parentOptions = useMemo(
     () => runs.filter((run) => run.id !== selectedId),
@@ -230,6 +289,54 @@ function RunsPage() {
     }
   }
 
+  async function startViewer() {
+    if (!selectedId) return
+    setBusy(true)
+    setNotice('')
+    try {
+      const created = await fetchJson('/api/viewers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Ascento-Control': '1',
+        },
+        body: JSON.stringify({
+          run_id: selectedId,
+          checkpoint: checkpointSelection || 'latest',
+          follow: viewerFollow,
+        }),
+      })
+      setViewer(created)
+      setNotice(
+        created.follow
+          ? 'Viewer started in checkpoint-follow mode.'
+          : 'Viewer process started. Open it when the status becomes running.',
+      )
+    } catch (caught) {
+      setError(caught.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function stopViewer() {
+    if (!viewer?.id) return
+    setBusy(true)
+    setNotice('')
+    try {
+      const updated = await fetchJson(`/api/viewers/${viewer.id}`, {
+        method: 'DELETE',
+        headers: { 'X-Ascento-Control': '1' },
+      })
+      setViewer(updated)
+      setNotice('Viewer stop requested.')
+    } catch (caught) {
+      setError(caught.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function toggleCompare(id) {
     setComparison(null)
     setCompareIds((current) => {
@@ -254,6 +361,11 @@ function RunsPage() {
   }
 
   const active = ['starting', 'running', 'stopping'].includes(detail?.state)
+  const viewerActive = ['starting', 'running', 'stopping'].includes(viewer?.state)
+  const viewerForSelected = Boolean(viewer && viewer.run_id === selectedId)
+  const openViewerUrl = viewer?.port
+    ? `http://${window.location.hostname}:${viewer.port}`
+    : ''
 
   return (
     <main className="runs-page">
@@ -426,6 +538,104 @@ function RunsPage() {
               )}
               {detail.run_info?.long_horizon_candidate_checkpoint && <p className="runs-hint">Long-horizon candidate: <code>{detail.run_info.long_horizon_candidate_checkpoint}</code>. Evaluate it deterministically with balance_gate_v5 before selecting it.</p>}
               {detail.run_info?.command && <details className="runs-command"><summary>Training arguments and launch command</summary><pre>{Array.isArray(detail.run_info.command) ? detail.run_info.command.join('\n') : detail.run_info.command}</pre></details>}
+
+              <div className="policy-viewer-card">
+                <div className="policy-viewer-heading">
+                  <div>
+                    <span className="policy-viewer-kicker">POLICY VIEWER</span>
+                    <strong>Interactive mjlab / Viser</strong>
+                  </div>
+                  {viewerForSelected && <StateBadge state={viewer.state} />}
+                </div>
+
+                {!viewerForSelected && (
+                  <>
+                    {viewerActive && (
+                      <div className="policy-viewer-other-run">
+                        <p className="runs-hint">
+                          Another run currently owns the viewer slot
+                          {viewer?.run_id ? ` (${viewer.run_id})` : ''}.
+                        </p>
+                        <button
+                          className="runs-button danger"
+                          disabled={busy}
+                          onClick={stopViewer}
+                        >
+                          Stop active viewer
+                        </button>
+                      </div>
+                    )}
+                    <label className="policy-viewer-field">
+                      Checkpoint
+                      <select
+                        value={checkpointSelection}
+                        onChange={(event) => setCheckpointSelection(event.target.value)}
+                        disabled={checkpoints.length === 0 || viewerActive}
+                      >
+                        {checkpoints.length === 0 && <option value="">No stable checkpoints yet</option>}
+                        {checkpoints.map((item) => (
+                          <option key={item.relative_path} value={item.relative_path}>
+                            {item.relative_path}
+                            {item.iteration !== null ? ` — iteration ${item.iteration}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="policy-viewer-follow">
+                      <input
+                        type="checkbox"
+                        checked={viewerFollow}
+                        onChange={(event) => setViewerFollow(event.target.checked)}
+                        disabled={viewerActive}
+                      />
+                      Follow newly completed checkpoints automatically
+                    </label>
+                    <button
+                      className="runs-button primary full"
+                      disabled={busy || viewerActive || checkpoints.length === 0}
+                      onClick={startViewer}
+                    >
+                      Visualize checkpoint
+                    </button>
+                  </>
+                )}
+
+                {viewerForSelected && (
+                  <>
+                    <div className="policy-viewer-stats">
+                      <div><span>Loaded</span><strong>{viewer.checkpoint || '—'}</strong></div>
+                      <div><span>Policy iteration</span><strong>{fmtNumber(viewer.checkpoint_iteration, 0)}</strong></div>
+                      <div><span>Training iteration</span><strong>{fmtNumber(viewer.training_iteration, 0)}</strong></div>
+                      <div><span>Lag</span><strong>{viewer.lag_iterations === null || viewer.lag_iterations === undefined ? '—' : `${fmtNumber(viewer.lag_iterations, 0)} iterations`}</strong></div>
+                      <div><span>Mode</span><strong>{viewer.follow ? 'Follow latest' : 'Fixed / manual'}</strong></div>
+                      <div><span>Port</span><strong className="mono">{viewer.port}</strong></div>
+                    </div>
+                    <div className="policy-viewer-actions">
+                      <a
+                        className={`runs-button ${viewer.state === 'running' ? 'primary' : 'disabled'}`}
+                        href={viewer.state === 'running' ? openViewerUrl : undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-disabled={viewer.state !== 'running'}
+                      >
+                        {viewer.state === 'running' ? 'Open 3D viewer' : 'Viewer starting…'}
+                      </a>
+                      {viewerActive && (
+                        <button className="runs-button danger" disabled={busy} onClick={stopViewer}>
+                          Stop viewer
+                        </button>
+                      )}
+                    </div>
+                    {viewer.state === 'failed' && (
+                      <p className="runs-hint">
+                        Viewer exited with code {viewer.exit_code ?? 'unknown'}. Check
+                        <code> /api/viewers/{viewer.id}/logs</code> for the worker traceback.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+
               {active && <button className="runs-button danger full" disabled={busy || detail.state === 'stopping'} onClick={stopRun}>{detail.state === 'stopping' ? 'Stopping…' : 'Graceful stop'}</button>}
               <form className="runs-form edit-form" onSubmit={saveMetadata}>
                 <label>Human name<input value={editForm.display_name} onChange={(event) => setEditForm({ ...editForm, display_name: event.target.value })} /></label>
