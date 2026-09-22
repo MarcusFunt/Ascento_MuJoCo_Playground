@@ -164,7 +164,7 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
 def test_create_rejects_horizon_for_non_progressive_tasks(tmp_path):
     service = RunService(tmp_path)
 
-    with pytest.raises(ValueError, match="only for balance and velocity"):
+    with pytest.raises(ValueError, match="not configurable for this task"):
         service.create(
             {
                 "display_name": "Jump validation",
