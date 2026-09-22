@@ -99,6 +99,30 @@ def world_target_proximity(
     return torch.exp(-torch.sum(torch.square(error), dim=1) / (std * std))
 
 
+def world_target_progress_velocity(
+    env: ManagerBasedRlEnv,
+    speed_scale: float = 0.35,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Signed dense reward for instantaneous progress toward the XY target.
+
+    The projection of world-frame planar velocity onto the target direction is
+    positive while closing distance and negative while moving away. Tanh keeps
+    the signal strong but bounded, so the policy cannot increase reward without
+    limit simply by driving faster. The upright factor avoids paying for
+    ballistic motion after the robot has effectively fallen.
+    """
+    if speed_scale <= 0.0:
+        raise ValueError("speed_scale must be positive")
+    asset: Entity = env.scene[asset_cfg.name]
+    to_target = world_target_xy(env) - asset.data.root_link_pos_w[:, :2]
+    distance = torch.linalg.vector_norm(to_target, dim=1)
+    direction = to_target / distance.clamp_min(1.0e-6).unsqueeze(1)
+    closing_speed = torch.sum(asset.data.root_link_lin_vel_w[:, :2] * direction, dim=1)
+    closing_speed = torch.where(distance > 1.0e-3, closing_speed, torch.zeros_like(closing_speed))
+    upright_factor = torch.clamp(-asset.data.projected_gravity_b[:, 2], min=0.0, max=1.0)
+    return torch.tanh(closing_speed / speed_scale) * upright_factor
+
 def world_target_heading(
     env: ManagerBasedRlEnv,
     std: float = 0.35,
