@@ -1,5 +1,6 @@
 import { CircleHelp } from 'lucide-react'
 import { Sparkline } from './Sparkline'
+import { Progress } from './ui/progress'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 import { cn } from '../lib/utils'
 
@@ -10,6 +11,7 @@ export function MetricCard({
   values = [],
   help,
   tone = 'neutral',
+  progress,
 }: {
   label: string
   value: string
@@ -17,7 +19,9 @@ export function MetricCard({
   values?: Array<number | null | undefined>
   help?: string
   tone?: 'neutral' | 'good' | 'warning' | 'danger'
+  progress?: number
 }) {
+  const hasTrend = values.filter((value) => Number.isFinite(Number(value))).length >= 2
   const toneClass = {
     neutral: 'text-foreground',
     good: 'text-success',
@@ -43,7 +47,11 @@ export function MetricCard({
         </div>
         {secondary ? <div className="max-w-[42%] text-right text-xs leading-relaxed text-muted">{secondary}</div> : null}
       </div>
-      <Sparkline values={values} className="mt-3 text-secondary" />
+      {progress !== undefined ? (
+        <Progress value={progress} className="mt-5 h-1" />
+      ) : hasTrend ? (
+        <Sparkline values={values} className="mt-3 text-secondary" />
+      ) : null}
     </section>
   )
 }
