@@ -25,6 +25,7 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
     go-to-pose attempts instead of a single short movement sequence.
     """
     cfg = ascento_balance_quiet_env_cfg(play=play, num_envs=num_envs)
+    cfg.scene.env_spacing = 8.0
     cfg.events.pop("balance_push", None)
     cfg.events["initialize_world_target"] = EventTermCfg(
         func=ascento_mdp.events.initialize_random_world_target,
