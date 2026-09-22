@@ -229,6 +229,9 @@ def test_locomotion_uses_long_repeated_random_target_curriculum(monkeypatch):
     assert repeated.params["min_target_distance_m"] == pytest.approx(2.0)
     assert repeated.params["max_target_distance_m"] == pytest.approx(3.0)
     assert repeated.params["target_hold_s"] == pytest.approx(0.35)
+    progress = cfg.rewards["world_target_progress"]
+    assert progress.weight == pytest.approx(8.0)
+    assert progress.params["speed_scale"] == pytest.approx(0.30)
     assert repeated.params["arena_half_extent_m"] == pytest.approx(4.0)
     assert cfg.scene.env_spacing == pytest.approx(10.0)
 
