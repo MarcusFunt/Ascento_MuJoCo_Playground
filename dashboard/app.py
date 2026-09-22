@@ -18,6 +18,7 @@ from dashboard.config import load_config, validate_startup
 from dashboard.curriculum import curriculum_for_run
 from dashboard.database import DashboardDatabase
 from dashboard.health import (
+    build_run_info,
     decorate_records,
     discover_dashboard_runs,
     list_dashboard_summaries,
@@ -273,33 +274,30 @@ def _overview_series(run_id: str, max_points: int = 120) -> list[dict]:
     return result
 
 
+def _curriculum_snapshot(run_id: str) -> tuple[dict, dict | None]:
+    """Build curriculum state without loading detailed contracts or GPU diagnostics."""
+    ref = _run(run_id)
+    progress = RUN_SERVICE.progress_index(run_id)
+    run_info = build_run_info(
+        ref.path,
+        ARTIFACT_ROOT,
+        str(progress.get("stage") or "unknown"),
+    )
+    detail = {**progress, "run_info": run_info}
+    return detail, curriculum_for_run(detail)
+
+
 def _overview_run(detail: dict) -> dict:
+    """Project a cheap progress snapshot into the landing-page run model."""
     row = _compact_run(detail)
-    health = detail.get("training_health") if isinstance(detail.get("training_health"), dict) else {}
-    canonical = health.get("latest") if isinstance(health.get("latest"), dict) else {}
-    telemetry = detail.get("telemetry") if isinstance(detail.get("telemetry"), dict) else {}
     run_info = detail.get("run_info") if isinstance(detail.get("run_info"), dict) else {}
     row.update(
         {
             "task": run_info.get("task") or row.get("task"),
-            "iteration": telemetry.get("iteration", row.get("iteration")),
-            "total_iterations": telemetry.get("total_iterations", row.get("total_iterations")),
-            "percent_complete": telemetry.get("percent_complete", row.get("percent_complete")),
-            "eta_seconds": telemetry.get("eta_seconds", row.get("eta_seconds")),
-            "throughput": telemetry.get(
-                "environment_steps_per_second", row.get("throughput")
-            ),
-            "reward": canonical.get("reward", row.get("reward")),
-            "episode_length": canonical.get("episode_length", row.get("episode_length")),
-            "kl": canonical.get("kl", row.get("kl")),
-            "entropy": canonical.get("entropy", row.get("entropy")),
-            "ppo_loss": canonical.get("ppo_loss", row.get("ppo_loss")),
-            "clip_fraction": canonical.get("clip_fraction", row.get("clip_fraction")),
             "started_at": run_info.get("started_at"),
             "device": run_info.get("device"),
-            "invalid_updates": health.get("invalid_updates"),
-            "non_finite_updates": health.get("non_finite_updates"),
-            "system": detail.get("system") or {},
+            "invalid_updates": 1 if row.get("invalid_update") else 0,
+            "non_finite_updates": 0,
         }
     )
     return row
@@ -451,8 +449,7 @@ def overview():
         }
 
     try:
-        detail = RUN_SERVICE.detail(str(active["id"]))
-        curriculum = curriculum_for_run(detail)
+        detail, curriculum = _curriculum_snapshot(str(active["id"]))
         current = _overview_run(detail)
         DATABASE.sync_run(current, curriculum)
         return {
@@ -524,8 +521,8 @@ def run_status(run_id: str):
 @app.get("/api/runs/{run_id}/curriculum")
 def run_curriculum(run_id: str):
     try:
-        detail = RUN_SERVICE.detail(run_id)
-        return {"curriculum": curriculum_for_run(detail)}
+        _, curriculum = _curriculum_snapshot(run_id)
+        return {"curriculum": curriculum}
     except KeyError as error:
         raise HTTPException(status_code=404, detail="training run not found") from error
 
