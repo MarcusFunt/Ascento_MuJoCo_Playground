@@ -23,6 +23,7 @@ from dashboard.health import (
 )
 from dashboard.monitor import load_training_records, tail_lines, training_log_path
 from dashboard.run_service import RunService
+from dashboard.viewer_service import ViewerBusyError, ViewerNotFoundError, ViewerService
 from dashboard.supervisor_client import (
     SupervisorClient,
     SupervisorRejected,
@@ -35,6 +36,13 @@ STARTUP_WARNINGS = validate_startup(CONFIG, create_artifact_root=False)
 ARTIFACT_ROOT = CONFIG.artifact_root
 FRONTEND_DIST = CONFIG.frontend_dist
 RUN_SERVICE = RunService(ARTIFACT_ROOT, stale_after_seconds=CONFIG.stale_after_seconds)
+VIEWER_SERVICE = ViewerService(
+    RUN_SERVICE,
+    logs_root=CONFIG.repo_root / "logs" / "viewers",
+    host=os.environ.get("ASCENTO_VIEWER_HOST", "0.0.0.0"),
+    port=int(os.environ.get("ASCENTO_VIEWER_PORT", "8081")),
+    stable_age_seconds=float(os.environ.get("ASCENTO_VIEWER_STABLE_AGE_SECONDS", "2.0")),
+)
 SUPERVISOR = SupervisorClient()
 
 # Artifact discovery walks a mounted training directory.  Keeping the annotated
@@ -43,7 +51,7 @@ _SUMMARY_CACHE_TTL_S = 25.0
 _SUMMARY_CACHE_LOCK = threading.Lock()
 _SUMMARY_CACHE: tuple[float, list[dict]] | None = None
 
-app = FastAPI(title="Ascento Training Monitor", version="2.1")
+app = FastAPI(title="Ascento Training Monitor", version="2.2")
 
 
 class RunCreateRequest(BaseModel):
@@ -70,6 +78,13 @@ class RunUpdateRequest(BaseModel):
 
 class RunStopRequest(BaseModel):
     reason: str = "user_requested"
+
+
+class ViewerCreateRequest(BaseModel):
+    run_id: str
+    checkpoint: str = "latest"
+    follow: bool = False
+    device: str | None = None
 
 
 def _run(run_id: str):
@@ -328,6 +343,70 @@ def stop_run(run_id: str, request: RunStopRequest):
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.get("/api/runs/{run_id}/checkpoints")
+def run_checkpoints(run_id: str):
+    try:
+        return VIEWER_SERVICE.checkpoints(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="training run not found") from error
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.get("/api/viewers")
+def viewers():
+    return VIEWER_SERVICE.list()
+
+
+@app.post("/api/viewers", status_code=202)
+def start_viewer(payload: ViewerCreateRequest, request: Request):
+    if request.headers.get("x-ascento-control") != "1":
+        raise HTTPException(status_code=403, detail="missing dashboard control header")
+    try:
+        return VIEWER_SERVICE.start(
+            run_id=payload.run_id,
+            checkpoint=payload.checkpoint,
+            follow=payload.follow,
+            device=payload.device,
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="training run not found") from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ViewerBusyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(status_code=503, detail=f"viewer could not start: {error}") from error
+
+
+@app.get("/api/viewers/{viewer_id}")
+def viewer_status(viewer_id: str):
+    try:
+        return VIEWER_SERVICE.get(viewer_id)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
+@app.get("/api/viewers/{viewer_id}/logs")
+def viewer_logs(viewer_id: str, tail: int = 300):
+    try:
+        return VIEWER_SERVICE.logs(viewer_id, tail=tail)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
+@app.delete("/api/viewers/{viewer_id}", status_code=202)
+def stop_viewer(viewer_id: str, request: Request):
+    if request.headers.get("x-ascento-control") != "1":
+        raise HTTPException(status_code=403, detail="missing dashboard control header")
+    try:
+        return VIEWER_SERVICE.stop(viewer_id)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
 @app.get("/api/runs/{run_id}/summary.json")
 def run_summary(run_id: str):
     try:
@@ -427,3 +506,8 @@ def index():
 
 if (FRONTEND_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+
+@app.on_event("shutdown")
+def stop_managed_viewers() -> None:
+    VIEWER_SERVICE.stop_all()
