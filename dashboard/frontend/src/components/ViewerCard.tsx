@@ -25,16 +25,16 @@ export function ViewerCard({ runId }: { runId: string }) {
   const viewer = viewers.data?.viewers?.[0] || null
   const forSelected = viewer?.run_id === runId
   const viewerActive = Boolean(viewer && ['starting', 'running', 'stopping'].includes(viewer.state))
-  const [checkpoint, setCheckpoint] = useState('')
+  const [checkpoint, setCheckpoint] = useState('latest')
   const [follow, setFollow] = useState(false)
 
   useEffect(() => {
     const items = checkpoints.data?.checkpoints || []
     setCheckpoint((current) => {
-      if (current && items.some((item) => item.relative_path === current)) return current
-      return checkpoints.data?.latest || items[items.length - 1]?.relative_path || ''
+      if (current === 'latest' || items.some((item) => item.relative_path === current)) return current
+      return 'latest'
     })
-  }, [checkpoints.data])
+  }, [checkpoints.data, runId])
 
   const start = useMutation({
     mutationFn: () => api.startViewer({ run_id: runId, checkpoint: checkpoint || 'latest', follow }),
@@ -68,7 +68,7 @@ export function ViewerCard({ runId }: { runId: string }) {
         {forSelected && viewer ? <StateBadge state={viewer.state} /> : null}
       </div>
 
-      {!forSelected ? (
+      {!forSelected || !viewerActive ? (
         <div className="mt-6">
           {viewerActive && viewer ? (
             <div className="mb-4 rounded-lg border border-warning/35 bg-warning/10 p-4 text-sm text-warning">
@@ -80,7 +80,12 @@ export function ViewerCard({ runId }: { runId: string }) {
             <label>
               <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.06em] text-muted">Checkpoint</span>
               <SelectInput value={checkpoint} onChange={(event) => setCheckpoint(event.target.value)} disabled={viewerActive || !checkpoints.data?.checkpoints?.length}>
-                {!checkpoints.data?.checkpoints?.length ? <option value="">No stable checkpoints yet</option> : null}
+                {!checkpoints.data?.checkpoints?.length ? <option value="latest">No stable checkpoints yet</option> : null}
+                {checkpoints.data?.checkpoints?.length ? (
+                  <option value="latest">
+                    Latest stable{checkpoints.data.latest ? ` · ${checkpoints.data.latest}` : ''}
+                  </option>
+                ) : null}
                 {(checkpoints.data?.checkpoints || []).map((item) => (
                   <option key={item.relative_path} value={item.relative_path}>
                     {item.relative_path}{item.iteration !== null && item.iteration !== undefined ? ` · iteration ${item.iteration}` : ''}
@@ -88,7 +93,7 @@ export function ViewerCard({ runId }: { runId: string }) {
                 ))}
               </SelectInput>
             </label>
-            <Button variant="primary" size="lg" disabled={viewerActive || !checkpoint || start.isPending} onClick={() => start.mutate()}>
+            <Button variant="primary" size="lg" disabled={viewerActive || !checkpoints.data?.checkpoints?.length || start.isPending} onClick={() => start.mutate()}>
               {start.isPending ? 'Starting…' : 'Visualize checkpoint'}
             </Button>
           </div>

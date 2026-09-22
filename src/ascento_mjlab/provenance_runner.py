@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -24,13 +25,20 @@ _ENVIRONMENT_PROGRESS_SCHEMA_VERSION = 1
 class AscentoProvenanceRunner(MjlabOnPolicyRunner):
     """Persist the compiled simulation authority with all Ascento checkpoints."""
 
+    def _num_steps_per_env(self) -> int:
+        """Return rollout length across supported RSL-RL runner versions."""
+        value = getattr(self, "num_steps_per_env", None)
+        if value is None:
+            value = self.cfg.get("num_steps_per_env", 0)
+        return int(value)
+
     def _environment_progress(self) -> dict[str, int]:
         """Return training progress needed to resume environment-side curricula exactly."""
         return {
             "schema_version": _ENVIRONMENT_PROGRESS_SCHEMA_VERSION,
             "common_step_counter": int(self.env.unwrapped.common_step_counter),
             "learning_iteration": int(self.current_learning_iteration),
-            "num_steps_per_env": int(self.cfg["num_steps_per_env"]),
+            "num_steps_per_env": self._num_steps_per_env(),
         }
 
     def save(self, path: str, infos: dict[str, Any] | None = None) -> None:
@@ -41,7 +49,21 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
             "task_contract": current_task_contract(self.env.unwrapped.cfg),
             "environment_progress": self._environment_progress(),
         }
-        super().save(path, infos=provenance)
+        target = Path(path).expanduser().resolve()
+        temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        upload_model = bool(self.cfg.get("upload_model", False))
+        try:
+            self.cfg["upload_model"] = False
+            super().save(str(temporary), infos=provenance)
+            os.replace(temporary, target)
+        finally:
+            self.cfg["upload_model"] = upload_model
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if upload_model:
+            self.logger.save_model(str(target), self.current_learning_iteration)
 
     def _restore_environment_progress(
         self,
@@ -74,7 +96,7 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
 
         if restored_steps is None:
             iteration = max(0, int(self.current_learning_iteration))
-            steps_per_iteration = max(0, int(self.cfg["num_steps_per_env"]))
+            steps_per_iteration = max(0, self._num_steps_per_env())
             restored_steps = iteration * steps_per_iteration
 
         self.env.unwrapped.common_step_counter = restored_steps
