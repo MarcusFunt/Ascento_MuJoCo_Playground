@@ -269,6 +269,36 @@ def initialize_world_target(
     state["target_yaw"][ids] = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[ids])
 
 
+def initialize_random_world_target(
+    env,
+    env_ids: torch.Tensor | slice | None = None,
+    *,
+    asset_name: str = "robot",
+    min_distance_m: float = 0.15,
+    max_distance_m: float = 0.35,
+    arena_half_extent_m: float = 0.65,
+) -> None:
+    """Assign each selected environment an immediate bounded random XY target.
+
+    Locomotion training needs task-relevant reward from the first rollout step.
+    Targets remain close enough for the existing proximity reward to stay
+    informative, while the arena bound prevents repeated target sampling from
+    turning into an unbounded random walk across neighbouring cloned worlds.
+    """
+    ids = _resolved_env_ids(env, env_ids)
+    if ids.numel() == 0:
+        return
+    asset = env.scene[asset_name]
+    _set_bounded_random_world_targets(
+        env,
+        asset,
+        ids,
+        min_distance_m=min_distance_m,
+        max_distance_m=max_distance_m,
+        arena_half_extent_m=arena_half_extent_m,
+    )
+
+
 def world_target_xy(env) -> torch.Tensor:
     """Return the current per-environment world-frame XY target.
 
@@ -332,6 +362,76 @@ class OneShotPlanarVelocityPush:
         velocity[:, :3] += delta
         asset.write_root_link_velocity_to_sim(velocity, env_ids=ids)
         self._pushed[ids] = True
+
+
+class RepeatedRandomWorldTargetSequence:
+    """Chain nearby random go-to-pose targets for the full episode.
+
+    A target is replaced only after the robot is both close to it and settled
+    for a short dwell. This keeps the locomotion objective dense without
+    rewarding fly-through behavior, and provides many movement attempts per
+    long episode instead of a single target step.
+    """
+
+    def __init__(self, cfg, env) -> None:
+        del cfg
+        self._settled_at_target_s = torch.zeros(
+            env.num_envs, dtype=torch.float32, device=env.device
+        )
+
+    def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+        if env_ids is None:
+            self._settled_at_target_s.zero_()
+            return
+        ids = _resolved_env_ids_placeholder(
+            env_ids, self._settled_at_target_s.device, self._settled_at_target_s.numel()
+        )
+        self._settled_at_target_s[ids] = 0.0
+
+    def __call__(
+        self,
+        env,
+        env_ids: torch.Tensor | slice | None,
+        *,
+        target_reached_distance_m: float = 0.04,
+        target_hold_s: float = 0.35,
+        min_target_distance_m: float = 0.15,
+        max_target_distance_m: float = 0.35,
+        arena_half_extent_m: float = 0.65,
+        asset_cfg: SceneEntityCfg,
+    ) -> None:
+        if target_reached_distance_m <= 0.0:
+            raise ValueError("target_reached_distance_m must be positive")
+        if target_hold_s <= 0.0:
+            raise ValueError("target_hold_s must be positive")
+
+        ids = _resolved_env_ids(env, env_ids)
+        if ids.numel() == 0:
+            return
+        asset = env.scene[asset_cfg.name]
+        distance = torch.linalg.vector_norm(
+            asset.data.root_link_pos_w[ids, :2] - world_target_xy(env)[ids], dim=1
+        )
+        settled = _is_settled_for_locomotion(env, asset, ids)
+        at_target = (distance <= target_reached_distance_m) & settled
+        self._settled_at_target_s[ids] = torch.where(
+            at_target,
+            self._settled_at_target_s[ids] + float(env.step_dt),
+            torch.zeros_like(self._settled_at_target_s[ids]),
+        )
+        ready = ids[self._settled_at_target_s[ids] >= target_hold_s]
+        if ready.numel() == 0:
+            return
+
+        _set_bounded_random_world_targets(
+            env,
+            asset,
+            ready,
+            min_distance_m=min_target_distance_m,
+            max_distance_m=max_target_distance_m,
+            arena_half_extent_m=arena_half_extent_m,
+        )
+        self._settled_at_target_s[ready] = 0.0
 
 
 class SettleTriggeredLocomotionSequence:
@@ -502,6 +602,67 @@ def _apply_cardinal_planar_push(
     asset.write_root_link_velocity_to_sim(velocity, env_ids=ids)
 
 
+def _set_bounded_random_world_targets(
+    env,
+    asset,
+    ids: torch.Tensor,
+    *,
+    min_distance_m: float,
+    max_distance_m: float,
+    arena_half_extent_m: float,
+) -> None:
+    """Sample reachable local targets while keeping each clone in its own arena."""
+    if not 0.0 < min_distance_m <= max_distance_m:
+        raise ValueError("target distance requires 0 < min <= max")
+    if arena_half_extent_m <= 0.0:
+        raise ValueError("arena_half_extent_m must be positive")
+
+    current = asset.data.root_link_pos_w[ids, :2]
+    origins = env.scene.env_origins[ids, :2]
+    targets = current.clone()
+    pending = torch.arange(ids.numel(), dtype=torch.long, device=env.device)
+
+    # Local polar sampling keeps every segment inside the proximity reward's
+    # useful range. Rejection against the per-clone arena prevents a long chain
+    # of targets from drifting into neighbouring environments.
+    for _ in range(8):
+        if pending.numel() == 0:
+            break
+        angles = torch.empty(pending.numel(), device=env.device).uniform_(-torch.pi, torch.pi)
+        distances = torch.empty(pending.numel(), device=env.device).uniform_(
+            min_distance_m, max_distance_m
+        )
+        offsets = distances.unsqueeze(1) * torch.stack(
+            (torch.cos(angles), torch.sin(angles)), dim=1
+        )
+        candidates = current[pending] + offsets
+        local = candidates - origins[pending]
+        valid = torch.all(local.abs() <= arena_half_extent_m, dim=1)
+        if bool(valid.any()):
+            targets[pending[valid]] = candidates[valid]
+        pending = pending[~valid]
+
+    if pending.numel() > 0:
+        # Rare boundary fallback: move back toward the clone origin. This keeps
+        # the target useful even if overshoot left the robot near/outside the
+        # nominal arena.
+        to_origin = origins[pending] - current[pending]
+        norm = torch.linalg.vector_norm(to_origin, dim=1, keepdim=True)
+        default_direction = torch.zeros_like(to_origin)
+        default_direction[:, 0] = 1.0
+        direction = torch.where(
+            norm > 1.0e-6,
+            to_origin / norm.clamp_min(1.0e-6),
+            default_direction,
+        )
+        distance = 0.5 * (min_distance_m + max_distance_m)
+        targets[pending] = current[pending] + direction * distance
+
+    state = _world_target_state(env)
+    state["target_xy"][ids] = targets
+    state["target_yaw"][ids] = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[ids])
+
+
 def _set_nearby_world_targets(
     env, asset, ids: torch.Tensor, *, min_distance_m: float, max_distance_m: float
 ) -> None:
@@ -517,9 +678,11 @@ __all__ = [
     "DEFAULT_WHEEL_HALF_WIDTH_M",
     "DEFAULT_WHEEL_RADIUS_M",
     "flat_ground_wheel_bottom_heights",
+    "initialize_random_world_target",
     "initialize_world_target",
     "mixed_balance_recovery_reset",
     "OneShotPlanarVelocityPush",
+    "RepeatedRandomWorldTargetSequence",
     "SettleTriggeredLocomotionSequence",
     "reset_to_default_supported",
     "reset_root_state_supported",
