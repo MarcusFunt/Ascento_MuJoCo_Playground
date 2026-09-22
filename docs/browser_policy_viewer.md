@@ -72,8 +72,9 @@ Requirements:
 - Represent the selected checkpoint by a run-relative path.
 - Expose iteration, size, mtime, and age for the dashboard.
 
-A short stability age prevents the viewer from racing a checkpoint writer. Failed loads do
-not replace the currently active Viser policy.
+A short stability age prevents the viewer from racing a checkpoint writer. If a load or
+contract check still fails, the viewer worker surfaces the error and can be restarted; the
+training process is unaffected.
 
 ### 2. Standalone viewer worker
 
@@ -234,11 +235,11 @@ No Docker socket is added to the dashboard.
 | --- | --- |
 | No checkpoint | Start returns conflict; trainer unaffected |
 | Checkpoint still being written | Not offered until stable |
-| Contract mismatch | Load fails before policy replacement |
+| Contract mismatch | Viewer reload fails and the worker reports/exits; trainer unaffected |
 | Viser crash | Viewer state becomes failed |
 | GPU OOM in viewer | Viewer dies; trainer remains separate |
 | Browser disconnect | Worker remains available |
-| Manual checkpoint load fails | Existing viewer policy remains active |
+| Manual checkpoint load fails | Viewer reports the failure; worker may exit; trainer unaffected |
 | Training stops | Viewer continues with its loaded checkpoint |
 | Dashboard shutdown | Managed viewer receives SIGTERM |
 | Unknown viewer ID | API returns 404 |
