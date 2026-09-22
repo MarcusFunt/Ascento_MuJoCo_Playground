@@ -193,7 +193,40 @@ Status includes:
 This is deliberately labeled as a policy preview rather than claiming the browser is
 rendering the trainer's exact in-memory PPO iteration.
 
-### 7. React integration
+### 7. Live diagnostic HUD
+
+Implemented in `src/ascento_mjlab/viewer/worker.py` with pure helpers in
+`src/ascento_mjlab/viewer/diagnostics.py`.
+
+The Viser page now includes a live, always-visible diagnostic panel designed for catching
+small reward/sign/state bugs while interacting with the policy. It updates at 10 Hz and
+shows:
+
+- weighted reward rate before dt scaling,
+- exact dt-scaled step reward returned by the environment,
+- the largest signed reward-term contributions,
+- current body tilt and the actual `fallen` tilt boundary,
+- measured tilt rate plus roll/pitch angular-speed magnitude,
+- body height and the actual minimum-height fall boundary,
+- left/right wheel support,
+- recent compact histories for reward, tilt, and balance margin,
+- episode step/reset information,
+- a diagnostic balance-confidence percentage.
+
+The balance-confidence value is deliberately not described as policy uncertainty. The
+policy does not emit calibrated fall probability. Instead, the HUD derives a conservative
+state margin from the same termination boundaries used by the environment. It projects
+only *worsening* measured tilt forward by a short look-ahead interval, then combines that
+tilt margin with height margin and wheel support. This makes the number useful for spotting
+"this looked safe but the environment thought it was nearly fallen" discrepancies without
+inventing neural-network confidence.
+
+The operator can change the diagnostic look-ahead, confidence smoothing, history window,
+and number of reward terms shown, freeze the HUD independently of simulation pause, and
+clear the HUD history. None of these controls change the policy, reward function,
+termination logic, or physics.
+
+### 8. React integration
 
 Implemented in `dashboard/frontend/src/RunsPage.jsx` and `viewer.css`.
 
@@ -212,7 +245,7 @@ The viewer opens as its own page instead of an iframe. Viser already has a subst
 for camera, commands, rewards, metrics, overlays, contacts, groups, speed, reset, and
 checkpoint switching; full-screen use preserves that interface.
 
-### 8. Tailnet and workstation access
+### 9. Tailnet and workstation access
 
 The viewer process runs inside the dashboard container and therefore shares the Tailscale
 sidecar's network namespace.
@@ -241,7 +274,7 @@ No Docker socket is added to the dashboard.
 | Browser disconnect | Worker remains available |
 | Manual checkpoint load fails | Viewer reports the failure; worker may exit; trainer unaffected |
 | Training stops | Viewer continues with its loaded checkpoint |
-| Dashboard shutdown | Managed viewer receives SIGTERM |
+| Dashboard shutdown | Managed viewer receives SIGINT for clean mjlab/Viser shutdown |
 | Unknown viewer ID | API returns 404 |
 
 ## Validation gates
@@ -256,10 +289,11 @@ The implementation is considered ready when all of the following pass:
 6. Frontend production build succeeds.
 7. Ruff and dashboard/mjlab unit tests pass.
 8. Docker Compose renders with the Tailscale overlay.
-9. On a GPU host, a real Ascento checkpoint reaches Viser and can be switched manually.
-10. Follow mode advances only after a new stable checkpoint appears.
+9. Diagnostic confidence uses the environment's real fall boundaries and has unit coverage.
+10. On a GPU host, a real Ascento checkpoint reaches Viser and can be switched manually.
+11. Follow mode advances only after a new stable checkpoint appears.
 
-CI covers 1-8. Gate 9-10 require the existing GPU-capable host because GitHub's standard
+CI covers 1-9. Gates 10-11 require the existing GPU-capable host because GitHub's standard
 runner does not have the project's CUDA/MuJoCo-Warp runtime.
 
 ## Deliberate non-goals for this PR
