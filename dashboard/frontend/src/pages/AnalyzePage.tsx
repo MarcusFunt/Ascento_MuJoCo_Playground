@@ -80,7 +80,7 @@ export function AnalyzePage() {
             </div>
           </section>
 
-          <CurriculumRail curriculum={curriculum.data?.curriculum} />
+          <CurriculumRail curriculum={curriculum.data?.curriculum} compact />
 
           {telemetry.error ? <div className="rounded-xl border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{telemetry.error.message}</div> : null}
           <div className="grid gap-5 xl:grid-cols-2">
