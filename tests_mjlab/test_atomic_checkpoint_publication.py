@@ -43,3 +43,18 @@ def test_checkpoint_save_is_published_atomically(monkeypatch, tmp_path):
     assert writes[0][1]["custom"] == "value"
     assert uploaded == [(str(target.resolve()), 42)]
     assert runner.cfg["upload_model"] is True
+
+
+def test_environment_progress_reads_rollout_length_from_runner_config():
+    runner = object.__new__(provenance.AscentoProvenanceRunner)
+    runner.cfg = {"num_steps_per_env": 24}
+    runner.current_learning_iteration = 5
+    runner.env = SimpleNamespace(
+        unwrapped=SimpleNamespace(common_step_counter=123)
+    )
+
+    progress = runner._environment_progress()
+
+    assert progress["common_step_counter"] == 123
+    assert progress["learning_iteration"] == 5
+    assert progress["num_steps_per_env"] == 24
