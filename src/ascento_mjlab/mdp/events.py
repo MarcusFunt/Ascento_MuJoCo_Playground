@@ -622,9 +622,9 @@ def _set_bounded_random_world_targets(
     targets = current.clone()
     pending = torch.arange(ids.numel(), dtype=torch.long, device=env.device)
 
-    # Local polar sampling keeps every segment inside the proximity reward's
-    # useful range. Rejection against the per-clone arena prevents a long chain
-    # of targets from drifting into neighbouring environments.
+    # Local polar sampling produces a directionally diverse waypoint set.
+    # Rejection against the per-clone arena prevents a long chain of targets
+    # from drifting into neighbouring environments.
     for _ in range(8):
         if pending.numel() == 0:
             break
@@ -660,7 +660,12 @@ def _set_bounded_random_world_targets(
 
     state = _world_target_state(env)
     state["target_xy"][ids] = targets
-    state["target_yaw"][ids] = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[ids])
+    displacement = targets - current
+    # Locomotion waypoints own their arrival heading: face along the segment
+    # toward the target rather than preserving the yaw at target assignment.
+    # Keeping this bearing fixed for the segment avoids a 180-degree heading
+    # discontinuity if the robot slightly overshoots the waypoint.
+    state["target_yaw"][ids] = torch.atan2(displacement[:, 1], displacement[:, 0])
 
 
 def _set_nearby_world_targets(

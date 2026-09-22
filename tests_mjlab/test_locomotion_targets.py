@@ -6,6 +6,7 @@ from ascento_mjlab.mdp.events import (
     RepeatedRandomWorldTargetSequence,
     initialize_random_world_target,
     world_target_xy,
+    world_target_yaw,
 )
 
 
@@ -69,6 +70,11 @@ def test_random_world_target_is_immediately_reachable_and_arena_bounded():
     assert torch.all(distance >= 0.15 - 1e-6)
     assert torch.all(distance <= 0.35 + 1e-6)
     assert torch.all(local_target.abs() <= 0.65 + 1e-6)
+    expected_yaw = torch.atan2(
+        targets[:, 1] - current[:, 1],
+        targets[:, 0] - current[:, 0],
+    )
+    assert torch.allclose(world_target_yaw(env), expected_yaw, atol=1e-6)
 
 
 def test_repeated_target_sequence_requires_a_settled_hold_before_resampling():

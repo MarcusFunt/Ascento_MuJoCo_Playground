@@ -16,9 +16,12 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
     """Train sustained locomotion through repeated long-range random world targets.
 
     This intentionally preserves the 41-dimensional balance actor observation
-    topology, including world-frame target XY and heading error.  It does not
-    introduce velocity or height commands, so compatible balance actor weights
-    can be transferred without a policy input/output adapter.
+    topology, including world-frame target XY and heading error. For locomotion,
+    each waypoint's heading is the fixed bearing from the robot to that waypoint
+    at assignment time, so heading shaping turns with the travel objective
+    instead of preserving the pre-trip yaw. It does not introduce velocity or
+    height commands, so compatible balance actor weights can be transferred
+    without a policy input/output adapter.
 
     Each reset starts with an immediate 2--3 m target. After the robot
     arrives and settles briefly, another bounded target is sampled. Training
