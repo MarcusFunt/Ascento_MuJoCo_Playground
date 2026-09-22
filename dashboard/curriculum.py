@@ -35,9 +35,17 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
 
 
-def _recovery_difficulty(iteration: int | None, rollout_steps: int | None) -> dict[str, Any]:
+def _recovery_difficulty(
+    iteration: int | None,
+    rollout_steps: int | None,
+    exact_control_steps: int | None = None,
+) -> dict[str, Any]:
     ramp_steps = 120_000
-    control_steps = max(0, (iteration or 0) * (rollout_steps or 24))
+    control_steps = (
+        max(0, exact_control_steps)
+        if exact_control_steps is not None
+        else max(0, (iteration or 0) * (rollout_steps or 24))
+    )
     progress = _clamp(control_steps / ramp_steps)
     hard_fraction = 0.10 + 0.20 * progress
     pitch_max = 0.10 + 0.05 * progress
@@ -130,6 +138,7 @@ def curriculum_for_run(detail: dict[str, Any] | None) -> dict[str, Any] | None:
             result["secondary"] = _recovery_difficulty(
                 iteration,
                 _integer(run_info.get("rollout_steps_per_env")),
+                _integer(run_info.get("horizon_control_steps")),
             )
         return result
 
