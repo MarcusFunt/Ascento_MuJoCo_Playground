@@ -594,6 +594,7 @@ def build_run_info(run_dir: Path, root: Path, stage: str) -> dict[str, Any]:
     sim_timestep = _first((status, manifest), "simulation_timestep", "sim_timestep", "sim_dt")
     if sim_timestep is None:
         sim_timestep = _sim_timestep(run_dir)
+    rollout_steps_per_env, num_envs = _training_shape(run_dir)
 
     return {
         "git_commit": _first((status, manifest, git_data), "git_commit", "commit", "sha"),
@@ -614,6 +615,12 @@ def build_run_info(run_dir: Path, root: Path, stage: str) -> dict[str, Any]:
         "horizon_top_windows": _first((status, manifest), "horizon_top_windows"),
         "horizon_transition": _first((status, manifest), "horizon_transition"),
         "horizon_timeout_fraction": _first((status, manifest), "horizon_timeout_fraction"),
+        "horizon_control_steps": _first((status, manifest), "horizon_control_steps"),
+        "horizon_stationary_quality_fraction": _first(
+            (status, manifest), "horizon_stationary_quality_fraction"
+        ),
+        "rollout_steps_per_env": rollout_steps_per_env,
+        "num_envs": num_envs,
         "long_horizon_candidate_checkpoint": _first(
             (status, manifest), "long_horizon_candidate_checkpoint"
         ),

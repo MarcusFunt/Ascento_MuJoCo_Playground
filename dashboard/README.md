@@ -1,5 +1,11 @@
 # Ascento Training Dashboard
 
+> The current UI is the **Ascento Control** control room. It opens on an
+> Overview page with active-training metrics and task-aware curriculum state.
+> See [../docs/dashboard-control-room.md](../docs/dashboard-control-room.md) for
+> the frontend stack, PostgreSQL semantic index, routes, and UI architecture.
+
+
 A local web control plane for mjlab/RSL-RL training. The dashboard monitors
 existing artifacts, starts/stops managed training runs, compares results, reports
 repository state, and can request a guarded update to the newest `origin/main`.
@@ -198,6 +204,10 @@ For frontend development, run `npm run dev` in `dashboard/frontend`; Vite proxie
 
 Read/monitor endpoints:
 
+- `GET /api/overview` — bounded landing-page control-room payload
+- `GET /api/runs/index` — compact run library without full compatibility contracts
+- `GET /api/tasks` — current backend-owned task catalog
+- `GET /api/runs/<id>/curriculum` — task-aware curriculum projection
 - `GET /api/health`
 - `GET /api/config`
 - `GET /api/system`

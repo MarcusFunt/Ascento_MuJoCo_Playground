@@ -21,6 +21,7 @@ class DashboardConfig:
     artifact_root: Path
     frontend_dist: Path
     stale_after_seconds: float
+    database_url: str | None = None
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -29,6 +30,12 @@ class DashboardConfig:
             "frontend_dist": str(self.frontend_dist),
             "frontend_built": (self.frontend_dist / "index.html").is_file(),
             "stale_after_seconds": self.stale_after_seconds,
+            "database_enabled": bool(self.database_url),
+            "database_backend": (
+                self.database_url.split(":", 1)[0].split("+", 1)[0]
+                if self.database_url
+                else None
+            ),
             "python_executable": sys.executable,
             "uv_available": shutil.which("uv") is not None,
             "nvidia_smi_available": shutil.which("nvidia-smi") is not None,
@@ -68,6 +75,7 @@ def load_config() -> DashboardConfig:
         artifact_root=artifact_root,
         frontend_dist=frontend_dist,
         stale_after_seconds=stale_after,
+        database_url=os.environ.get("ASCENTO_DATABASE_URL") or None,
     )
 
 

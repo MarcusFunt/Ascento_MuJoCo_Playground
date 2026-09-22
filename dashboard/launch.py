@@ -34,6 +34,7 @@ HORIZON_CURRICULUM_RE = re.compile(
     r"(?:\s+failed_windows=(?P<failed>\d+))?"
     r"(?:\s+stage_windows=(?P<stage_windows>\d+))?"
     r"(?:\s+top_horizon_windows=(?P<top_windows>\d+))?"
+    r"(?:\s+control_steps=(?P<control_steps>\d+))?"
     r"(?:\s+transition=(?P<transition>\S+))?"
     r"(?:\s+timeout_fraction=(?P<timeout>\S+))?"
     r"(?:\s+quality_fraction=(?P<quality>\S+))?"
@@ -251,6 +252,8 @@ def _runtime_status_from_line(line: str) -> dict[str, Any]:
             values["horizon_stage_windows"] = int(horizon.group("stage_windows"))
         if horizon.group("top_windows") is not None:
             values["horizon_top_windows"] = int(horizon.group("top_windows"))
+        if horizon.group("control_steps") is not None:
+            values["horizon_control_steps"] = int(horizon.group("control_steps"))
         if horizon.group("transition") is not None:
             values["horizon_transition"] = horizon.group("transition")
         if horizon.group("timeout") is not None:
