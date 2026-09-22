@@ -1,8 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-import ascento_mjlab.provenance_runner as provenance
 from mjlab.rl import MjlabOnPolicyRunner
+
+import ascento_mjlab.provenance_runner as provenance
 
 
 def test_checkpoint_save_is_published_atomically(monkeypatch, tmp_path):
