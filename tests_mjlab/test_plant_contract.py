@@ -30,7 +30,7 @@ def _resume_runner(cfg):
         {"unwrapped": type("Base", (), {"common_step_counter": 0, "cfg": cfg})()},
     )()
     runner.current_learning_iteration = 0
-    runner.num_steps_per_env = 24
+    runner.cfg = {"num_steps_per_env": 24}
     return runner
 
 
@@ -56,8 +56,7 @@ def test_checkpoint_embeds_the_plant_contract_and_supports_safe_actor_transfer(
         {"unwrapped": type("Base", (), {"common_step_counter": 7, "cfg": cfg})()},
     )()
     runner.current_learning_iteration = 3
-    runner.num_steps_per_env = 24
-    runner.cfg = {"upload_model": False}
+    runner.cfg = {"num_steps_per_env": 24, "upload_model": False}
     runner.alg = type("Algorithm", (), {"save": lambda self: {"actor_state_dict": {}}})()
     runner.logger = type("Logger", (), {})()
     path = tmp_path / "model.pt"
