@@ -20,7 +20,6 @@ from ascento_mjlab.viewer.worker import (
     _ViewerPolicy,
 )
 
-
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(),
     reason="requires CUDA/MuJoCo-Warp GPU runtime",

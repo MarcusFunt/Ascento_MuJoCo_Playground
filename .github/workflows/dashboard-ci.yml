@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'dashboard/**'
+      - 'alembic.ini'
       - 'scripts/**'
       - 'docker/**'
       - 'src/ascento_mjlab/tools/**'
@@ -35,6 +36,7 @@ on:
       - main
     paths:
       - 'dashboard/**'
+      - 'alembic.ini'
       - 'scripts/**'
       - 'docker/**'
       - 'src/ascento_mjlab/tools/**'
@@ -129,4 +131,5 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
+      - run: npm run typecheck
       - run: npm run build

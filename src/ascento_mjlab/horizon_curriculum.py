@@ -353,6 +353,7 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
             f"failed_windows={self._failing_windows}",
             f"stage_windows={self._stage_windows}",
             f"top_horizon_windows={self._top_horizon_success_windows}",
+            f"control_steps={int(getattr(self.env.unwrapped, 'common_step_counter', 0))}",
             f"transition={transition}",
         ]
         if timeout_fraction is not None:

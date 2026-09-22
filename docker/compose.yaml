@@ -1,4 +1,19 @@
 services:
+  dashboard-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ascento
+      POSTGRES_USER: ascento
+      POSTGRES_PASSWORD: ${ASCENTO_DB_PASSWORD:-ascento-local}
+    volumes:
+      - dashboard-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ascento -d ascento"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
   ascento-mjlab:
     image: ascento-mjlab:local
     build:
@@ -28,6 +43,11 @@ services:
         REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
         REPOSITORY_DIRTY: ${ASCENTO_REPOSITORY_DIRTY:-unknown}
     command: ["python", "-m", "uvicorn", "dashboard.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      dashboard-db:
+        # The web UI must still start if the optional semantic index is broken.
+        # The app retries the connection briefly, then falls back to filesystem state.
+        condition: service_started
     ports:
       - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
       - "127.0.0.1:${ASCENTO_VIEWER_PORT:-8081}:${ASCENTO_VIEWER_PORT:-8081}"
@@ -44,6 +64,11 @@ services:
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
       ASCENTO_ARTIFACT_ROOT: /workspace/logs/rsl_rl
+      ASCENTO_DATABASE_URL: postgresql+psycopg://ascento:${ASCENTO_DB_PASSWORD:-ascento-local}@dashboard-db:5432/ascento
       ASCENTO_VIEWER_PORT: ${ASCENTO_VIEWER_PORT:-8081}
       ASCENTO_SUPERVISOR_SOCKET: /run/ascento-supervisor/supervisor.sock
     restart: unless-stopped
+
+
+volumes:
+  dashboard-postgres-data:
