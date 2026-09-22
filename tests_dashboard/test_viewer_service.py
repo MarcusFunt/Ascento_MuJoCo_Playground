@@ -1,5 +1,7 @@
 import json
+import signal
 from pathlib import Path
+
 import pytest
 
 import dashboard.viewer_service as viewer_service_module
@@ -171,4 +173,4 @@ def test_stop_signals_only_viewer_process_group(monkeypatch, tmp_path):
     stopped = service.stop(started["id"])
 
     assert stopped["state"] == "stopping"
-    assert signalled and signalled[0][0] == 4321
+    assert signalled and signalled[0] == (4321, signal.SIGINT)
