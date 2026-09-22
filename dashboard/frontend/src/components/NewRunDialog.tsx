@@ -16,10 +16,10 @@ const schema = z.object({
   tags: z.string(),
   parent_run_id: z.string(),
   parent_checkpoint: z.string(),
-  episode_horizon_s: z.coerce.number().optional(),
+  episode_horizon_s: z.number().optional(),
   notes: z.string(),
-  num_envs: z.coerce.number().int().min(1).max(8192),
-  max_iterations: z.coerce.number().int().min(1),
+  num_envs: z.number().int().min(1).max(8192),
+  max_iterations: z.number().int().min(1),
   seed: z.string(),
   extra_args: z.string(),
   allow_dirty_provenance: z.boolean(),
@@ -129,14 +129,14 @@ export function NewRunDialog({
               <Input placeholder="locomotion, warm-start, recovery" {...form.register('tags')} />
             </Field>
             <Field label="Parallel environments" error={form.formState.errors.num_envs?.message}>
-              <Input type="number" min={1} max={8192} {...form.register('num_envs')} />
+              <Input type="number" min={1} max={8192} {...form.register('num_envs', { valueAsNumber: true })} />
             </Field>
             <Field label="Maximum PPO iterations" error={form.formState.errors.max_iterations?.message}>
-              <Input type="number" min={1} {...form.register('max_iterations')} />
+              <Input type="number" min={1} {...form.register('max_iterations', { valueAsNumber: true })} />
             </Field>
             {task?.supports_horizon ? (
               <Field label="Initial episode horizon">
-                <SelectInput {...form.register('episode_horizon_s')}>
+                <SelectInput {...form.register('episode_horizon_s', { valueAsNumber: true })}>
                   <option value={20}>20 seconds · frequent reset practice</option>
                   <option value={60}>60 seconds</option>
                   <option value={120}>120 seconds</option>
