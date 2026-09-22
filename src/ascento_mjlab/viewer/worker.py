@@ -403,7 +403,9 @@ class _FollowViserPlayViewer(ViserPlayViewer):
             </div>
             <div style="padding:0.45em;border:1px solid rgba(127,127,127,.25);border-radius:6px">
               <div style="opacity:.65">Tilt / fall boundary</div>
-              <div style="font-size:1.35em;font-weight:700">{tilt_deg:.2f}° / {fall_tilt_deg:.1f}°</div>
+              <div style="font-size:1.35em;font-weight:700">
+                {tilt_deg:.2f}° / {fall_tilt_deg:.1f}°
+              </div>
               <div style="opacity:.7">predicted: {predicted_tilt_deg:.2f}°</div>
             </div>
             <div style="padding:0.45em;border:1px solid rgba(127,127,127,.25);border-radius:6px">
@@ -424,9 +426,11 @@ class _FollowViserPlayViewer(ViserPlayViewer):
             </div>
           </div>
 
-          <div style="margin-top:0.65em;font-family:monospace;font-size:0.78em;white-space:nowrap;overflow:hidden">
+          <div style="margin-top:0.65em;font-family:monospace;font-size:0.78em;
+            white-space:nowrap;overflow:hidden">
             reward&nbsp; {sparkline(reward_history)}<br/>
-            tilt&nbsp;&nbsp;&nbsp; {sparkline(tilt_history, minimum=0.0, maximum=fall_tilt_deg)}<br/>
+            tilt&nbsp;&nbsp;&nbsp;
+            {sparkline(tilt_history, minimum=0.0, maximum=fall_tilt_deg)}<br/>
             margin&nbsp;&nbsp; {sparkline(confidence_history, minimum=0.0, maximum=100.0)}
           </div>
 
