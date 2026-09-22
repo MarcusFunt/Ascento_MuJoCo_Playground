@@ -1,10 +1,9 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 
 import dashboard.viewer_service as viewer_service_module
+from dashboard.health import discover_dashboard_runs
 from dashboard.run_service import RunService
 from dashboard.viewer_service import ViewerBusyError, ViewerService
 
@@ -37,9 +36,7 @@ def _run(root: Path) -> tuple[RunService, str, Path]:
     checkpoint = run / "model_100.pt"
     checkpoint.write_bytes(b"checkpoint")
     service = RunService(root)
-    run_id = service.resolve(next(iter([ref.id for ref in __import__(
-        "dashboard.health", fromlist=["discover_dashboard_runs"]
-    ).discover_dashboard_runs(root)]))).id
+    run_id = discover_dashboard_runs(root)[0].id
     return service, run_id, run
 
 
