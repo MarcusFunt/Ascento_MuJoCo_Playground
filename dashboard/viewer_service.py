@@ -107,6 +107,10 @@ class ViewerService:
                     raise ViewerBusyError(
                         "a viewer is already active; stop it before starting another"
                     )
+            if self._port_open():
+                raise ViewerBusyError(
+                    f"viewer port {self.port} is already in use"
+                )
 
             ref = self.run_service.resolve(run_id)
             detail = self.run_service.detail(run_id)
@@ -205,7 +209,7 @@ class ViewerService:
                 return self._snapshot_locked(viewer)
             viewer.state = "stopping"
             try:
-                os.killpg(viewer.process.pid, signal.SIGTERM)
+                os.killpg(viewer.process.pid, signal.SIGINT)
             except ProcessLookupError:
                 pass
             except OSError:
@@ -224,7 +228,7 @@ class ViewerService:
             if viewer.state not in {"starting", "running", "stopping"}:
                 return
             try:
-                os.killpg(viewer.process.pid, signal.SIGTERM)
+                os.killpg(viewer.process.pid, signal.SIGINT)
             except OSError:
                 try:
                     viewer.process.terminate()
