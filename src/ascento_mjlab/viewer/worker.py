@@ -246,12 +246,18 @@ class _FollowViserPlayViewer(ViserPlayViewer):
             smoothing,
         )
 
-        reward_terms = {
-            name: float(values[0])
-            for name, values in env.reward_manager.get_active_iterable_terms(env_idx)
-        }
+        reward_manager = env.reward_manager
+        step_terms = getattr(reward_manager, "_step_reward", None)
+        if step_terms is not None:
+            term_values = step_terms[env_idx].detach().cpu().tolist()
+            reward_terms = dict(zip(reward_manager.active_terms, term_values, strict=False))
+        else:
+            reward_terms = {
+                name: float(values[0])
+                for name, values in reward_manager.get_active_iterable_terms(env_idx)
+            }
         reward_rate = sum(reward_terms.values())
-        reward_buf = getattr(env.reward_manager, "_reward_buf", None)
+        reward_buf = getattr(reward_manager, "_reward_buf", None)
         if reward_buf is not None:
             step_reward = float(reward_buf[env_idx].item())
         else:
