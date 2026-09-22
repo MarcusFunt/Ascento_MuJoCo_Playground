@@ -116,9 +116,14 @@ Targets stay inside a widened per-clone arena and locomotion-only environment
 spacing is increased to 10 m so long-range motion does not immediately enter a
 neighbouring clone region. Training episodes default to 60 s. At 2–3 m, the
 existing 0.35 m-scale proximity reward is effectively near zero at target issue,
-which is intentional for this experiment: the reward ABI remains untouched so
-we can directly observe whether the policy discovers sustained directional
-locomotion without adding progress shaping.
+so locomotion adds a strong signed progress term based on world-frame closing
+speed. Moving toward the target is rewarded, moving away is penalized, and
+sideways motion contributes approximately zero. The term uses
+`8 * tanh(closing_speed / 0.30 m/s)` before normal environment dt scaling, so
+useful progress is strongly preferred while reward gain saturates at higher
+speeds instead of encouraging unbounded acceleration. This is a reward-ABI
+change and must start a new locomotion lineage rather than resume an older
+locomotion optimizer state.
 
 The deterministic acceptance suite remains the fixed settle/push/recover/15 cm
 sequence; repeated-target training is not itself evidence that disturbance
