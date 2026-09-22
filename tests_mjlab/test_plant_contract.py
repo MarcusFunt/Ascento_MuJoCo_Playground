@@ -149,11 +149,12 @@ def test_training_resume_reconstructs_environment_progress_for_legacy_checkpoint
 def test_actor_only_load_does_not_restore_training_environment_progress(monkeypatch):
     import ascento_mjlab.tasks  # noqa: F401
 
+    checkpoint_cfg = load_env_cfg("Ascento-Balance-Recovery-Flat", play=False)
     cfg = load_env_cfg("Ascento-Balance-Recovery-Flat", play=True)
     runner = _resume_runner(cfg)
     runner.env.unwrapped.common_step_counter = 17
     infos = {
-        **_checkpoint_infos(cfg),
+        **_checkpoint_infos(checkpoint_cfg),
         "environment_progress": {
             "schema_version": 1,
             "common_step_counter": 120_000,
