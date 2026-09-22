@@ -69,12 +69,13 @@ def _load_actor_transactionally(
         name: value.detach().clone() for name, value in actor.state_dict().items()
     }
     try:
-        _load_actor_transactionally(
-            runner,
-            checkpoint_path,
-            canonical_env_cfg,
-            device=device,
+        infos = runner.load(
+            str(checkpoint_path),
+            load_cfg={"actor": True},
+            strict=True,
+            map_location=device,
         )
+        require_current_checkpoint_contracts(infos, canonical_env_cfg)
     except Exception:
         runner.alg.get_policy().load_state_dict(previous_state, strict=True)
         runner.alg.eval_mode()
@@ -612,13 +613,12 @@ def run_viewer(
             stable_age_seconds=stable_age_seconds,
         )
         checkpoint_path = run_dir / info.relative_path
-        infos = runner.load(
-            str(checkpoint_path),
-            load_cfg={"actor": True},
-            strict=True,
-            map_location=device,
+        _load_actor_transactionally(
+            runner,
+            checkpoint_path,
+            canonical_env_cfg,
+            device=device,
         )
-        require_current_checkpoint_contracts(infos, canonical_env_cfg)
         policy = _ViewerPolicy(
             RslRlPolicyAdapter(runner, checkpoint_path, deterministic=True)
         )
