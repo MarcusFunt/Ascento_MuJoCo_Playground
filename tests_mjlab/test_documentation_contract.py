@@ -8,6 +8,16 @@ import json
 from pathlib import Path
 
 from ascento_mjlab.cli import build_parser
+from ascento_mjlab.horizon_curriculum import HORIZON_SCHEDULE_S, HorizonCurriculumRunner
+from ascento_mjlab.tasks import ASCENTO_TASK_IDS
+from dashboard.curriculum import (
+    HORIZON_FAILURE_THRESHOLD,
+    HORIZON_FAILURE_WINDOWS,
+    HORIZON_SCHEDULE_S as DASHBOARD_HORIZON_SCHEDULE_S,
+    HORIZON_SUCCESS_THRESHOLD,
+    HORIZON_SUCCESS_WINDOWS,
+)
+from dashboard.task_catalog import task_ids
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -117,12 +127,18 @@ def test_mcp_inventory_tracks_decorated_tool_functions() -> None:
 
 
 def test_runs_page_matches_the_current_curriculum_and_selection_gate() -> None:
-    curriculum_backend = (ROOT / "dashboard" / "curriculum.py").read_text(encoding="utf-8")
     curriculum_ui = (
         ROOT / "dashboard" / "frontend" / "src" / "components" / "CurriculumRail.tsx"
     ).read_text(encoding="utf-8")
 
-    assert "HORIZON_SUCCESS_WINDOWS = 6" in curriculum_backend
-    assert "balance_gate_v5" in curriculum_ui
-    assert "HORIZON_SUCCESS_WINDOWS = 3" not in curriculum_backend
+    assert DASHBOARD_HORIZON_SCHEDULE_S == HORIZON_SCHEDULE_S
+    assert HORIZON_SUCCESS_WINDOWS == HorizonCurriculumRunner.required_success_windows
+    assert HORIZON_SUCCESS_THRESHOLD == HorizonCurriculumRunner.timeout_success_threshold
+    assert HORIZON_FAILURE_WINDOWS == HorizonCurriculumRunner.required_failure_windows
+    assert HORIZON_FAILURE_THRESHOLD == HorizonCurriculumRunner.timeout_failure_threshold
+    assert HorizonCurriculumRunner.selection_suite in curriculum_ui
     assert "balance_gate_v2" not in curriculum_ui
+
+
+def test_dashboard_task_catalog_tracks_registered_tasks() -> None:
+    assert task_ids() == set(ASCENTO_TASK_IDS)
