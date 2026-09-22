@@ -108,6 +108,12 @@ function HorizonRail({ curriculum }: { curriculum: HorizonCurriculum }) {
           ) : null}
         </div>
       </div>
+      {curriculum.candidate_checkpoint ? (
+        <div className="mt-5 rounded-lg border border-border bg-background/35 p-4 text-sm text-secondary">
+          Long-horizon candidate <code className="text-foreground">{curriculum.candidate_checkpoint}</code>.
+          {' '}Evaluate it deterministically with <code className="text-foreground">balance_gate_v5</code> before selecting it.
+        </div>
+      ) : null}
       {curriculum.secondary ? <RecoveryRamp value={curriculum.secondary} /> : null}
     </>
   )
