@@ -1,11 +1,13 @@
+import { lazy } from 'react'
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 import { AppShell } from './components/layout/AppShell'
-import { AnalyzePage } from './pages/AnalyzePage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { OverviewPage } from './pages/OverviewPage'
-import { RunDetailPage } from './pages/RunDetailPage'
-import { RunsPage } from './pages/RunsPage'
-import { SystemPage } from './pages/SystemPage'
+
+const RunsPage = lazy(() => import('./pages/RunsPage').then((module) => ({ default: module.RunsPage })))
+const RunDetailPage = lazy(() => import('./pages/RunDetailPage').then((module) => ({ default: module.RunDetailPage })))
+const AnalyzePage = lazy(() => import('./pages/AnalyzePage').then((module) => ({ default: module.AnalyzePage })))
+const SystemPage = lazy(() => import('./pages/SystemPage').then((module) => ({ default: module.SystemPage })))
 
 const rootRoute = createRootRoute({
   component: AppShell,
