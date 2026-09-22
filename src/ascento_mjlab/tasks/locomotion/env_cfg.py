@@ -12,7 +12,7 @@ from ascento_mjlab.tasks.balance_quiet.env_cfg import ascento_balance_quiet_env_
 
 
 def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
-    """Train sustained locomotion through repeated nearby random world targets.
+    """Train sustained locomotion through repeated long-range random world targets.
 
     This intentionally preserves the 41-dimensional balance actor observation
     topology, including world-frame target XY and heading error.  It does not
@@ -25,7 +25,7 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
     go-to-pose attempts instead of a single short movement sequence.
     """
     cfg = ascento_balance_quiet_env_cfg(play=play, num_envs=num_envs)
-    cfg.scene.env_spacing = 8.0
+    cfg.scene.env_spacing = 10.0
     cfg.events.pop("balance_push", None)
     cfg.events["initialize_world_target"] = EventTermCfg(
         func=ascento_mdp.events.initialize_random_world_target,
@@ -44,8 +44,8 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
         params={
             "target_reached_distance_m": 0.04,
             "target_hold_s": 0.35,
-            "min_target_distance_m": 0.15,
-            "max_target_distance_m": 0.35,
+            "min_target_distance_m": 2.0,
+            "max_target_distance_m": 3.0,
             "arena_half_extent_m": 4.0,
             "asset_cfg": ROBOT_CFG,
         },
