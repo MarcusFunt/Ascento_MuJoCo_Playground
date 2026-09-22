@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,12 +72,16 @@ class ViewerService:
         host: str = "0.0.0.0",
         port: int = 8081,
         stable_age_seconds: float = 2.0,
+        stop_grace_seconds: float = 5.0,
+        stop_term_seconds: float = 5.0,
     ) -> None:
         self.run_service = run_service
         self.logs_root = logs_root.expanduser().resolve()
         self.host = host
         self.port = int(port)
         self.stable_age_seconds = max(0.0, float(stable_age_seconds))
+        self.stop_grace_seconds = max(0.0, float(stop_grace_seconds))
+        self.stop_term_seconds = max(0.0, float(stop_term_seconds))
         self._lock = threading.RLock()
         self._active: _ManagedViewer | None = None
 
@@ -207,16 +212,7 @@ class ViewerService:
             self._refresh_locked(viewer)
             if viewer.state not in {"starting", "running", "stopping"}:
                 return self._snapshot_locked(viewer)
-            viewer.state = "stopping"
-            try:
-                os.killpg(viewer.process.pid, signal.SIGINT)
-            except ProcessLookupError:
-                pass
-            except OSError:
-                try:
-                    viewer.process.terminate()
-                except OSError:
-                    pass
+            self._begin_stop_locked(viewer)
             return self._snapshot_locked(viewer)
 
     def stop_all(self) -> None:
@@ -227,14 +223,51 @@ class ViewerService:
             self._refresh_locked(viewer)
             if viewer.state not in {"starting", "running", "stopping"}:
                 return
+            self._begin_stop_locked(viewer)
+
+    def _begin_stop_locked(self, viewer: _ManagedViewer) -> None:
+        if viewer.state == "stopping":
+            return
+        viewer.state = "stopping"
+        self._signal_process_group(viewer, signal.SIGINT)
+        threading.Thread(
+            target=self._escalate_stop,
+            args=(viewer.viewer_id, viewer.process.pid),
+            daemon=True,
+            name=f"viewer-stop-{viewer.viewer_id}",
+        ).start()
+
+    def _signal_process_group(self, viewer: _ManagedViewer, sig: signal.Signals) -> None:
+        try:
+            os.killpg(viewer.process.pid, sig)
+        except ProcessLookupError:
+            return
+        except OSError:
             try:
-                os.killpg(viewer.process.pid, signal.SIGINT)
-            except OSError:
-                try:
+                if sig == signal.SIGKILL:
+                    viewer.process.kill()
+                else:
                     viewer.process.terminate()
-                except OSError:
-                    pass
-            viewer.state = "stopping"
+            except OSError:
+                pass
+
+    def _escalate_stop(self, viewer_id: str, pid: int) -> None:
+        for delay, sig in (
+            (self.stop_grace_seconds, signal.SIGTERM),
+            (self.stop_term_seconds, signal.SIGKILL),
+        ):
+            time.sleep(delay)
+            with self._lock:
+                viewer = self._active
+                if (
+                    viewer is None
+                    or viewer.viewer_id != viewer_id
+                    or viewer.process.pid != pid
+                    or viewer.state != "stopping"
+                    or viewer.process.poll() is not None
+                ):
+                    return
+                self._signal_process_group(viewer, sig)
 
     def _require(self, viewer_id: str) -> _ManagedViewer:
         if self._active is None or self._active.viewer_id != viewer_id:

@@ -27,6 +27,7 @@ import ascento_mjlab.tasks  # noqa: F401
 from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
 from ascento_mjlab.evaluation.policy import RslRlPolicyAdapter
 from ascento_mjlab.geometry import projected_gravity_tilt
+from ascento_mjlab.mdp.jump import PHASE_FLIGHT
 from ascento_mjlab.physics import PHYSICS_PROFILE
 
 from .checkpoints import CheckpointInfo, discover_checkpoints, resolve_run_checkpoint
@@ -40,6 +41,45 @@ def _write_json(path: Path | None, value: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
     temporary.replace(path)
+
+
+def _preflight_checkpoint(checkpoint_path: Path, canonical_env_cfg: Any) -> dict[str, Any]:
+    """Validate checkpoint provenance before mutating the live viewer runner."""
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict):
+        raise ValueError("checkpoint is not a supported RSL-RL checkpoint")
+    infos = payload.get("infos")
+    if not isinstance(infos, dict):
+        raise ValueError("checkpoint lacks provenance metadata")
+    require_current_checkpoint_contracts(infos, canonical_env_cfg)
+    return infos
+
+
+def _load_actor_transactionally(
+    runner: Any,
+    checkpoint_path: Path,
+    canonical_env_cfg: Any,
+    *,
+    device: str,
+) -> dict[str, Any]:
+    """Load actor weights without leaving a rejected candidate partially applied."""
+    _preflight_checkpoint(checkpoint_path, canonical_env_cfg)
+    actor = runner.alg.get_policy()
+    previous_state = {
+        name: value.detach().clone() for name, value in actor.state_dict().items()
+    }
+    try:
+        _load_actor_transactionally(
+            runner,
+            checkpoint_path,
+            canonical_env_cfg,
+            device=device,
+        )
+    except Exception:
+        runner.alg.get_policy().load_state_dict(previous_state, strict=True)
+        runner.alg.eval_mode()
+        raise
+    return infos
 
 
 class _ViewerPolicy:
@@ -69,6 +109,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         self._follow = bool(follow)
         self._follow_poll_seconds = max(0.5, float(follow_poll_seconds))
         self._next_follow_poll = 0.0
+        self._follow_rejected_checkpoint: str | None = None
 
         self._diagnostic_html = None
         self._diagnostic_freeze = None
@@ -79,7 +120,6 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         self._diagnostic_top_terms = None
         self._diagnostic_next_update = 0.0
         self._diagnostic_prev_tilt: float | None = None
-        self._diagnostic_prev_sample_at: float | None = None
         self._diagnostic_prev_episode_step: int | None = None
         self._diagnostic_smoothed_confidence: float | None = None
         self._diagnostic_reset_count = 0
@@ -150,7 +190,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
                 for history in self._diagnostic_history.values():
                     history.clear()
                 self._diagnostic_prev_tilt = None
-                self._diagnostic_prev_sample_at = None
+                self._diagnostic_prev_episode_step = None
                 self._diagnostic_smoothed_confidence = None
                 self._diagnostic_reset_count = 0
                 self._diagnostic_next_update = 0.0
@@ -161,9 +201,50 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         if self._follow and manager is not None and now >= self._next_follow_poll:
             self._next_follow_poll = now + self._follow_poll_seconds
             entries = manager.fetch_available()
-            if entries and entries[-1][0] != manager.current_name:
+            latest = entries[-1][0] if entries else None
+            if (
+                latest is not None
+                and latest != manager.current_name
+                and latest != self._follow_rejected_checkpoint
+            ):
                 self._actions.append((ViewerAction.FETCH_CHECKPOINT, "latest"))
         super()._process_actions()
+
+    def _handle_custom_action(self, action: ViewerAction, payload: Any) -> bool:
+        manager = getattr(self, "_ckpt_mgr", None)
+        previous = manager.current_name if manager is not None else None
+        try:
+            handled = super()._handle_custom_action(action, payload)
+        except Exception as exc:
+            if action != ViewerAction.FETCH_CHECKPOINT:
+                raise
+            attempted: str | None = None
+            if manager is not None:
+                if payload == "latest":
+                    entries = manager.fetch_available()
+                    attempted = entries[-1][0] if entries else None
+                elif payload == "selected":
+                    attempted = self._ckpt_dropdown.value.split("  (")[0]
+            self._follow_rejected_checkpoint = attempted
+            self._last_error = f"Checkpoint load rejected: {exc}"
+            print(f"[WARN]: {self._last_error}")
+            if manager is not None:
+                current = next(
+                    (
+                        label
+                        for label in self._ckpt_dropdown.options
+                        if label.startswith(manager.current_name)
+                    ),
+                    manager.current_name,
+                )
+                self._ckpt_user_event.clear()
+                self._ckpt_dropdown.value = current
+                self._ckpt_user_event.set()
+            return True
+        if manager is not None and manager.current_name != previous:
+            self._follow_rejected_checkpoint = None
+            self._last_error = None
+        return handled
 
     def sync_env_to_viewer(self) -> None:
         super().sync_env_to_viewer()
@@ -194,29 +275,33 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         angular_rate_deg_s = math.degrees(angular_rate_rad_s)
 
         episode_step = int(env.episode_length_buf[env_idx].item())
+        previous_episode_step = self._diagnostic_prev_episode_step
         reset_detected = (
-            self._diagnostic_prev_episode_step is not None
-            and episode_step < self._diagnostic_prev_episode_step
+            previous_episode_step is not None and episode_step < previous_episode_step
         )
-        self._diagnostic_prev_episode_step = episode_step
 
         if (
             reset_detected
             or self._diagnostic_prev_tilt is None
-            or self._diagnostic_prev_sample_at is None
+            or previous_episode_step is None
+            or episode_step <= previous_episode_step
         ):
             tilt_rate_rad_s = 0.0
             if reset_detected:
                 self._diagnostic_reset_count += 1
         else:
-            dt = max(1.0e-6, now - self._diagnostic_prev_sample_at)
-            tilt_rate_rad_s = (tilt_rad - self._diagnostic_prev_tilt) / dt
+            simulation_dt = max(
+                1.0e-9,
+                (episode_step - previous_episode_step) * float(env.step_dt),
+            )
+            tilt_rate_rad_s = (tilt_rad - self._diagnostic_prev_tilt) / simulation_dt
 
         self._diagnostic_prev_tilt = tilt_rad
-        self._diagnostic_prev_sample_at = now
+        self._diagnostic_prev_episode_step = episode_step
 
         left_contact = self._wheel_contact(env, "left_wheel_contact", env_idx)
         right_contact = self._wheel_contact(env, "right_wheel_contact", env_idx)
+        support_expected = self._support_expected(env, env_idx)
         fall_tilt_rad, min_height_m = self._fall_boundaries(env)
 
         lookahead_s = (
@@ -234,6 +319,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
             min_height_m=min_height_m,
             nominal_height_m=PHYSICS_PROFILE.default_root_height_m,
             lookahead_s=lookahead_s,
+            support_expected=support_expected,
         )
         smoothing = (
             float(self._diagnostic_smoothing.value)
@@ -285,6 +371,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
             height_m=height_m,
             left_contact=left_contact,
             right_contact=right_contact,
+            support_expected=support_expected,
             fall_tilt_deg=math.degrees(fall_tilt_rad),
             min_height_m=min_height_m,
             predicted_tilt_deg=math.degrees(confidence.predicted_tilt_rad),
@@ -302,6 +389,17 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         if found is None:
             return False
         return bool(found[env_idx].flatten().any().item())
+
+    @staticmethod
+    def _support_expected(env, env_idx: int) -> bool:
+        """Treat intentional jump flight as unsupported-by-design, not instability."""
+        state = getattr(env, "ascento_jump_state", None)
+        if not isinstance(state, dict):
+            return True
+        phase = state.get("phase")
+        if phase is None:
+            return True
+        return int(phase[env_idx].item()) != PHASE_FLIGHT
 
     @staticmethod
     def _fall_boundaries(env) -> tuple[float, float]:
@@ -329,6 +427,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         height_m: float,
         left_contact: bool,
         right_contact: bool,
+        support_expected: bool,
         fall_tilt_deg: float,
         min_height_m: float,
         predicted_tilt_deg: float,
@@ -354,7 +453,9 @@ class _FollowViserPlayViewer(ViserPlayViewer):
             else "#ef4444"
         )
         support = (
-            "both"
+            "airborne (expected)"
+            if not support_expected
+            else "both"
             if left_contact and right_contact
             else "left only"
             if left_contact
@@ -415,7 +516,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
               <div style="opacity:.7">predicted: {predicted_tilt_deg:.2f}°</div>
             </div>
             <div style="padding:0.45em;border:1px solid rgba(127,127,127,.25);border-radius:6px">
-              <div style="opacity:.65">Balance confidence*</div>
+              <div style="opacity:.65">Stability margin*</div>
               <div style="font-size:1.35em;font-weight:700;color:{confidence_color}">
                 {confidence_percent:.1f}%
               </div>

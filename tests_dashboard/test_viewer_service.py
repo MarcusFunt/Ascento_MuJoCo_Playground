@@ -68,6 +68,9 @@ class FakeProcess:
     def terminate(self):
         self.terminated = True
 
+    def kill(self):
+        self.exit_code = -9
+
 
 def test_viewer_service_launches_isolated_worker_and_rejects_duplicate(
     monkeypatch,
@@ -185,3 +188,43 @@ def test_stop_signals_only_viewer_process_group(monkeypatch, tmp_path):
 
     assert stopped["state"] == "stopping"
     assert signalled and signalled[0] == (4321, signal.SIGINT)
+
+
+def test_stop_escalates_from_interrupt_to_term_and_kill(monkeypatch, tmp_path):
+    run_service, run_id, _ = _run(tmp_path / "artifacts")
+    _patch_popen(monkeypatch, lambda command, **kwargs: FakeProcess(command))
+    signals = []
+    monkeypatch.setattr(
+        viewer_service_module.os,
+        "killpg",
+        lambda pgid, sig: signals.append((pgid, sig)),
+    )
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, **kwargs):
+            del kwargs
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(viewer_service_module.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(viewer_service_module.time, "sleep", lambda _seconds: None)
+
+    service = ViewerService(
+        run_service,
+        logs_root=tmp_path / "viewer-logs",
+        stable_age_seconds=0,
+        stop_grace_seconds=0,
+        stop_term_seconds=0,
+    )
+    monkeypatch.setattr(service, "_port_open", lambda: False)
+    started = service.start(run_id=run_id)
+    service.stop(started["id"])
+
+    assert signals == [
+        (4321, signal.SIGINT),
+        (4321, signal.SIGTERM),
+        (4321, signal.SIGKILL),
+    ]

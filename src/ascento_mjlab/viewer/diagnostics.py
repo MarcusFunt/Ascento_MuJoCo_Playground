@@ -29,6 +29,7 @@ def compute_balance_confidence(
     min_height_m: float,
     nominal_height_m: float,
     lookahead_s: float = 0.25,
+    support_expected: bool = True,
 ) -> BalanceConfidence:
     """Estimate remaining balance margin from state and the real fall boundary.
 
@@ -61,7 +62,9 @@ def compute_balance_confidence(
         (height_m - min_height_m) / (nominal_height_m - min_height_m)
     )
 
-    if left_contact and right_contact:
+    if not support_expected:
+        support_factor = 1.0
+    elif left_contact and right_contact:
         support_factor = 1.0
     elif left_contact or right_contact:
         support_factor = 0.65

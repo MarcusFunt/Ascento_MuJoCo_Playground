@@ -71,12 +71,14 @@ function RunsPage() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [checkpoints, setCheckpoints] = useState([])
-  const [checkpointSelection, setCheckpointSelection] = useState('')
+  const [latestCheckpoint, setLatestCheckpoint] = useState('')
+  const [checkpointSelection, setCheckpointSelection] = useState('latest')
   const [viewer, setViewer] = useState(null)
   const [viewerFollow, setViewerFollow] = useState(false)
   const runsRefreshInFlight = useRef(false)
   const detailRefreshInFlight = useRef(false)
   const viewerRefreshInFlight = useRef(false)
+  const checkpointRefreshGeneration = useRef(0)
   const editFormRunId = useRef('')
 
   async function refreshRuns() {
@@ -127,23 +129,29 @@ function RunsPage() {
 
 
   async function refreshCheckpoints(id) {
+    const generation = ++checkpointRefreshGeneration.current
     if (!id) {
       setCheckpoints([])
-      setCheckpointSelection('')
+      setLatestCheckpoint('')
+      setCheckpointSelection('latest')
       return
     }
     try {
       const data = await fetchJson(`/api/runs/${id}/checkpoints`)
+      if (generation !== checkpointRefreshGeneration.current) return
       const items = data.checkpoints || []
       setCheckpoints(items)
+      setLatestCheckpoint(data.latest || '')
       setCheckpointSelection((current) => (
-        current && items.some((item) => item.relative_path === current)
+        current === 'latest' || items.some((item) => item.relative_path === current)
           ? current
-          : (data.latest || '')
+          : 'latest'
       ))
     } catch (caught) {
+      if (generation !== checkpointRefreshGeneration.current) return
       setCheckpoints([])
-      setCheckpointSelection('')
+      setLatestCheckpoint('')
+      setCheckpointSelection('latest')
       setError(caught.message)
     }
   }
@@ -548,7 +556,7 @@ function RunsPage() {
                   {viewerForSelected && <StateBadge state={viewer.state} />}
                 </div>
 
-                {!viewerForSelected && (
+                {(!viewerForSelected || !viewerActive) && (
                   <>
                     {viewerActive && (
                       <div className="policy-viewer-other-run">
@@ -572,7 +580,12 @@ function RunsPage() {
                         onChange={(event) => setCheckpointSelection(event.target.value)}
                         disabled={checkpoints.length === 0 || viewerActive}
                       >
-                        {checkpoints.length === 0 && <option value="">No stable checkpoints yet</option>}
+                        {checkpoints.length === 0 && <option value="latest">No stable checkpoints yet</option>}
+                        {checkpoints.length > 0 && (
+                          <option value="latest">
+                            Latest stable{latestCheckpoint ? ` — ${latestCheckpoint}` : ''}
+                          </option>
+                        )}
                         {checkpoints.map((item) => (
                           <option key={item.relative_path} value={item.relative_path}>
                             {item.relative_path}

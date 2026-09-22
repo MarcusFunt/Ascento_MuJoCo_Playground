@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,21 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
             "task_contract": current_task_contract(self.env.unwrapped.cfg),
             "environment_progress": self._environment_progress(),
         }
-        super().save(path, infos=provenance)
+        target = Path(path).expanduser().resolve()
+        temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        upload_model = bool(self.cfg.get("upload_model", False))
+        try:
+            self.cfg["upload_model"] = False
+            super().save(str(temporary), infos=provenance)
+            os.replace(temporary, target)
+        finally:
+            self.cfg["upload_model"] = upload_model
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if upload_model:
+            self.logger.save_model(str(target), self.current_learning_iteration)
 
     def _restore_environment_progress(
         self,

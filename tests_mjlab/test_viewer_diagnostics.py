@@ -141,3 +141,20 @@ def test_smoothing_and_sparkline_helpers_are_predictable():
     assert smooth_value(None, 0.8, 0.9) == pytest.approx(0.8)
     assert smooth_value(0.8, 0.2, 0.5) == pytest.approx(0.5)
     assert sparkline([0.0, 0.5, 1.0], minimum=0.0, maximum=1.0) == "▁▅█"
+
+
+def test_intentional_flight_does_not_penalize_missing_wheel_support():
+    result = compute_balance_confidence(
+        tilt_rad=0.0,
+        tilt_rate_rad_s=0.0,
+        height_m=0.80,
+        left_contact=False,
+        right_contact=False,
+        fall_tilt_rad=math.radians(60.0),
+        min_height_m=0.35,
+        nominal_height_m=0.75,
+        support_expected=False,
+    )
+
+    assert result.support_factor == pytest.approx(1.0)
+    assert result.confidence == pytest.approx(1.0)
