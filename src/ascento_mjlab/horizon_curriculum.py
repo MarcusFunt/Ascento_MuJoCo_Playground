@@ -48,6 +48,7 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
     required_top_horizon_candidate_windows = 1
     top_horizon_candidate_name = "model_best_long_horizon.pt"
     top_horizon_learning_rate = 1.0e-5
+    selection_suite = "balance_gate_v5"
     stationary_min_samples = 50
     stationary_quality_thresholds = {
         "tilt_rms": 0.04,
@@ -324,7 +325,7 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
             "stationary_quality_pass_fraction": quality_fraction,
             "stable_windows": self._top_horizon_success_windows,
             "learning_iteration": self.current_learning_iteration,
-            "selection": "requires deterministic balance_gate_v5 evaluation",
+            "selection": f"requires deterministic {self.selection_suite} evaluation",
         }
         self.save(str(temporary_checkpoint), infos={"long_horizon_candidate": details})
         os.replace(temporary_checkpoint, checkpoint)
@@ -361,3 +362,76 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
         if candidate_saved:
             parts.append(f"candidate_checkpoint={self.top_horizon_candidate_name}")
         print("HORIZON_CURRICULUM " + " ".join(parts), flush=True)
+
+
+class VelocityHorizonCurriculumRunner(HorizonCurriculumRunner):
+    """Advance the velocity horizon only when commanded motion is tracked.
+
+    Balance quality is defined around a fixed world heading and a 0.75 m root
+    height.  Those are intentionally absent from ``Ascento-Velocity-Flat``:
+    yaw rate and height are policy commands.  This runner therefore measures
+    the same body-frame twist and root-height errors used by the velocity gate
+    instead of inheriting balance's stationary-quality predicate.
+    """
+
+    tracking_min_samples = 50
+    selection_suite = "velocity_gate_v1"
+    tracking_quality_thresholds = {
+        "velocity_tracking_rmse": 0.25,
+        "height_tracking_rmse": 0.08,
+    }
+
+    def __init__(
+        self,
+        env: RslRlVecEnvWrapper,
+        train_cfg: dict[str, Any],
+        log_dir: str | None = None,
+        device: str = "cpu",
+    ) -> None:
+        super().__init__(env, train_cfg, log_dir, device)
+        self._tracking_quality_sums = torch.zeros(
+            (env.num_envs, len(self.tracking_quality_thresholds)), device=env.device
+        )
+        self._tracking_quality_samples = torch.zeros(env.num_envs, device=env.device)
+
+    def _accumulate_stationary_quality(self, actions: torch.Tensor) -> None:
+        """Accumulate command-tracking mean-square errors for every rollout step."""
+        del actions
+        if not hasattr(self, "_tracking_quality_sums"):
+            # Lightweight unit tests may construct a runner without its normal
+            # initializer.
+            return
+        base_env = self.env.unwrapped
+        robot = base_env.scene["robot"]
+        twist = base_env.command_manager.get_command("twist")
+        height = base_env.command_manager.get_command("height")
+        assert twist is not None and twist.shape[1] == 3
+        assert height is not None and height.shape[1] == 1
+        actual_twist = torch.stack(
+            (
+                robot.data.root_link_lin_vel_b[:, 0],
+                robot.data.root_link_lin_vel_b[:, 1],
+                robot.data.root_link_ang_vel_b[:, 2],
+            ),
+            dim=1,
+        )
+        velocity_error_sq = torch.mean(torch.square(actual_twist - twist), dim=1)
+        height_error_sq = torch.square(robot.data.root_link_pos_w[:, 2] - height[:, 0])
+        self._tracking_quality_sums += torch.stack((velocity_error_sq, height_error_sq), dim=1)
+        self._tracking_quality_samples += 1.0
+
+    def _finish_quality_episodes(self, done_ids: torch.Tensor) -> list[bool]:
+        """Require adequate twist and height tracking before horizon promotion."""
+        if not hasattr(self, "_tracking_quality_sums"):
+            return [True] * int(done_ids.numel())
+        samples = self._tracking_quality_samples[done_ids]
+        rms = torch.sqrt(
+            self._tracking_quality_sums[done_ids] / samples.clamp_min(1.0).unsqueeze(1)
+        )
+        thresholds = torch.tensor(
+            tuple(self.tracking_quality_thresholds.values()), device=rms.device, dtype=rms.dtype
+        )
+        passed = (samples >= self.tracking_min_samples) & torch.all(rms <= thresholds, dim=1)
+        self._tracking_quality_sums[done_ids] = 0.0
+        self._tracking_quality_samples[done_ids] = 0.0
+        return [bool(value) for value in passed.cpu().tolist()]

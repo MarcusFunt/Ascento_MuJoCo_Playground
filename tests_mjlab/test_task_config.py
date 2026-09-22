@@ -84,6 +84,10 @@ def test_balance_rl_config_enforces_normalized_actions_and_instrumented_ppo():
 
 
 def test_velocity_stage_has_no_reward_that_penalizes_its_commands():
+    from mjlab.tasks.registry import load_runner_cls
+
+    from ascento_mjlab.horizon_curriculum import VelocityHorizonCurriculumRunner
+
     cfg = load_env_cfg("Ascento-Velocity-Flat")
 
     assert set(cfg.commands) == {"twist", "height"}
@@ -101,8 +105,11 @@ def test_velocity_stage_has_no_reward_that_penalizes_its_commands():
     assert "track_linear_velocity" in cfg.rewards
     assert "track_yaw_rate" in cfg.rewards
     assert "track_height" in cfg.rewards
+    assert cfg.rewards["track_yaw_rate"].weight == pytest.approx(1.0)
+    assert cfg.rewards["track_yaw_rate"].params["std"] == pytest.approx(0.40)
     assert "twist_command" in cfg.observations["actor"].terms
     assert "height_command" in cfg.observations["actor"].terms
+    assert load_runner_cls("Ascento-Velocity-Flat") is VelocityHorizonCurriculumRunner
 
 
 def test_recovery_stage_exports_executable_success_metric_and_training_pushes():
@@ -123,6 +130,7 @@ def test_recovery_stage_exports_executable_success_metric_and_training_pushes():
         "Ascento-Balance-Flat",
         "Ascento-Velocity-Flat",
         "Ascento-Recovery-Flat",
+        "Ascento-Balance-Recovery-Flat",
         "Ascento-Jump-Flat",
     ],
 )

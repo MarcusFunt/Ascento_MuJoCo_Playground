@@ -139,6 +139,64 @@ def reset_root_state_supported(
     env.sim.sense()
 
 
+def mixed_balance_recovery_reset(
+    env,
+    env_ids: torch.Tensor | slice | None,
+    *,
+    asset_cfg: SceneEntityCfg,
+    normal_pose_range: dict[str, tuple[float, float]],
+    normal_velocity_range: dict[str, tuple[float, float]],
+    hard_pose_range_start: dict[str, tuple[float, float]],
+    hard_pose_range_end: dict[str, tuple[float, float]],
+    hard_velocity_range_start: dict[str, tuple[float, float]],
+    hard_velocity_range_end: dict[str, tuple[float, float]],
+    hard_fraction_start: float = 0.10,
+    hard_fraction_end: float = 0.30,
+    ramp_control_steps: int = 120_000,
+) -> None:
+    """Mix ordinary balance resets with a progressive hard-recovery subset."""
+    if not (0.0 <= hard_fraction_start <= 1.0 and 0.0 <= hard_fraction_end <= 1.0):
+        raise ValueError("hard reset fractions must lie in [0, 1]")
+    if ramp_control_steps <= 0:
+        raise ValueError("ramp_control_steps must be positive")
+    ids = _resolved_env_ids(env, env_ids)
+    if ids.numel() == 0:
+        return
+    progress = min(
+        1.0, max(0.0, float(getattr(env, "common_step_counter", 0)) / ramp_control_steps)
+    )
+    hard_fraction = hard_fraction_start + (hard_fraction_end - hard_fraction_start) * progress
+    hard_mask = torch.rand(ids.numel(), device=env.device) < hard_fraction
+    normal_ids = ids[~hard_mask]
+    hard_ids = ids[hard_mask]
+    if normal_ids.numel():
+        reset_root_state_supported(
+            env,
+            normal_ids,
+            pose_range=normal_pose_range,
+            velocity_range=normal_velocity_range,
+            asset_cfg=asset_cfg,
+        )
+    if hard_ids.numel():
+
+        def lerp_ranges(start, end):
+            keys = set(start) | set(end)
+            resolved = {}
+            for key in keys:
+                a0, a1 = start.get(key, end[key])
+                b0, b1 = end.get(key, start[key])
+                resolved[key] = (a0 + (b0 - a0) * progress, a1 + (b1 - a1) * progress)
+            return resolved
+
+        reset_root_state_supported(
+            env,
+            hard_ids,
+            pose_range=lerp_ranges(hard_pose_range_start, hard_pose_range_end),
+            velocity_range=lerp_ranges(hard_velocity_range_start, hard_velocity_range_end),
+            asset_cfg=asset_cfg,
+        )
+
+
 def reset_to_default_supported(
     env,
     env_ids: torch.Tensor | slice | None = None,
@@ -429,9 +487,9 @@ def _apply_cardinal_planar_push(
     # Use the longitudinal axis most often during the first curriculum phase,
     # while retaining some lateral recovery examples.
     axes = (torch.rand(ids.numel(), device=env.device) >= fore_aft_probability).long()
-    signs = torch.where(
-        torch.rand(ids.numel(), device=env.device) < 0.5, 1.0, -1.0
-    ).to(dtype=velocity.dtype)
+    signs = torch.where(torch.rand(ids.numel(), device=env.device) < 0.5, 1.0, -1.0).to(
+        dtype=velocity.dtype
+    )
     body_direction = torch.zeros_like(delta)
     body_direction[torch.arange(ids.numel(), device=env.device), axes] = signs
     world_direction = quat_apply(asset.data.root_link_quat_w[ids], body_direction)
@@ -460,6 +518,7 @@ __all__ = [
     "DEFAULT_WHEEL_RADIUS_M",
     "flat_ground_wheel_bottom_heights",
     "initialize_world_target",
+    "mixed_balance_recovery_reset",
     "OneShotPlanarVelocityPush",
     "SettleTriggeredLocomotionSequence",
     "reset_to_default_supported",

@@ -76,7 +76,10 @@ def test_v1_null_task_id_migration_requires_every_other_topology_field_to_match(
         json.dumps(changed["topology"], sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
-    assert classify_task_contract_compatibility(changed, current).status == TaskContractStatus.INCOMPATIBLE
+    assert (
+        classify_task_contract_compatibility(changed, current).status
+        == TaskContractStatus.INCOMPATIBLE
+    )
     assert not task_contracts_compatible(changed, current)
 
 
@@ -136,9 +139,26 @@ def test_locomotion_uses_the_balance_actor_abi_and_a_fore_aft_biased_sequence():
     assert sequence.params["fore_aft_probability"] == 0.75
     assert sequence.params["min_target_distance_m"] == 0.05
     assert sequence.params["max_target_distance_m"] == 0.20
-    assert "settle_triggered_sequence" not in load_env_cfg(
-        "Ascento-Locomotion-Flat", play=True
-    ).events
+    assert (
+        "settle_triggered_sequence" not in load_env_cfg("Ascento-Locomotion-Flat", play=True).events
+    )
+
+
+def test_balance_recovery_preserves_balance_actor_abi():
+    from mjlab.tasks.registry import load_env_cfg
+
+    source = current_task_contract_for_task("Ascento-Balance-Flat")
+    target = current_task_contract_for_task("Ascento-Balance-Recovery-Flat")
+    assert classify_actor_transfer_compatibility(source, target).compatible is True
+
+    cfg = load_env_cfg("Ascento-Balance-Recovery-Flat", play=False)
+    reset = cfg.events["reset_supported_pose"]
+    assert reset.func.__name__ == "mixed_balance_recovery_reset"
+    assert reset.params["hard_fraction_start"] == pytest.approx(0.10)
+    assert reset.params["hard_fraction_end"] == pytest.approx(0.30)
+    assert reset.params["hard_pose_range_end"]["pitch"] == pytest.approx((0.08, 0.15))
+    assert reset.params["hard_velocity_range_end"]["pitch"] == pytest.approx((-0.50, 0.50))
+    assert reset.params["hard_velocity_range_end"]["roll"] == pytest.approx((-0.50, 0.50))
 
 
 def test_checkpoint_validation_reports_missing_task_contract_before_rollout():
