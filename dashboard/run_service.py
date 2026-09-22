@@ -16,7 +16,7 @@ from uuid import uuid4
 from dashboard.config import REPO_ROOT
 from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
 from dashboard.provenance import working_tree_state
-from dashboard.task_catalog import horizon_task_ids
+from dashboard.task_catalog import horizon_task_ids, task_ids
 from dashboard.versioning import annotate_run_summary, classify_run_version
 
 RUN_METADATA = "run_metadata.json"
@@ -230,8 +230,8 @@ class RunService:
         if not display_name:
             raise ValueError("display_name is required")
         task = str(request.get("task") or "Ascento-Balance-Flat").strip()
-        if not task.startswith("Ascento-"):
-            raise ValueError("task must be an Ascento task name")
+        if task not in task_ids():
+            raise ValueError(f"unknown Ascento task: {task}")
         episode_horizon_s = request.get("episode_horizon_s")
         if episode_horizon_s is not None:
             if task not in horizon_task_ids():
