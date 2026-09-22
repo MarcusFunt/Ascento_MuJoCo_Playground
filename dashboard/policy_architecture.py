@@ -11,6 +11,18 @@ import yaml
 _LINEAR_WEIGHT = re.compile(r"^mlp\.(\d+)\.weight$")
 
 
+def _tensor_stats(value: Any) -> dict[str, float]:
+    """Return cheap scalar summaries without exposing checkpoint tensors."""
+    tensor = value.detach().float()
+    if tensor.numel() == 0:
+        return {"rms": 0.0, "mean_abs": 0.0, "max_abs": 0.0}
+    return {
+        "rms": float(tensor.square().mean().sqrt().item()),
+        "mean_abs": float(tensor.abs().mean().item()),
+        "max_abs": float(tensor.abs().max().item()),
+    }
+
+
 def _linear_sizes(state: dict[str, Any]) -> list[int]:
     weights: list[tuple[int, Any]] = []
     for key, value in state.items():
@@ -34,6 +46,47 @@ def _linear_sizes(state: dict[str, Any]) -> list[int]:
             sizes.append(input_size)
         sizes.append(output_size)
     return sizes
+
+
+def _branch_summary(state: dict[str, Any]) -> dict[str, Any]:
+    """Summarize parameter scale for each affine transition in an MLP."""
+    linear_layers: list[dict[str, Any]] = []
+    for key, weight in state.items():
+        match = _LINEAR_WEIGHT.fullmatch(key)
+        if not match:
+            continue
+        layer_index = int(match.group(1))
+        shape = getattr(weight, "shape", ())
+        if len(shape) != 2:
+            continue
+        output_size, input_size = (int(shape[0]), int(shape[1]))
+        weight_stats = _tensor_stats(weight)
+        bias = state.get(f"mlp.{layer_index}.bias")
+        bias_rms = None
+        if hasattr(bias, "numel"):
+            bias_rms = _tensor_stats(bias)["rms"]
+        linear_layers.append(
+            {
+                "module_index": layer_index,
+                "input_size": input_size,
+                "output_size": output_size,
+                "weight_count": int(weight.numel()),
+                "weight_rms": weight_stats["rms"],
+                "weight_mean_abs": weight_stats["mean_abs"],
+                "weight_max_abs": weight_stats["max_abs"],
+                "bias_rms": bias_rms,
+            }
+        )
+    linear_layers.sort(key=lambda item: item["module_index"])
+    parameter_count = sum(
+        int(value.numel())
+        for value in state.values()
+        if hasattr(value, "numel")
+    )
+    return {
+        "parameter_count": parameter_count,
+        "linear_layers": linear_layers,
+    }
 
 
 def _activation_names(agent_config_path: Path) -> tuple[str, str]:
@@ -97,9 +150,11 @@ def inspect_policy_checkpoint(checkpoint_path: Path, relative_path: str) -> dict
             "activation": actor_activation,
             "distribution": distribution,
             "std_parameters": std_parameters,
+            **_branch_summary(actor_state),
         },
         "critic": {
             "layers": critic_sizes,
             "activation": critic_activation,
+            **_branch_summary(critic_state),
         },
     }
