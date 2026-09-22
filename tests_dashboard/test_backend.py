@@ -13,11 +13,15 @@ def _load_app(monkeypatch, artifact_root):
 def test_dashboard_backend_registers_health_and_config_routes(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
 
-    assert module.app.title == "Ascento Training Monitor"
+    assert module.app.title == "Ascento Control"
     paths = {route.path for route in module.app.routes}
     assert "/api/health" in paths
     assert "/api/config" in paths
     assert "/api/runs/{run_id}/summary.json" in paths
+    assert "/api/overview" in paths
+    assert "/api/runs/index" in paths
+    assert "/api/tasks" in paths
+    assert "/api/runs/{run_id}/curriculum" in paths
 
     health = module.health()
     assert health["ok"] is True
