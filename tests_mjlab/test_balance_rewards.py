@@ -12,6 +12,7 @@ from ascento_mjlab.mdp.rewards import (
     track_world_target_yaw_rate,
     upright,
     world_target_heading,
+    world_target_progress_velocity,
     world_target_proximity,
 )
 
@@ -24,6 +25,7 @@ def _env():
             root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
             projected_gravity_b=torch.tensor([[0.0, 0.0, -1.0]]),
             root_link_lin_vel_b=torch.zeros((1, 3)),
+            root_link_lin_vel_w=torch.zeros((1, 3)),
             root_link_ang_vel_b=torch.zeros((1, 3)),
             joint_pos=torch.tensor([[-3.14159, -3.14159, 0.0, -3.14159, -3.14159, 0.0]]),
         )
@@ -56,6 +58,25 @@ def test_world_target_proximity_decays_with_absolute_world_drift():
     assert world_target_proximity(env, asset_cfg=asset_cfg).item() == pytest.approx(
         torch.exp(torch.tensor(-(0.5 / 0.35) ** 2)).item()
     )
+
+
+def test_world_target_progress_reward_is_signed_and_bounded():
+    env = _env()
+    initialize_world_target(env)
+    asset_cfg = SimpleNamespace(name="robot")
+    env.ascento_world_target_state["target_xy"][0] += torch.tensor([2.5, 0.0])
+
+    env.scene["robot"].data.root_link_lin_vel_w[0, 0] = 0.30
+    toward = world_target_progress_velocity(env, speed_scale=0.30, asset_cfg=asset_cfg)
+    env.scene["robot"].data.root_link_lin_vel_w[0, 0] = -0.30
+    away = world_target_progress_velocity(env, speed_scale=0.30, asset_cfg=asset_cfg)
+    env.scene["robot"].data.root_link_lin_vel_w[0] = torch.tensor([0.0, 0.30, 0.0])
+    sideways = world_target_progress_velocity(env, speed_scale=0.30, asset_cfg=asset_cfg)
+
+    assert toward.item() == pytest.approx(torch.tanh(torch.tensor(1.0)).item())
+    assert away.item() == pytest.approx(-torch.tanh(torch.tensor(1.0)).item())
+    assert sideways.item() == pytest.approx(0.0, abs=1.0e-7)
+    assert abs(toward.item()) < 1.0
 
 
 def test_world_target_observation_is_yaw_invariant_but_target_is_world_framed():
