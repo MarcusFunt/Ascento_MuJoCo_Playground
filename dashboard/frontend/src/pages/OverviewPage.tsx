@@ -121,6 +121,7 @@ export function OverviewPage() {
                 value={horizon ? fmtRatioPercent(horizon.promotion.timeout_fraction) : fmtNumber(run.episode_length, 1)}
                 secondary={horizon ? `target ≥ ${fmtRatioPercent(horizon.promotion.timeout_threshold)}` : 'environment steps'}
                 values={horizon ? [] : episodeValues}
+                progress={horizon?.promotion.timeout_fraction !== null && horizon?.promotion.timeout_fraction !== undefined ? horizon.promotion.timeout_fraction * 100 : undefined}
                 tone={horizon?.promotion.timeout_fraction !== null && horizon?.promotion.timeout_fraction !== undefined && horizon.promotion.timeout_fraction < horizon.promotion.timeout_threshold ? 'warning' : 'neutral'}
                 help={horizon ? 'Fraction of completed episodes that reached the current time horizon. This directly gates curriculum promotion.' : 'Mean episode duration. Sudden drops often indicate earlier failures.'}
               />
