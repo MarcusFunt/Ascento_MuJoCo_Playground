@@ -123,7 +123,7 @@ def test_runtime_contract_recovery_requires_one_exact_registered_topology():
     assert recovered.task_id == "Ascento-Balance-Quiet-Flat"
 
 
-def test_locomotion_uses_the_balance_actor_abi_and_a_fore_aft_biased_sequence():
+def test_locomotion_preserves_actor_abi_and_uses_repeated_long_range_targets():
     from mjlab.tasks.registry import load_env_cfg
 
     balance = current_task_contract_for_task("Ascento-Balance-Quiet-Flat")
@@ -131,17 +131,24 @@ def test_locomotion_uses_the_balance_actor_abi_and_a_fore_aft_biased_sequence():
     assert classify_actor_transfer_compatibility(balance, locomotion).compatible is True
 
     cfg = load_env_cfg("Ascento-Locomotion-Flat", play=False)
-    sequence = cfg.events["settle_triggered_sequence"]
+    assert "settle_triggered_sequence" not in cfg.events
+    assert "balance_push" not in cfg.events
+
+    initial = cfg.events["initialize_world_target"]
+    assert initial.func.__name__ == "initialize_random_world_target"
+    assert initial.params["min_distance_m"] == pytest.approx(2.0)
+    assert initial.params["max_distance_m"] == pytest.approx(3.0)
+
+    sequence = cfg.events["repeated_random_world_targets"]
     assert sequence.interval_range_s == (0.01, 0.01)
-    assert sequence.params["settle_hold_s"] == 0.75
-    assert sequence.params["min_delta_v"] == 0.05
-    assert sequence.params["max_delta_v"] == 0.15
-    assert sequence.params["fore_aft_probability"] == 0.75
-    assert sequence.params["min_target_distance_m"] == 0.05
-    assert sequence.params["max_target_distance_m"] == 0.20
-    assert (
-        "settle_triggered_sequence" not in load_env_cfg("Ascento-Locomotion-Flat", play=True).events
-    )
+    assert sequence.params["target_reached_distance_m"] == pytest.approx(0.04)
+    assert sequence.params["target_hold_s"] == pytest.approx(0.35)
+    assert sequence.params["min_target_distance_m"] == pytest.approx(2.0)
+    assert sequence.params["max_target_distance_m"] == pytest.approx(3.0)
+    assert cfg.episode_length_s == pytest.approx(60.0)
+
+    play_cfg = load_env_cfg("Ascento-Locomotion-Flat", play=True)
+    assert "repeated_random_world_targets" in play_cfg.events
 
 
 def test_balance_recovery_preserves_balance_actor_abi():
