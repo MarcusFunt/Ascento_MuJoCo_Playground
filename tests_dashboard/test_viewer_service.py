@@ -2,9 +2,8 @@ import json
 import signal
 from pathlib import Path
 
-import pytest
-
 import dashboard.viewer_service as viewer_service_module
+import pytest
 from dashboard.health import discover_dashboard_runs
 from dashboard.run_service import RunService
 from dashboard.viewer_service import ViewerBusyError, ViewerService
