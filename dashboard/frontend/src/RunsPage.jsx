@@ -636,7 +636,7 @@ function RunsPage() {
                 )}
               </div>
 
-              {active && <button className="runs-button danger full" disabled={busy || detail.state === 'stopping'} onClick={stopRun}>{detail.state === 'stopping' ? 'Stopping…' : 'Graceful stop'}</button>
+              {active && <button className="runs-button danger full" disabled={busy || detail.state === 'stopping'} onClick={stopRun}>{detail.state === 'stopping' ? 'Stopping…' : 'Graceful stop'}</button>}
               <form className="runs-form edit-form" onSubmit={saveMetadata}>
                 <label>Human name<input value={editForm.display_name} onChange={(event) => setEditForm({ ...editForm, display_name: event.target.value })} /></label>
                 <label>Purpose<input value={editForm.purpose} onChange={(event) => setEditForm({ ...editForm, purpose: event.target.value })} /></label>
