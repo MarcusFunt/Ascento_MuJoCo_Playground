@@ -10,7 +10,7 @@ from dashboard.viewer_service import ViewerBusyError, ViewerService
 
 def _run(root: Path) -> tuple[RunService, str, Path]:
     run = root / "run"
-    run.mkdir()
+    run.mkdir(parents=True)
     (run / "run_status.json").write_text(
         json.dumps(
             {
