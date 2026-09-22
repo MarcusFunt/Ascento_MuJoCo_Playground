@@ -58,6 +58,9 @@ _SUMMARY_CACHE: tuple[float, list[dict]] | None = None
 _INDEX_CACHE_TTL_S = 10.0
 _INDEX_CACHE_LOCK = threading.Lock()
 _INDEX_CACHE: tuple[float, list[dict]] | None = None
+_OVERVIEW_SERIES_CACHE_TTL_S = 10.0
+_OVERVIEW_SERIES_CACHE_LOCK = threading.Lock()
+_OVERVIEW_SERIES_CACHE: dict[str, tuple[float, list[dict]]] = {}
 
 app = FastAPI(title="Ascento Control", version="3.0")
 
@@ -252,6 +255,11 @@ def _indexed_summaries() -> list[dict]:
 
 
 def _overview_series(run_id: str, max_points: int = 120) -> list[dict]:
+    with _OVERVIEW_SERIES_CACHE_LOCK:
+        cached = _OVERVIEW_SERIES_CACHE.get(run_id)
+        if cached and time.monotonic() - cached[0] < _OVERVIEW_SERIES_CACHE_TTL_S:
+            return list(cached[1])
+
     ref = _run(run_id)
     raw = load_training_records(ref.path, limit=600)
     if len(raw) > max_points:
@@ -271,7 +279,9 @@ def _overview_series(run_id: str, max_points: int = 120) -> list[dict]:
                 "clip_fraction": canonical.get("clip_fraction"),
             }
         )
-    return result
+    with _OVERVIEW_SERIES_CACHE_LOCK:
+        _OVERVIEW_SERIES_CACHE[run_id] = (time.monotonic(), result)
+    return list(result)
 
 
 def _curriculum_snapshot(run_id: str) -> tuple[dict, dict | None]:
