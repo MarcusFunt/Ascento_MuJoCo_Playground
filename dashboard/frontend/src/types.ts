@@ -179,6 +179,22 @@ export type Checkpoint = {
   stable?: boolean
 }
 
+export type PolicyBranchArchitecture = {
+  layers: number[]
+  activation: string
+  distribution?: string
+  std_parameters?: number
+}
+
+export type PolicyArchitecture = {
+  available: boolean
+  checkpoint?: string
+  iteration?: number | null
+  message?: string
+  actor?: PolicyBranchArchitecture
+  critic?: PolicyBranchArchitecture
+}
+
 export type ViewerState = {
   id: string
   run_id: string

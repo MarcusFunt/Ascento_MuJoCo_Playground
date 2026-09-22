@@ -7,7 +7,7 @@ import { Button } from './ui/button'
 import { SelectInput } from './ui/input'
 import { StateBadge } from './StateBadge'
 
-export function ViewerCard({ runId }: { runId: string }) {
+export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpointPath?: string }) {
   const queryClient = useQueryClient()
   const checkpoints = useQuery({
     queryKey: ['checkpoints', runId],
@@ -79,8 +79,14 @@ export function ViewerCard({ runId }: { runId: string }) {
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
             <label>
               <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.06em] text-muted">Checkpoint</span>
-              <SelectInput value={checkpoint} onChange={(event) => setCheckpoint(event.target.value)} disabled={viewerActive || !checkpoints.data?.checkpoints?.length}>
-                {!checkpoints.data?.checkpoints?.length ? <option value="latest">No stable checkpoints yet</option> : null}
+              <SelectInput
+                value={checkpoint}
+                onChange={(event) => setCheckpoint(event.target.value)}
+                disabled={viewerActive || checkpoints.isLoading || Boolean(checkpoints.error) || !checkpoints.data?.checkpoints?.length}
+              >
+                {checkpoints.isLoading ? <option value="latest">Loading checkpoints…</option> : null}
+                {checkpoints.error ? <option value="latest">Checkpoint list unavailable</option> : null}
+                {!checkpoints.isLoading && !checkpoints.error && !checkpoints.data?.checkpoints?.length ? <option value="latest">No stable checkpoints yet</option> : null}
                 {checkpoints.data?.checkpoints?.length ? (
                   <option value="latest">
                     Latest stable{checkpoints.data.latest ? ` · ${checkpoints.data.latest}` : ''}
@@ -93,10 +99,23 @@ export function ViewerCard({ runId }: { runId: string }) {
                 ))}
               </SelectInput>
             </label>
-            <Button variant="primary" size="lg" disabled={viewerActive || !checkpoints.data?.checkpoints?.length || start.isPending} onClick={() => start.mutate()}>
+            <Button variant="primary" size="lg" disabled={viewerActive || checkpoints.isLoading || Boolean(checkpoints.error) || !checkpoints.data?.checkpoints?.length || start.isPending} onClick={() => start.mutate()}>
               {start.isPending ? 'Starting…' : 'Visualize checkpoint'}
             </Button>
           </div>
+          {checkpoints.error ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/35 bg-danger/10 p-3 text-sm text-danger" role="alert">
+              <span>Could not read checkpoints: {checkpoints.error.message}</span>
+              <Button size="sm" onClick={() => void checkpoints.refetch()}>Retry</Button>
+            </div>
+          ) : null}
+          {!checkpoints.isLoading && !checkpoints.error && !checkpoints.data?.checkpoints?.length ? (
+            <p className="mt-3 rounded-lg border border-border bg-background/35 p-3 text-sm text-muted" role="status">
+              {checkpointPath
+                ? `The run record points to ${checkpointPath}, but no stable checkpoint file is currently available in this run’s artifact folder.`
+                : 'No stable checkpoint is available yet. This list refreshes automatically.'}
+            </p>
+          ) : null}
           <label className="mt-4 flex items-center gap-2 text-sm text-secondary">
             <input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} disabled={viewerActive} />
             Follow newly completed checkpoints automatically

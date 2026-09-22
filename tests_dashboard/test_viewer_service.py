@@ -161,6 +161,49 @@ def test_start_rejects_an_already_occupied_viewer_port(monkeypatch, tmp_path):
         service.start(run_id=run_id)
 
 
+def test_architecture_reports_the_checkpoint_actor_and_critic_shapes(tmp_path):
+    import torch
+
+    run_service, run_id, run_dir = _run(tmp_path / "artifacts")
+    torch.save(
+        {
+            "actor_state_dict": {
+                "mlp.0.weight": torch.zeros(256, 41),
+                "mlp.2.weight": torch.zeros(256, 256),
+                "mlp.4.weight": torch.zeros(256, 256),
+                "mlp.6.weight": torch.zeros(6, 256),
+                "distribution.std_param": torch.zeros(6),
+            },
+            "critic_state_dict": {
+                "mlp.0.weight": torch.zeros(256, 50),
+                "mlp.2.weight": torch.zeros(256, 256),
+                "mlp.4.weight": torch.zeros(256, 256),
+                "mlp.6.weight": torch.zeros(1, 256),
+            },
+            "iter": 100,
+        },
+        run_dir / "model_100.pt",
+    )
+    params = run_dir / "params"
+    params.mkdir()
+    (params / "agent.yaml").write_text(
+        "actor:\n  activation: elu\ncritic:\n  activation: elu\n",
+        encoding="utf-8",
+    )
+    service = ViewerService(run_service, logs_root=tmp_path / "viewer-logs", stable_age_seconds=0)
+
+    architecture = service.architecture(run_id)
+
+    assert architecture["available"] is True
+    assert architecture["checkpoint"] == "model_100.pt"
+    assert architecture["iteration"] == 100
+    assert architecture["actor"]["layers"] == [41, 256, 256, 256, 6]
+    assert architecture["actor"]["activation"] == "ELU"
+    assert architecture["actor"]["distribution"] == "Gaussian"
+    assert architecture["critic"]["layers"] == [50, 256, 256, 256, 1]
+    assert architecture["critic"]["activation"] == "ELU"
+
+
 def test_stop_signals_only_viewer_process_group(monkeypatch, tmp_path):
     run_service, run_id, _ = _run(tmp_path / "artifacts")
     _patch_popen(

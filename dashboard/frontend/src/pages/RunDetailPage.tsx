@@ -6,6 +6,7 @@ import { api } from '../api'
 import { CurriculumRail } from '../components/CurriculumRail'
 import { EditRunDialog } from '../components/EditRunDialog'
 import { PageHeader } from '../components/PageHeader'
+import { PolicyArchitectureCard } from '../components/PolicyArchitectureCard'
 import { StateBadge } from '../components/StateBadge'
 import { ViewerCard } from '../components/ViewerCard'
 import { Button } from '../components/ui/button'
@@ -85,7 +86,14 @@ export function RunDetailPage() {
 
       <div className="space-y-6">
         <CurriculumRail curriculum={curriculum.data?.curriculum} />
-        <ViewerCard runId={runId} />
+        <PolicyArchitectureCard
+          runId={runId}
+          checkpointPath={typeof info.checkpoint_path === 'string' ? info.checkpoint_path : undefined}
+        />
+        <ViewerCard
+          runId={runId}
+          checkpointPath={typeof info.checkpoint_path === 'string' ? info.checkpoint_path : undefined}
+        />
 
         <section className="rounded-xl border border-border bg-panel p-6">
           <div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Provenance & contracts</div>

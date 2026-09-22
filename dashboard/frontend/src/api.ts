@@ -1,6 +1,7 @@
 import type {
   Checkpoint,
   OverviewResponse,
+  PolicyArchitecture,
   RunDetail,
   RunIndexRow,
   SystemStatus,
@@ -32,6 +33,7 @@ export const api = {
   logs: (id: string, tail = 400) => fetchJson<{ lines: string[] }>(`/api/runs/${id}/logs?tail=${tail}`),
   checkpoints: (id: string) =>
     fetchJson<{ checkpoints: Checkpoint[]; latest?: string | null }>(`/api/runs/${id}/checkpoints`),
+  architecture: (id: string) => fetchJson<PolicyArchitecture>(`/api/runs/${id}/architecture`),
   viewers: () => fetchJson<{ viewers: ViewerState[] }>('/api/viewers'),
   system: (refresh = false) => fetchJson<SystemStatus>(`/api/system${refresh ? '?refresh=true' : ''}`),
   health: () => fetchJson<Record<string, any>>('/api/health'),

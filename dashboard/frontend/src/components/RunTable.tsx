@@ -20,6 +20,14 @@ function taskLabel(run: RunIndexRow): string {
   return source.replace(/^Ascento-/, '').replace(/-Flat$/, '').replaceAll('-', ' ')
 }
 
+function responsiveColumnClass(id: string): string {
+  if (id === 'task' || id === 'percent_complete') return 'hidden lg:table-cell'
+  if (id === 'version' || id === 'modified_at') return 'hidden xl:table-cell'
+  if (id === 'iteration') return 'hidden sm:table-cell'
+  if (id === 'reward') return 'hidden md:table-cell'
+  return ''
+}
+
 export function RunTable({
   runs,
   compareIds,
@@ -53,9 +61,9 @@ export function RunTable({
       accessorFn: (run) => run.display_name,
       header: 'Run',
       cell: ({ row }) => (
-        <div className="min-w-[250px] max-w-[430px]">
+        <div className="min-w-[190px] max-w-[300px] xl:min-w-[250px] xl:max-w-[430px]">
           <strong className="block truncate text-[15px] font-semibold text-foreground">{row.original.display_name}</strong>
-          <span className="mt-1 block truncate font-mono text-[11px] text-subtle">{row.original.name}</span>
+          <span className="mt-1 hidden truncate font-mono text-[11px] text-subtle xl:block">{row.original.name}</span>
         </div>
       ),
     },
@@ -69,7 +77,7 @@ export function RunTable({
       accessorFn: (run) => run.task || run.stage || '',
       header: 'Task',
       cell: ({ row }) => (
-        <div className="min-w-[160px]">
+        <div className="min-w-[130px]">
           <span className="block text-sm capitalize text-secondary">{taskLabel(row.original)}</span>
           {row.original.tags?.length ? (
             <span className="mt-1 block truncate text-[11px] text-muted">{row.original.tags.slice(0, 2).join(' · ')}</span>
@@ -130,13 +138,14 @@ export function RunTable({
   })
 
   return (
-    <div className="overflow-x-auto">
-      <Table>
+    <div>
+      <div className="overflow-x-auto overscroll-x-contain">
+      <Table className="min-w-[560px] md:min-w-0">
         <TableHeader>
           {table.getHeaderGroups().map((group) => (
             <TableRow key={group.id} className="hover:bg-transparent">
               {group.headers.map((header) => (
-                <TableHead key={header.id} style={{ width: header.getSize() }}>
+                <TableHead key={header.id} className={responsiveColumnClass(header.column.id)} style={{ width: header.getSize() }}>
                   {header.isPlaceholder ? null : header.column.getCanSort() ? (
                     <button
                       className="control-focus inline-flex items-center gap-1.5 rounded text-left hover:text-secondary"
@@ -159,7 +168,7 @@ export function RunTable({
               onClick={() => void navigate({ to: '/runs/$runId', params: { runId: row.original.id } })}
             >
               {row.getVisibleCells().map((cell) => (
-                <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                <TableCell key={cell.id} className={responsiveColumnClass(cell.column.id)}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
               ))}
             </TableRow>
           ))}
@@ -170,6 +179,8 @@ export function RunTable({
           ) : null}
         </TableBody>
       </Table>
+      </div>
+      <p className="mt-2 px-4 text-xs text-muted lg:hidden">The table prioritizes run status and scores here; swipe sideways for any hidden details.</p>
     </div>
   )
 }

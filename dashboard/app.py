@@ -597,6 +597,16 @@ def run_checkpoints(run_id: str):
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
+@app.get("/api/runs/{run_id}/architecture")
+def run_architecture(run_id: str):
+    try:
+        return VIEWER_SERVICE.architecture(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="training run not found") from error
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
 @app.get("/api/viewers")
 def viewers():
     return VIEWER_SERVICE.list()

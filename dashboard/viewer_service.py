@@ -22,6 +22,7 @@ from ascento_mjlab.viewer.checkpoints import (
     resolve_run_checkpoint,
 )
 from dashboard.config import REPO_ROOT
+from dashboard.policy_architecture import inspect_policy_checkpoint
 from dashboard.run_service import RunService
 
 _FORCE_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
@@ -98,6 +99,30 @@ class ViewerService:
             "latest": items[-1].relative_path if items else None,
             "checkpoints": [item.as_dict() for item in items],
         }
+
+    def architecture(self, run_id: str) -> dict[str, Any]:
+        """Describe the newest stable policy without exposing checkpoint values."""
+        ref = self.run_service.resolve(run_id)
+        items = discover_checkpoints(
+            ref.path,
+            stable_age_seconds=self.stable_age_seconds,
+        )
+        if not items:
+            return {"available": False, "message": "No stable checkpoint is available yet."}
+
+        selected = items[-1]
+        try:
+            return inspect_policy_checkpoint(
+                ref.path / selected.relative_path,
+                selected.relative_path,
+            )
+        except ValueError as error:
+            return {
+                "available": False,
+                "checkpoint": selected.relative_path,
+                "iteration": selected.iteration,
+                "message": str(error),
+            }
 
     def start(
         self,
