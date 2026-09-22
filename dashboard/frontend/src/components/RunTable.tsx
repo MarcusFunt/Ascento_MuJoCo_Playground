@@ -15,6 +15,11 @@ import { Progress } from './ui/progress'
 import { StateBadge } from './StateBadge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 
+function taskLabel(run: RunIndexRow): string {
+  const source = run.task || run.stage || '—'
+  return source.replace(/^Ascento-/, '').replace(/-Flat$/, '').replaceAll('-', ' ')
+}
+
 export function RunTable({
   runs,
   compareIds,
@@ -64,9 +69,11 @@ export function RunTable({
       accessorFn: (run) => run.task || run.stage || '',
       header: 'Task',
       cell: ({ row }) => (
-        <div className="min-w-[150px]">
-          <span className="block text-sm text-secondary">{(row.original.task || '—').replace('Ascento-', '').replace('-Flat', '')}</span>
-          <span className="mt-1 block text-xs text-muted">{row.original.stage || '—'}</span>
+        <div className="min-w-[160px]">
+          <span className="block text-sm capitalize text-secondary">{taskLabel(row.original)}</span>
+          {row.original.tags?.length ? (
+            <span className="mt-1 block truncate text-[11px] text-muted">{row.original.tags.slice(0, 2).join(' · ')}</span>
+          ) : null}
         </div>
       ),
     },
