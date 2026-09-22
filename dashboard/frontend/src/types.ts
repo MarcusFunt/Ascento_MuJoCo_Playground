@@ -179,11 +179,24 @@ export type Checkpoint = {
   stable?: boolean
 }
 
+export type PolicyLayerStats = {
+  module_index: number
+  input_size: number
+  output_size: number
+  weight_count: number
+  weight_rms: number
+  weight_mean_abs: number
+  weight_max_abs: number
+  bias_rms?: number | null
+}
+
 export type PolicyBranchArchitecture = {
   layers: number[]
   activation: string
   distribution?: string
   std_parameters?: number
+  parameter_count?: number
+  linear_layers?: PolicyLayerStats[]
 }
 
 export type PolicyArchitecture = {
