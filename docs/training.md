@@ -112,6 +112,12 @@ and run the full authoritative gate before promotion.
 world-heading target channels. The training curriculum now gives every reset an
 immediate random target 2–3 m away and chains another bounded target each
 time the robot reaches the current one and holds a settled stop for 0.35 s.
+Each new waypoint also sets its heading to the bearing from the robot to the
+waypoint. The existing heading observation, heading reward, yaw-rate tracking,
+and settled-stop criterion therefore all encourage turning into the travel
+direction instead of preserving the yaw from before the waypoint was issued.
+The bearing is held fixed for that segment so a small overshoot near the target
+cannot flip the desired heading by 180 degrees.
 Targets stay inside a widened per-clone arena and locomotion-only environment
 spacing is increased to 10 m so long-range motion does not immediately enter a
 neighbouring clone region. Training episodes default to 60 s. At 2–3 m, the
