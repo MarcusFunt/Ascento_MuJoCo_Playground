@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, Float, Integer, String, Text, create_engine, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -91,32 +92,48 @@ class DashboardDatabase:
     def available(self) -> bool:
         return self.engine is not None and self.error is None
 
-    def initialize(self) -> None:
+    def initialize(self, *, attempts: int = 10, retry_delay_s: float = 0.5) -> None:
+        """Migrate/connect, but never make the filesystem control plane unavailable."""
         if not self.url:
             return
-        try:
-            from alembic import command
-            from alembic.config import Config
+        attempts = max(1, attempts)
+        for attempt in range(attempts):
+            try:
+                from alembic import command
+                from alembic.config import Config
 
-            config = Config(str(self.repo_root / "alembic.ini"))
-            config.set_main_option("sqlalchemy.url", self.url)
-            command.upgrade(config, "head")
-            kwargs: dict[str, Any] = {"pool_pre_ping": True}
-            if self.url.startswith("sqlite:"):
-                kwargs["connect_args"] = {"check_same_thread": False}
-            self.engine = create_engine(self.url, **kwargs)
-            self.sessions = sessionmaker(self.engine, expire_on_commit=False)
-            with self.engine.connect() as connection:
-                connection.exec_driver_sql("SELECT 1")
-            self.error = None
-        except Exception as error:
-            self.error = str(error)
-            self.engine = None
-            self.sessions = None
+                config = Config(str(self.repo_root / "alembic.ini"))
+                config.set_main_option("sqlalchemy.url", self.url)
+                command.upgrade(config, "head")
+                kwargs: dict[str, Any] = {"pool_pre_ping": True}
+                if self.url.startswith("sqlite:"):
+                    kwargs["connect_args"] = {"check_same_thread": False}
+                engine = create_engine(self.url, **kwargs)
+                with engine.connect() as connection:
+                    connection.exec_driver_sql("SELECT 1")
+                self.engine = engine
+                self.sessions = sessionmaker(engine, expire_on_commit=False)
+                self.error = None
+                return
+            except Exception as error:
+                self._mark_unavailable(error)
+                if attempt + 1 < attempts:
+                    time.sleep(max(0.0, retry_delay_s))
+
+    def _mark_unavailable(self, error: Exception) -> None:
+        self.error = str(error)
+        engine = self.engine
+        self.engine = None
+        self.sessions = None
+        if engine is not None:
+            engine.dispose()
 
     def dispose(self) -> None:
-        if self.engine is not None:
-            self.engine.dispose()
+        engine = self.engine
+        self.engine = None
+        self.sessions = None
+        if engine is not None:
+            engine.dispose()
 
     def status(self) -> dict[str, Any]:
         backend = None
@@ -145,111 +162,135 @@ class DashboardDatabase:
     ) -> None:
         if not self.available:
             return
-        with self._session() as session:
-            session.add(
-                DashboardEvent(
-                    run_id=run_id,
-                    event_type=event_type,
-                    message=message,
-                    payload=payload,
-                    created_at=created_at or time.time(),
+        try:
+            with self._session() as session:
+                session.add(
+                    DashboardEvent(
+                        run_id=run_id,
+                        event_type=event_type,
+                        message=message,
+                        payload=payload,
+                        created_at=created_at or time.time(),
+                    )
                 )
-            )
-            session.commit()
+                session.commit()
+        except SQLAlchemyError as error:
+            self._mark_unavailable(error)
 
     def sync_run(self, row: dict[str, Any], curriculum: dict[str, Any] | None = None) -> None:
         if not self.available or not row.get("id"):
             return
         run_id = str(row["id"])
         repository = row.get("repository_version") or {}
-        with self._session() as session:
-            record = session.get(RunIndex, run_id)
-            old_state = record.state if record is not None else None
-            old_curriculum = record.curriculum if record is not None else None
-            if record is None:
-                record = RunIndex(
-                    id=run_id,
-                    display_name=str(row.get("display_name") or row.get("name") or run_id),
-                    artifact_name=str(row.get("name") or ""),
-                    state=str(row.get("state") or "unknown"),
-                )
-                session.add(record)
-
-            record.display_name = str(row.get("display_name") or row.get("name") or run_id)
-            record.artifact_name = str(row.get("name") or "")
-            record.task = row.get("task")
-            record.stage = row.get("stage")
-            record.state = str(row.get("state") or "unknown")
-            record.iteration = _int(row.get("iteration"))
-            record.total_iterations = _int(row.get("total_iterations"))
-            record.percent_complete = _float(row.get("percent_complete"))
-            record.reward = _float(row.get("reward"))
-            record.episode_length = _float(row.get("episode_length"))
-            record.kl = _float(row.get("kl"))
-            record.entropy = _float(row.get("entropy"))
-            record.repository_status = repository.get("status")
-            record.run_commit = repository.get("run_commit")
-            record.modified_at = _float(row.get("modified_at"))
-            record.curriculum = curriculum
-            record.updated_at = time.time()
-
-            if old_state is not None and old_state != record.state:
-                session.add(
-                    DashboardEvent(
-                        run_id=run_id,
-                        event_type="run_state",
-                        message=f"{record.display_name}: {old_state} → {record.state}",
-                        payload={"from": old_state, "to": record.state},
+        try:
+            with self._session() as session:
+                record = session.get(RunIndex, run_id)
+                old_state = record.state if record is not None else None
+                old_curriculum = record.curriculum if record is not None else None
+                if record is None:
+                    record = RunIndex(
+                        id=run_id,
+                        display_name=str(row.get("display_name") or row.get("name") or run_id),
+                        artifact_name=str(row.get("name") or ""),
+                        state=str(row.get("state") or "unknown"),
                     )
-                )
-            old_stage = old_curriculum.get("stage") if isinstance(old_curriculum, dict) else None
-            new_stage = curriculum.get("stage") if isinstance(curriculum, dict) else None
-            if old_stage is not None and new_stage is not None and old_stage != new_stage:
-                session.add(
-                    DashboardEvent(
-                        run_id=run_id,
-                        event_type="curriculum_transition",
-                        message=f"{record.display_name}: curriculum stage {old_stage} → {new_stage}",
-                        payload={"from": old_stage, "to": new_stage},
+                    session.add(record)
+
+                record.display_name = str(row.get("display_name") or row.get("name") or run_id)
+                record.artifact_name = str(row.get("name") or "")
+                record.task = row.get("task")
+                record.stage = row.get("stage")
+                record.state = str(row.get("state") or "unknown")
+                record.iteration = _int(row.get("iteration"))
+                record.total_iterations = _int(row.get("total_iterations"))
+                record.percent_complete = _float(row.get("percent_complete"))
+                record.reward = _float(row.get("reward"))
+                record.episode_length = _float(row.get("episode_length"))
+                record.kl = _float(row.get("kl"))
+                record.entropy = _float(row.get("entropy"))
+                record.repository_status = repository.get("status")
+                record.run_commit = repository.get("run_commit")
+                record.modified_at = _float(row.get("modified_at"))
+                if curriculum is not None:
+                    record.curriculum = curriculum
+                record.updated_at = time.time()
+
+                if old_state is not None and old_state != record.state:
+                    session.add(
+                        DashboardEvent(
+                            run_id=run_id,
+                            event_type="run_state",
+                            message=f"{record.display_name}: {old_state} → {record.state}",
+                            payload={"from": old_state, "to": record.state},
+                        )
                     )
+                old_stage = (
+                    old_curriculum.get("stage") if isinstance(old_curriculum, dict) else None
                 )
-            session.commit()
+                new_stage = curriculum.get("stage") if isinstance(curriculum, dict) else None
+                if old_stage is not None and new_stage is not None and old_stage != new_stage:
+                    session.add(
+                        DashboardEvent(
+                            run_id=run_id,
+                            event_type="curriculum_transition",
+                            message=(
+                                f"{record.display_name}: curriculum stage "
+                                f"{old_stage} → {new_stage}"
+                            ),
+                            payload={"from": old_stage, "to": new_stage},
+                        )
+                    )
+                session.commit()
+        except SQLAlchemyError as error:
+            self._mark_unavailable(error)
 
     def recent_events(self, *, run_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         if not self.available:
             return []
         limit = max(1, min(limit, 100))
-        with self._session() as session:
-            statement = select(DashboardEvent)
-            if run_id is not None:
-                statement = statement.where(DashboardEvent.run_id == run_id)
-            statement = statement.order_by(DashboardEvent.created_at.desc()).limit(limit)
-            items = session.scalars(statement).all()
-            return [
-                {
-                    "id": item.id,
-                    "run_id": item.run_id,
-                    "type": item.event_type,
-                    "message": item.message,
-                    "payload": item.payload,
-                    "created_at": item.created_at,
-                }
-                for item in items
-            ]
+        try:
+            with self._session() as session:
+                statement = select(DashboardEvent)
+                if run_id is not None:
+                    statement = statement.where(DashboardEvent.run_id == run_id)
+                statement = statement.order_by(DashboardEvent.created_at.desc()).limit(limit)
+                items = session.scalars(statement).all()
+                return [
+                    {
+                        "id": item.id,
+                        "run_id": item.run_id,
+                        "type": item.event_type,
+                        "message": item.message,
+                        "payload": item.payload,
+                        "created_at": item.created_at,
+                    }
+                    for item in items
+                ]
+        except SQLAlchemyError as error:
+            self._mark_unavailable(error)
+            return []
 
     def sync_checkpoints(self, run_id: str, checkpoints: list[dict[str, Any]]) -> None:
         if not self.available:
             return
-        with self._session() as session:
-            for checkpoint in checkpoints:
-                relative = str(checkpoint.get("relative_path") or "")
-                if not relative:
-                    continue
-                key = f"{run_id}:{relative}"
-                record = session.get(CheckpointIndex, key)
-                if record is None:
-                    record = CheckpointIndex(id=key, run_id=run_id, relative_path=relative)
-                    session.add(record)
-                record.iteration = _int(checkpoint.get("iteration"))
-                record.stable = bool(checkpoint.get("stable", True))
-            session.commit()
+        try:
+            with self._session() as session:
+                for checkpoint in checkpoints:
+                    relative = str(checkpoint.get("relative_path") or "")
+                    if not relative:
+                        continue
+                    key = f"{run_id}:{relative}"
+                    record = session.get(CheckpointIndex, key)
+                    if record is None:
+                        record = CheckpointIndex(
+                            id=key,
+                            run_id=run_id,
+                            relative_path=relative,
+                        )
+                        session.add(record)
+                    record.iteration = _int(checkpoint.get("iteration"))
+                    record.stable = bool(checkpoint.get("stable", True))
+                session.commit()
+        except SQLAlchemyError as error:
+            self._mark_unavailable(error)
+
