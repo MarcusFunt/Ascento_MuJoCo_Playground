@@ -64,8 +64,8 @@ def ascento_velocity_env_cfg(play: bool = False, num_envs: int = 512):
     )
     cfg.rewards["track_yaw_rate"] = RewardTermCfg(
         func=ascento_mdp.rewards.track_yaw_rate,
-        weight=0.5,
-        params={"command_name": "twist", "std": 0.50},
+        weight=1.0,
+        params={"command_name": "twist", "std": 0.40},
     )
     cfg.rewards["track_height"] = RewardTermCfg(
         func=ascento_mdp.rewards.commanded_height_tracking,

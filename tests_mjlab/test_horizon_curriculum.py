@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import torch
 
-from ascento_mjlab.horizon_curriculum import HORIZON_SCHEDULE_S, HorizonCurriculumRunner
+from ascento_mjlab.horizon_curriculum import (
+    HORIZON_SCHEDULE_S,
+    HorizonCurriculumRunner,
+    VelocityHorizonCurriculumRunner,
+)
 
 
 class _Unwrapped:
@@ -20,8 +24,8 @@ class _Unwrapped:
         return int(self.cfg.episode_length_s * 100)
 
 
-def _runner(horizon_s=20.0, log_dir=None):
-    runner = object.__new__(HorizonCurriculumRunner)
+def _runner(horizon_s=20.0, log_dir=None, runner_cls=HorizonCurriculumRunner):
+    runner = object.__new__(runner_cls)
     runner.env = SimpleNamespace(
         unwrapped=_Unwrapped(horizon_s),
         max_episode_length=int(horizon_s * 100),
@@ -44,6 +48,34 @@ def _runner(horizon_s=20.0, log_dir=None):
         learning_rate=3.0e-4,
         optimizer=SimpleNamespace(param_groups=[{"lr": 3.0e-4}]),
     )
+    return runner
+
+
+def _velocity_runner(*, actual_twist: torch.Tensor, twist_target: torch.Tensor, actual_height: torch.Tensor, height_target: torch.Tensor):
+    runner = object.__new__(VelocityHorizonCurriculumRunner)
+    runner.env = SimpleNamespace(
+        unwrapped=SimpleNamespace(
+            scene={
+                "robot": SimpleNamespace(
+                    data=SimpleNamespace(
+                        root_link_lin_vel_b=actual_twist[:, :2],
+                        root_link_ang_vel_b=torch.stack(
+                            (torch.zeros_like(actual_twist[:, 2]), torch.zeros_like(actual_twist[:, 2]), actual_twist[:, 2]),
+                            dim=1,
+                        ),
+                        root_link_pos_w=torch.stack(
+                            (torch.zeros_like(actual_height), torch.zeros_like(actual_height), actual_height), dim=1
+                        ),
+                    )
+                )
+            },
+            command_manager=SimpleNamespace(
+                get_command=lambda name: {"twist": twist_target, "height": height_target[:, None]}[name]
+            ),
+        )
+    )
+    runner._tracking_quality_sums = torch.zeros((actual_twist.shape[0], 2))
+    runner._tracking_quality_samples = torch.zeros(actual_twist.shape[0])
     return runner
 
 
@@ -93,6 +125,34 @@ def test_horizon_does_not_promote_when_stationary_quality_fails(monkeypatch):
         runner._evaluate_completion_window()
 
     assert runner.env.unwrapped.cfg.episode_length_s == 20.0
+
+
+def test_velocity_quality_accepts_matched_twist_and_height_commands():
+    runner = _velocity_runner(
+        actual_twist=torch.tensor([[0.40, 0.0, 0.40], [-0.25, 0.0, 0.0]]),
+        twist_target=torch.tensor([[0.40, 0.0, 0.40], [-0.25, 0.0, 0.0]]),
+        actual_height=torch.tensor([0.70, 0.80]),
+        height_target=torch.tensor([0.70, 0.80]),
+    )
+
+    for _ in range(VelocityHorizonCurriculumRunner.tracking_min_samples):
+        runner._accumulate_stationary_quality(torch.empty((2, 6)))
+
+    assert runner._finish_quality_episodes(torch.tensor([0, 1])) == [True, True]
+
+
+def test_velocity_quality_rejects_survival_without_command_tracking():
+    runner = _velocity_runner(
+        actual_twist=torch.zeros((1, 3)),
+        twist_target=torch.tensor([[0.40, 0.0, 0.40]]),
+        actual_height=torch.tensor([0.70]),
+        height_target=torch.tensor([0.80]),
+    )
+
+    for _ in range(VelocityHorizonCurriculumRunner.tracking_min_samples):
+        runner._accumulate_stationary_quality(torch.empty((1, 6)))
+
+    assert runner._finish_quality_episodes(torch.tensor([0])) == [False]
 
 
 def test_horizon_rollover_preserves_surplus_completions(monkeypatch):
@@ -207,6 +267,25 @@ def test_final_horizon_saves_the_first_qualified_window(monkeypatch, tmp_path):
 
     assert len(saved) == 1
     assert saved[0]["long_horizon_candidate"]["stable_windows"] == 1
+
+
+def test_velocity_long_horizon_candidate_names_its_velocity_gate(monkeypatch, tmp_path):
+    runner = _runner(horizon_s=300.0, log_dir=tmp_path, runner_cls=VelocityHorizonCurriculumRunner)
+    monkeypatch.setattr(runner, "_emit_status", lambda **_: None)
+    saved = []
+
+    def save(path, infos=None):
+        Path(path).write_text("checkpoint", encoding="utf-8")
+        saved.append(infos)
+
+    monkeypatch.setattr(runner, "save", save)
+    runner._completed_in_window = 512
+    runner._timeouts_in_window = 512
+    runner._evaluate_completion_window()
+
+    assert saved[0]["long_horizon_candidate"]["selection"] == (
+        "requires deterministic velocity_gate_v1 evaluation"
+    )
 
 
 def test_entering_final_horizon_locks_the_optimizer_rate(monkeypatch):
