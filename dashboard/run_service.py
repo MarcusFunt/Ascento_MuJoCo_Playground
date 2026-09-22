@@ -16,7 +16,8 @@ from uuid import uuid4
 from dashboard.config import REPO_ROOT
 from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
 from dashboard.provenance import working_tree_state
-from dashboard.versioning import annotate_run_summary
+from dashboard.task_catalog import horizon_task_ids
+from dashboard.versioning import annotate_run_summary, classify_run_version
 
 RUN_METADATA = "run_metadata.json"
 
@@ -126,6 +127,31 @@ class RunService:
         summary["experiment_manifest"] = self._experiment_manifest(run_dir)
         return annotate_run_summary(summary, run_dir, self.artifact_root)
 
+    def annotate_index(self, summary: dict[str, Any], run_dir: Path) -> dict[str, Any]:
+        """Add only metadata needed by list/overview UIs.
+
+        Full contract payloads stay on the detail endpoint; this keeps run
+        discovery responses small even when task contracts are large.
+        """
+        metadata = self.load_metadata(run_dir)
+        legacy_id = summary.get("id")
+        if metadata.get("run_id"):
+            summary["id"] = metadata["run_id"]
+            if legacy_id != summary["id"]:
+                summary["legacy_id"] = legacy_id
+        summary["metadata"] = metadata
+        summary["display_name"] = metadata["display_name"]
+        summary["notes"] = metadata["notes"]
+        summary["tags"] = metadata["tags"]
+        summary["lineage"] = {
+            "parent_run_id": metadata.get("parent_run_id"),
+            "parent_checkpoint": metadata.get("parent_checkpoint"),
+        }
+        summary["repository_version"] = classify_run_version(
+            run_dir, self.artifact_root
+        )
+        return summary
+
     def detail(self, run_id: str) -> dict[str, Any]:
         ref = self.resolve(run_id)
         summary = summarize_dashboard_run(
@@ -148,6 +174,19 @@ class RunService:
             include_artifacts=False,
         )
         return self.annotate(summary, ref.path)
+
+    def progress_index(self, run_id: str) -> dict[str, Any]:
+        """Return a cheap live snapshot without full compatibility contracts."""
+        ref = self.resolve(run_id)
+        summary = summarize_dashboard_run(
+            ref.path,
+            self.artifact_root,
+            stale_after_seconds=self.stale_after_seconds,
+            detailed=False,
+            include_errors=False,
+            include_artifacts=False,
+        )
+        return self.annotate_index(summary, ref.path)
 
     def update_metadata(self, run_id: str, changes: dict[str, Any]) -> dict[str, Any]:
         ref = self.resolve(run_id)
@@ -195,8 +234,8 @@ class RunService:
             raise ValueError("task must be an Ascento task name")
         episode_horizon_s = request.get("episode_horizon_s")
         if episode_horizon_s is not None:
-            if task not in {"Ascento-Balance-Flat", "Ascento-Velocity-Flat"}:
-                raise ValueError("episode horizon is currently configurable only for balance and velocity")
+            if task not in horizon_task_ids():
+                raise ValueError("episode horizon is not configurable for this task")
             try:
                 episode_horizon_s = float(episode_horizon_s)
             except (TypeError, ValueError) as error:

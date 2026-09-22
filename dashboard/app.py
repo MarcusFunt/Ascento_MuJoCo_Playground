@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from dashboard.config import load_config, validate_startup
+from dashboard.curriculum import curriculum_for_run
+from dashboard.database import DashboardDatabase
 from dashboard.health import (
     decorate_records,
     discover_dashboard_runs,
@@ -28,6 +30,7 @@ from dashboard.supervisor_client import (
     SupervisorRejected,
     SupervisorUnavailable,
 )
+from dashboard.task_catalog import task_catalog
 from dashboard.versioning import current_repository_version
 from dashboard.viewer_service import ViewerBusyError, ViewerNotFoundError, ViewerService
 
@@ -44,14 +47,18 @@ VIEWER_SERVICE = ViewerService(
     stable_age_seconds=float(os.environ.get("ASCENTO_VIEWER_STABLE_AGE_SECONDS", "2.0")),
 )
 SUPERVISOR = SupervisorClient()
+DATABASE = DashboardDatabase(CONFIG.database_url, CONFIG.repo_root)
 
 # Artifact discovery walks a mounted training directory.  Keeping the annotated
 # list briefly avoids making every UI poll repeat that full filesystem scan.
 _SUMMARY_CACHE_TTL_S = 25.0
 _SUMMARY_CACHE_LOCK = threading.Lock()
 _SUMMARY_CACHE: tuple[float, list[dict]] | None = None
+_INDEX_CACHE_TTL_S = 10.0
+_INDEX_CACHE_LOCK = threading.Lock()
+_INDEX_CACHE: tuple[float, list[dict]] | None = None
 
-app = FastAPI(title="Ascento Training Monitor", version="2.2")
+app = FastAPI(title="Ascento Control", version="3.0")
 
 
 class RunCreateRequest(BaseModel):
@@ -155,9 +162,147 @@ def _artifact_health() -> list[str]:
 
 
 def _invalidate_summary_cache() -> None:
-    global _SUMMARY_CACHE
+    global _SUMMARY_CACHE, _INDEX_CACHE
     with _SUMMARY_CACHE_LOCK:
         _SUMMARY_CACHE = None
+    with _INDEX_CACHE_LOCK:
+        _INDEX_CACHE = None
+
+
+def _compact_run(summary: dict) -> dict:
+    telemetry = summary.get("telemetry") if isinstance(summary.get("telemetry"), dict) else {}
+    canonical = (
+        telemetry.get("canonical_metrics")
+        if isinstance(telemetry.get("canonical_metrics"), dict)
+        else {}
+    )
+    status = summary.get("status") if isinstance(summary.get("status"), dict) else {}
+    metadata = summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
+    repository = (
+        summary.get("repository_version")
+        if isinstance(summary.get("repository_version"), dict)
+        else {}
+    )
+    return {
+        "id": summary.get("id"),
+        "display_name": summary.get("display_name") or summary.get("name"),
+        "name": summary.get("name"),
+        "task": status.get("task"),
+        "stage": summary.get("stage"),
+        "state": summary.get("state"),
+        "stale": bool(summary.get("stale")),
+        "freshness_seconds": summary.get("freshness_seconds"),
+        "modified_at": summary.get("modified_at"),
+        "tags": summary.get("tags") or [],
+        "purpose": metadata.get("purpose") or "",
+        "lineage": summary.get("lineage") or {},
+        "repository_version": {
+            "status": repository.get("status"),
+            "is_outdated": bool(repository.get("is_outdated")),
+            "run_commit": repository.get("run_commit"),
+            "current_commit": repository.get("current_commit"),
+        },
+        "iteration": telemetry.get("iteration"),
+        "total_iterations": telemetry.get("total_iterations"),
+        "percent_complete": telemetry.get("percent_complete"),
+        "eta_seconds": telemetry.get("eta_seconds"),
+        "throughput": telemetry.get("environment_steps_per_second"),
+        "reward": canonical.get("reward"),
+        "episode_length": canonical.get("episode_length"),
+        "kl": canonical.get("kl"),
+        "entropy": canonical.get("entropy"),
+        "ppo_loss": canonical.get("ppo_loss"),
+        "clip_fraction": canonical.get("clip_fraction"),
+        "invalid_update": canonical.get("invalid_update"),
+    }
+
+
+def _indexed_summaries() -> list[dict]:
+    global _INDEX_CACHE
+    with _INDEX_CACHE_LOCK:
+        if _INDEX_CACHE is not None:
+            cached_at, rows = _INDEX_CACHE
+            if time.monotonic() - cached_at < _INDEX_CACHE_TTL_S:
+                return list(rows)
+
+    summaries = list_dashboard_summaries(
+        ARTIFACT_ROOT,
+        stale_after_seconds=CONFIG.stale_after_seconds,
+    )
+    refs = {ref.id: ref for ref in discover_dashboard_runs(ARTIFACT_ROOT)}
+    rows: list[dict] = []
+    for summary in summaries:
+        ref = refs.get(summary.get("id"))
+        if ref is None:
+            continue
+        RUN_SERVICE.annotate_index(summary, ref.path)
+        row = _compact_run(summary)
+        if row["state"] in {"starting", "running", "stopping"}:
+            try:
+                row = _compact_run(RUN_SERVICE.progress_index(str(row["id"])))
+            except (KeyError, OSError):
+                pass
+        rows.append(row)
+        DATABASE.sync_run(row)
+
+    with _INDEX_CACHE_LOCK:
+        _INDEX_CACHE = (time.monotonic(), rows)
+    return list(rows)
+
+
+def _overview_series(run_id: str, max_points: int = 120) -> list[dict]:
+    ref = _run(run_id)
+    raw = load_training_records(ref.path, limit=600)
+    if len(raw) > max_points:
+        raw = _sample_records(raw, max_points)
+    records = decorate_records(raw, ref.path)
+    result = []
+    for record in records:
+        canonical = record.get("canonical_metrics") or {}
+        result.append(
+            {
+                "iteration": record.get("iteration"),
+                "reward": canonical.get("reward"),
+                "episode_length": canonical.get("episode_length"),
+                "kl": canonical.get("kl"),
+                "entropy": canonical.get("entropy"),
+                "ppo_loss": canonical.get("ppo_loss"),
+                "clip_fraction": canonical.get("clip_fraction"),
+            }
+        )
+    return result
+
+
+def _overview_run(detail: dict) -> dict:
+    row = _compact_run(detail)
+    health = detail.get("training_health") if isinstance(detail.get("training_health"), dict) else {}
+    canonical = health.get("latest") if isinstance(health.get("latest"), dict) else {}
+    telemetry = detail.get("telemetry") if isinstance(detail.get("telemetry"), dict) else {}
+    run_info = detail.get("run_info") if isinstance(detail.get("run_info"), dict) else {}
+    row.update(
+        {
+            "task": run_info.get("task") or row.get("task"),
+            "iteration": telemetry.get("iteration", row.get("iteration")),
+            "total_iterations": telemetry.get("total_iterations", row.get("total_iterations")),
+            "percent_complete": telemetry.get("percent_complete", row.get("percent_complete")),
+            "eta_seconds": telemetry.get("eta_seconds", row.get("eta_seconds")),
+            "throughput": telemetry.get(
+                "environment_steps_per_second", row.get("throughput")
+            ),
+            "reward": canonical.get("reward", row.get("reward")),
+            "episode_length": canonical.get("episode_length", row.get("episode_length")),
+            "kl": canonical.get("kl", row.get("kl")),
+            "entropy": canonical.get("entropy", row.get("entropy")),
+            "ppo_loss": canonical.get("ppo_loss", row.get("ppo_loss")),
+            "clip_fraction": canonical.get("clip_fraction", row.get("clip_fraction")),
+            "started_at": run_info.get("started_at"),
+            "device": run_info.get("device"),
+            "invalid_updates": health.get("invalid_updates"),
+            "non_finite_updates": health.get("non_finite_updates"),
+            "system": detail.get("system") or {},
+        }
+    )
+    return row
 
 
 def _cached_summary_count() -> int | None:
@@ -213,6 +358,7 @@ def health():
         "warnings": STARTUP_WARNINGS,
         "config": CONFIG.public_dict(),
         "repository_version": current_repository_version(),
+        "database": DATABASE.status(),
     }
 
 
@@ -259,6 +405,69 @@ def system_update(request: Request):
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.get("/api/tasks")
+def tasks():
+    return {"tasks": task_catalog()}
+
+
+@app.get("/api/runs/index")
+def run_index():
+    """Small run-list payload for the control-room UI."""
+    try:
+        rows = _indexed_summaries()
+    except OSError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to scan artifact root {ARTIFACT_ROOT}: {error}",
+        ) from error
+    return {"runs": rows}
+
+
+@app.get("/api/overview")
+def overview():
+    """Return everything the landing page needs in one bounded request."""
+    rows = _indexed_summaries()
+    active_states = {"starting", "running", "stopping"}
+    active = next((row for row in rows if row.get("state") in active_states), None)
+    counts = {
+        "total": len(rows),
+        "active": sum(1 for row in rows if row.get("state") in active_states),
+        "errors": sum(1 for row in rows if row.get("state") == "error"),
+        "outdated": sum(
+            1
+            for row in rows
+            if (row.get("repository_version") or {}).get("is_outdated")
+        ),
+    }
+    if active is None:
+        return {
+            "active_run": None,
+            "recent_run": rows[0] if rows else None,
+            "curriculum": None,
+            "series": [],
+            "events": DATABASE.recent_events(limit=12),
+            "counts": counts,
+            "database": DATABASE.status(),
+        }
+
+    try:
+        detail = RUN_SERVICE.detail(str(active["id"]))
+        curriculum = curriculum_for_run(detail)
+        current = _overview_run(detail)
+        DATABASE.sync_run(current, curriculum)
+        return {
+            "active_run": current,
+            "recent_run": rows[0] if rows else None,
+            "curriculum": curriculum,
+            "series": _overview_series(str(active["id"])),
+            "events": DATABASE.recent_events(run_id=str(active["id"]), limit=12),
+            "counts": counts,
+            "database": DATABASE.status(),
+        }
+    except (KeyError, OSError) as error:
+        raise HTTPException(status_code=500, detail=f"failed to build overview: {error}") from error
+
+
 @app.get("/api/runs")
 def runs():
     try:
@@ -276,6 +485,12 @@ def create_run(request: RunCreateRequest):
     try:
         created = RUN_SERVICE.create(request.model_dump())
         _invalidate_summary_cache()
+        DATABASE.record_event(
+            "run_started",
+            f"{created.get('display_name') or created.get('name')}: training started",
+            run_id=str(created.get("id")) if created.get("id") else None,
+            payload={"task": request.task},
+        )
         return created
     except KeyError as error:
         raise HTTPException(
@@ -320,6 +535,11 @@ def update_run(run_id: str, request: RunUpdateRequest):
     try:
         updated = RUN_SERVICE.update_metadata(run_id, request.model_dump(exclude_unset=True))
         _invalidate_summary_cache()
+        DATABASE.record_event(
+            "metadata_updated",
+            f"{updated.get('display_name') or updated.get('name')}: metadata updated",
+            run_id=run_id,
+        )
         return updated
     except KeyError as error:
         raise HTTPException(
@@ -334,6 +554,12 @@ def stop_run(run_id: str, request: RunStopRequest):
     try:
         stopped = RUN_SERVICE.stop(run_id, reason=request.reason.strip() or "user_requested")
         _invalidate_summary_cache()
+        DATABASE.record_event(
+            "stop_requested",
+            f"{stopped.get('display_name') or stopped.get('name')}: graceful stop requested",
+            run_id=run_id,
+            payload={"reason": request.reason.strip() or "user_requested"},
+        )
         return stopped
     except KeyError as error:
         raise HTTPException(status_code=404, detail="training run not found") from error
@@ -346,7 +572,9 @@ def stop_run(run_id: str, request: RunStopRequest):
 @app.get("/api/runs/{run_id}/checkpoints")
 def run_checkpoints(run_id: str):
     try:
-        return VIEWER_SERVICE.checkpoints(run_id)
+        result = VIEWER_SERVICE.checkpoints(run_id)
+        DATABASE.sync_checkpoints(run_id, result.get("checkpoints") or [])
+        return result
     except KeyError as error:
         raise HTTPException(status_code=404, detail="training run not found") from error
     except OSError as error:
@@ -508,6 +736,16 @@ if (FRONTEND_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
 
+@app.on_event("startup")
+def initialize_dashboard_database() -> None:
+    DATABASE.initialize()
+    if DATABASE.enabled and DATABASE.error:
+        warning = f"Dashboard database unavailable; using filesystem fallback: {DATABASE.error}"
+        if warning not in STARTUP_WARNINGS:
+            STARTUP_WARNINGS.append(warning)
+
+
 @app.on_event("shutdown")
 def stop_managed_viewers() -> None:
     VIEWER_SERVICE.stop_all()
+    DATABASE.dispose()
