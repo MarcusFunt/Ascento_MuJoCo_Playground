@@ -24,7 +24,7 @@ commands when the active environment is not already configured for it.
 | --- | --- | --- | --- | --- |
 | 1 | `Ascento-Balance-Flat` | Supported balance at a per-environment world position and heading target, controlled effort, recovery from planar pushes | Curriculum through 20, 60, 120, and 300 s; a cardinal push between 4–6 s | `balance_gate_v5` |
 | 1b | `Ascento-Balance-Recovery-Flat` | Harden an already-capable balance actor against the measured positive-pitch/high-roll-rate/high-pitch-rate edge | 70-90% original resets plus a 10-to-30% hard subset ramped over 120k control steps; quiet-balance penalties retained | `balance_recovery_edge_v1` then actor-transfer back to `balance_gate_v5` |
-| 2 | `Ascento-Locomotion-Flat` | Sustained world-target locomotion through the balance actor interface | Immediate repeated 15–35 cm random go-to-pose targets; 60 s episodes by default; next target only after a settled stop | `locomotion_sequence_gate_v1` |
+| 2 | `Ascento-Locomotion-Flat` | Sustained world-target locomotion through the balance actor interface | Immediate repeated 2–3 m random go-to-pose targets; 60 s episodes by default; next target only after a settled stop | `locomotion_sequence_gate_v1` |
 | 3 | `Ascento-Velocity-Flat` | Linear velocity, yaw-rate, and height tracking | Random twist/height resampling every 3–6 s | `velocity_gate_v1` |
 | 4 | `Ascento-Recovery-Flat` | Wide-reset stabilization and recovery after a physical push | Broad initial roll/pitch/velocity envelope; interval push only during training | `recovery_gate_v1` |
 | 5 | `Ascento-Jump-Flat` | Commanded crouch, takeoff, flight, landing, distance, and post-landing stabilization | Flat-ground compound motion command | `jump_gate_v1` |
@@ -110,14 +110,15 @@ and run the full authoritative gate before promotion.
 
 `Ascento-Locomotion-Flat` retains the balance actor's world-position and
 world-heading target channels. The training curriculum now gives every reset an
-immediate random target 15–35 cm away and chains another bounded target each
+immediate random target 2–3 m away and chains another bounded target each
 time the robot reaches the current one and holds a settled stop for 0.35 s.
-Targets stay inside a per-clone arena so long episodes cannot random-walk into
-neighbouring environments. Training episodes default to 60 s, producing many
-go-to-pose attempts per episode while keeping every target inside the useful
-range of the existing proximity reward. This change deliberately leaves the
-reward ABI untouched so target exposure/horizon can be tested before adding new
-progress shaping.
+Targets stay inside a widened per-clone arena and locomotion-only environment
+spacing is increased to 8 m so long-range motion does not immediately enter a
+neighbouring clone region. Training episodes default to 60 s. At 2–3 m, the
+existing 0.35 m-scale proximity reward is effectively near zero at target issue,
+which is intentional for this experiment: the reward ABI remains untouched so
+we can directly observe whether the policy discovers sustained directional
+locomotion without adding progress shaping.
 
 The deterministic acceptance suite remains the fixed settle/push/recover/15 cm
 sequence; repeated-target training is not itself evidence that disturbance
