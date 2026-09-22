@@ -64,6 +64,7 @@ def _viewer_stack(tmp_path: Path):
 
 
 def _run_switch_case(tmp_path: Path, *, follow: bool) -> tuple[str, str]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     env, runner, load_policy, fetch_available = _viewer_stack(tmp_path)
     first = tmp_path / "model_100.pt"
     _save(runner, first, 100)
