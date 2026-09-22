@@ -16,13 +16,15 @@ export function PolicyArchitectureCard({
   checkpointPath?: string
 }) {
   const [branchName, setBranchName] = useState<BranchName>('actor')
-  const [paused, setPaused] = useState(false)
+  const [paused, setPaused] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  )
   const [speed, setSpeed] = useState(1)
   const architecture = useQuery({
     queryKey: ['architecture', runId],
     queryFn: () => api.architecture(runId),
-    staleTime: 60_000,
-    refetchInterval: (query) => query.state.data?.available ? false : 15_000,
+    staleTime: 20_000,
+    refetchInterval: 60_000,
   })
 
   const branch = architecture.data?.[branchName] as PolicyBranchArchitecture | undefined
