@@ -174,6 +174,8 @@ export function AnimatedPolicyNetwork({
                 role="button"
                 tabIndex={0}
                 aria-label={`${layerLabel(layer.index, layerCount, branchName)}: ${layer.size} units`}
+                aria-pressed={isSelected}
+                onFocus={() => setSelectedLayer(layer.index)}
                 onClick={() => setSelectedLayer(layer.index)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
