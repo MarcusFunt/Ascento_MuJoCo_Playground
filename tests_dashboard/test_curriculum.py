@@ -71,7 +71,7 @@ def test_balance_recovery_includes_reset_difficulty_ramp():
     assert secondary["kind"] == "recovery_difficulty"
     assert secondary["control_steps"] == 30_000
     assert secondary["progress"] == 0.25
-    assert secondary["hard_fraction"] == 0.15
+    assert math.isclose(secondary["hard_fraction"], 0.15)
     assert math.isclose(secondary["pitch_max_rad"], 0.1125)
 
 
