@@ -178,7 +178,7 @@ export function CurriculumRail({
   }
 
   return (
-    <section className="rounded-xl border border-border bg-panel p-6">
+    <section className={`rounded-xl border border-border bg-panel ${compact ? 'p-5' : 'p-6'}`}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Curriculum</div>
