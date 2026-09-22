@@ -113,7 +113,7 @@ world-heading target channels. The training curriculum now gives every reset an
 immediate random target 2–3 m away and chains another bounded target each
 time the robot reaches the current one and holds a settled stop for 0.35 s.
 Targets stay inside a widened per-clone arena and locomotion-only environment
-spacing is increased to 8 m so long-range motion does not immediately enter a
+spacing is increased to 10 m so long-range motion does not immediately enter a
 neighbouring clone region. Training episodes default to 60 s. At 2–3 m, the
 existing 0.35 m-scale proximity reward is effectively near zero at target issue,
 which is intentional for this experiment: the reward ABI remains untouched so
