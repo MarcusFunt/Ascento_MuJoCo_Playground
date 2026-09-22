@@ -153,7 +153,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
                 self._diagnostic_prev_sample_at = None
                 self._diagnostic_smoothed_confidence = None
                 self._diagnostic_reset_count = 0
-                self._update_diagnostic_hud(force=True)
+                self._diagnostic_next_update = 0.0
 
     def _process_actions(self) -> None:
         now = time.monotonic()
@@ -303,8 +303,9 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         max_gravity_z = -0.5
         try:
             cfg = env.termination_manager.get_term_cfg("fallen")
-            min_height_m = float(cfg.params.get("min_height", min_height_m))
-            max_gravity_z = float(cfg.params.get("max_gravity_z", max_gravity_z))
+            params = cfg.params or {}
+            min_height_m = float(params.get("min_height", min_height_m))
+            max_gravity_z = float(params.get("max_gravity_z", max_gravity_z))
         except ValueError:
             pass
         cosine_threshold = max(-1.0, min(1.0, -max_gravity_z))
