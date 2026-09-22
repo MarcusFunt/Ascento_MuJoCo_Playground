@@ -223,9 +223,11 @@ def test_locomotion_uses_long_repeated_random_target_curriculum(monkeypatch):
     assert cfg.events["initialize_world_target"].func.__name__ == "initialize_random_world_target"
     repeated = cfg.events["repeated_random_world_targets"]
     assert repeated.func.__name__ == "RepeatedRandomWorldTargetSequence"
-    assert repeated.params["min_target_distance_m"] == pytest.approx(0.15)
-    assert repeated.params["max_target_distance_m"] == pytest.approx(0.35)
+    assert repeated.params["min_target_distance_m"] == pytest.approx(2.0)
+    assert repeated.params["max_target_distance_m"] == pytest.approx(3.0)
     assert repeated.params["target_hold_s"] == pytest.approx(0.35)
+    assert repeated.params["arena_half_extent_m"] == pytest.approx(4.0)
+    assert cfg.scene.env_spacing == pytest.approx(8.0)
 
 
 def test_locomotion_episode_length_can_be_extended_without_reward_changes(monkeypatch):
