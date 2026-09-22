@@ -16,8 +16,8 @@ from ascento_mjlab.evaluation.policy import RslRlPolicyAdapter
 from ascento_mjlab.viewer.checkpoints import discover_checkpoints
 from ascento_mjlab.viewer.worker import (
     _FollowViserPlayViewer,
-    _ViewerPolicy,
     _load_actor_transactionally,
+    _ViewerPolicy,
 )
 
 
