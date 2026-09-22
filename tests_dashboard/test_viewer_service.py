@@ -168,17 +168,25 @@ def test_architecture_reports_the_checkpoint_actor_and_critic_shapes(tmp_path):
     torch.save(
         {
             "actor_state_dict": {
-                "mlp.0.weight": torch.zeros(256, 41),
+                "mlp.0.weight": torch.ones(256, 41),
+                "mlp.0.bias": torch.full((256,), 0.25),
                 "mlp.2.weight": torch.zeros(256, 256),
+                "mlp.2.bias": torch.zeros(256),
                 "mlp.4.weight": torch.zeros(256, 256),
+                "mlp.4.bias": torch.zeros(256),
                 "mlp.6.weight": torch.zeros(6, 256),
+                "mlp.6.bias": torch.zeros(6),
                 "distribution.std_param": torch.zeros(6),
             },
             "critic_state_dict": {
                 "mlp.0.weight": torch.zeros(256, 50),
+                "mlp.0.bias": torch.zeros(256),
                 "mlp.2.weight": torch.zeros(256, 256),
+                "mlp.2.bias": torch.zeros(256),
                 "mlp.4.weight": torch.zeros(256, 256),
+                "mlp.4.bias": torch.zeros(256),
                 "mlp.6.weight": torch.zeros(1, 256),
+                "mlp.6.bias": torch.zeros(1),
             },
             "iter": 100,
         },
@@ -200,8 +208,15 @@ def test_architecture_reports_the_checkpoint_actor_and_critic_shapes(tmp_path):
     assert architecture["actor"]["layers"] == [41, 256, 256, 256, 6]
     assert architecture["actor"]["activation"] == "ELU"
     assert architecture["actor"]["distribution"] == "Gaussian"
+    assert architecture["actor"]["parameter_count"] > 140_000
+    assert len(architecture["actor"]["linear_layers"]) == 4
+    assert architecture["actor"]["linear_layers"][0]["input_size"] == 41
+    assert architecture["actor"]["linear_layers"][0]["output_size"] == 256
+    assert architecture["actor"]["linear_layers"][0]["weight_rms"] == pytest.approx(1.0)
+    assert architecture["actor"]["linear_layers"][0]["bias_rms"] == pytest.approx(0.25)
     assert architecture["critic"]["layers"] == [50, 256, 256, 256, 1]
     assert architecture["critic"]["activation"] == "ELU"
+    assert len(architecture["critic"]["linear_layers"]) == 4
 
 
 def test_stop_signals_only_viewer_process_group(monkeypatch, tmp_path):
