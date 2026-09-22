@@ -30,7 +30,7 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
             "schema_version": _ENVIRONMENT_PROGRESS_SCHEMA_VERSION,
             "common_step_counter": int(self.env.unwrapped.common_step_counter),
             "learning_iteration": int(self.current_learning_iteration),
-            "num_steps_per_env": int(self.num_steps_per_env),
+            "num_steps_per_env": int(self.cfg["num_steps_per_env"]),
         }
 
     def save(self, path: str, infos: dict[str, Any] | None = None) -> None:
@@ -74,7 +74,7 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
 
         if restored_steps is None:
             iteration = max(0, int(self.current_learning_iteration))
-            steps_per_iteration = max(0, int(self.num_steps_per_env))
+            steps_per_iteration = max(0, int(self.cfg["num_steps_per_env"]))
             restored_steps = iteration * steps_per_iteration
 
         self.env.unwrapped.common_step_counter = restored_steps
