@@ -25,6 +25,9 @@ from dashboard.config import REPO_ROOT
 from dashboard.run_service import RunService
 
 
+_FORCE_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
+
 class ViewerBusyError(RuntimeError):
     """Raised when the single managed viewer slot is already occupied."""
 
@@ -238,23 +241,27 @@ class ViewerService:
         ).start()
 
     def _signal_process_group(self, viewer: _ManagedViewer, sig: signal.Signals) -> None:
-        try:
-            os.killpg(viewer.process.pid, sig)
-        except ProcessLookupError:
-            return
-        except OSError:
+        killpg = getattr(os, "killpg", None)
+        if callable(killpg):
             try:
-                if sig == signal.SIGKILL:
-                    viewer.process.kill()
-                else:
-                    viewer.process.terminate()
+                killpg(viewer.process.pid, sig)
+                return
+            except ProcessLookupError:
+                return
             except OSError:
                 pass
+        try:
+            if sig == _FORCE_KILL_SIGNAL:
+                viewer.process.kill()
+            else:
+                viewer.process.terminate()
+        except OSError:
+            pass
 
     def _escalate_stop(self, viewer_id: str, pid: int) -> None:
         for delay, sig in (
             (self.stop_grace_seconds, signal.SIGTERM),
-            (self.stop_term_seconds, signal.SIGKILL),
+            (self.stop_term_seconds, _FORCE_KILL_SIGNAL),
         ):
             time.sleep(delay)
             with self._lock:
