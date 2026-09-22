@@ -615,6 +615,7 @@ def build_run_info(run_dir: Path, root: Path, stage: str) -> dict[str, Any]:
         "horizon_top_windows": _first((status, manifest), "horizon_top_windows"),
         "horizon_transition": _first((status, manifest), "horizon_transition"),
         "horizon_timeout_fraction": _first((status, manifest), "horizon_timeout_fraction"),
+        "horizon_control_steps": _first((status, manifest), "horizon_control_steps"),
         "horizon_stationary_quality_fraction": _first(
             (status, manifest), "horizon_stationary_quality_fraction"
         ),
