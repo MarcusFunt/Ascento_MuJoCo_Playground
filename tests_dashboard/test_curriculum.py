@@ -61,6 +61,7 @@ def test_balance_recovery_includes_reset_difficulty_ramp():
                 "episode_horizon_s": 20.0,
                 "horizon_stage": 1,
                 "rollout_steps_per_env": 24,
+                "horizon_control_steps": 30000,
             },
             "telemetry": {"iteration": 2500},
         }
@@ -68,10 +69,10 @@ def test_balance_recovery_includes_reset_difficulty_ramp():
 
     secondary = curriculum["secondary"]
     assert secondary["kind"] == "recovery_difficulty"
-    assert secondary["control_steps"] == 60_000
-    assert secondary["progress"] == 0.5
-    assert secondary["hard_fraction"] == 0.20
-    assert math.isclose(secondary["pitch_max_rad"], 0.125)
+    assert secondary["control_steps"] == 30_000
+    assert secondary["progress"] == 0.25
+    assert secondary["hard_fraction"] == 0.15
+    assert math.isclose(secondary["pitch_max_rad"], 0.1125)
 
 
 def test_locomotion_curriculum_describes_training_sequence():
