@@ -8,6 +8,7 @@ from ascento_mjlab.control_contract import LEG_POSITION_SCALE_RAD, WHEEL_VELOCIT
 from ascento_mjlab.physics import PHYSICS_PROFILE
 from ascento_mjlab.tasks.balance.env_cfg import ascento_balance_env_cfg
 from ascento_mjlab.tasks.jump.env_cfg import ascento_jump_env_cfg
+from ascento_mjlab.tasks.locomotion.env_cfg import ascento_locomotion_env_cfg
 from ascento_mjlab.tasks.recovery.env_cfg import ascento_recovery_env_cfg
 
 
@@ -229,7 +230,7 @@ def test_locomotion_uses_long_repeated_random_target_curriculum(monkeypatch):
 
 def test_locomotion_episode_length_can_be_extended_without_reward_changes(monkeypatch):
     monkeypatch.setenv("ASCENTO_LOCOMOTION_EPISODE_LENGTH_S", "120")
-    cfg = ascento_mjlab.tasks.locomotion.env_cfg.ascento_locomotion_env_cfg()
+    cfg = ascento_locomotion_env_cfg()
 
     assert cfg.episode_length_s == pytest.approx(120.0)
     assert cfg.rewards["world_target_proximity"].weight == pytest.approx(4.0)
