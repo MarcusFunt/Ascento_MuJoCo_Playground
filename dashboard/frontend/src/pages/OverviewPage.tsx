@@ -148,7 +148,7 @@ export function OverviewPage() {
             </div>
           </section>
 
-          <CurriculumRail curriculum={curriculum} />
+          <CurriculumRail curriculum={curriculum} compact />
 
           <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
             <section className="rounded-xl border border-border bg-panel p-6">
