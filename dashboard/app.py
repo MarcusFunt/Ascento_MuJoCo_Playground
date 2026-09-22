@@ -23,13 +23,13 @@ from dashboard.health import (
 )
 from dashboard.monitor import load_training_records, tail_lines, training_log_path
 from dashboard.run_service import RunService
-from dashboard.viewer_service import ViewerBusyError, ViewerNotFoundError, ViewerService
 from dashboard.supervisor_client import (
     SupervisorClient,
     SupervisorRejected,
     SupervisorUnavailable,
 )
 from dashboard.versioning import current_repository_version
+from dashboard.viewer_service import ViewerBusyError, ViewerNotFoundError, ViewerService
 
 CONFIG = load_config()
 STARTUP_WARNINGS = validate_startup(CONFIG, create_artifact_root=False)
