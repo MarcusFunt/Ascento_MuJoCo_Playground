@@ -7,17 +7,20 @@ import ast
 import json
 from pathlib import Path
 
-from ascento_mjlab.cli import build_parser
-from ascento_mjlab.horizon_curriculum import HORIZON_SCHEDULE_S, HorizonCurriculumRunner
-from ascento_mjlab.tasks import ASCENTO_TASK_IDS
 from dashboard.curriculum import (
     HORIZON_FAILURE_THRESHOLD,
     HORIZON_FAILURE_WINDOWS,
-    HORIZON_SCHEDULE_S as DASHBOARD_HORIZON_SCHEDULE_S,
     HORIZON_SUCCESS_THRESHOLD,
     HORIZON_SUCCESS_WINDOWS,
 )
+from dashboard.curriculum import (
+    HORIZON_SCHEDULE_S as DASHBOARD_HORIZON_SCHEDULE_S,
+)
 from dashboard.task_catalog import task_ids
+
+from ascento_mjlab.cli import build_parser
+from ascento_mjlab.horizon_curriculum import HORIZON_SCHEDULE_S, HorizonCurriculumRunner
+from ascento_mjlab.tasks import ASCENTO_TASK_IDS
 
 ROOT = Path(__file__).resolve().parents[1]
 
