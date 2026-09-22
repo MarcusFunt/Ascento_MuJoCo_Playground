@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
 
 from ascento_mjlab import mdp as ascento_mdp
 from ascento_mjlab.tasks.balance.env_cfg import ROBOT_CFG
@@ -49,6 +50,11 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
             "arena_half_extent_m": 4.0,
             "asset_cfg": ROBOT_CFG,
         },
+    )
+    cfg.rewards["world_target_progress"] = RewardTermCfg(
+        func=ascento_mdp.rewards.world_target_progress_velocity,
+        weight=8.0,
+        params={"speed_scale": 0.30, "asset_cfg": ROBOT_CFG},
     )
     if not play:
         episode_length_s = float(os.environ.get("ASCENTO_LOCOMOTION_EPISODE_LENGTH_S", "60.0"))
