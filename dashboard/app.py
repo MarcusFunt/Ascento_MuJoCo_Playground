@@ -745,6 +745,21 @@ if (FRONTEND_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
 
+@app.get("/{path:path}", include_in_schema=False)
+def frontend_route(path: str):
+    """Serve the SPA shell for real browser routes.
+
+    API misses stay API 404s instead of returning HTML. The static assets mount
+    is registered before this fallback and therefore keeps handling /assets.
+    """
+    if path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API route not found")
+    index_path = FRONTEND_DIST / "index.html"
+    if index_path.is_file():
+        return FileResponse(index_path)
+    raise HTTPException(status_code=404, detail="Dashboard frontend is not built yet")
+
+
 @app.on_event("startup")
 def initialize_dashboard_database() -> None:
     DATABASE.initialize()
