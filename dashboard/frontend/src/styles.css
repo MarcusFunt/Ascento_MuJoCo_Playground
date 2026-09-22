@@ -77,3 +77,45 @@ button, a, input, select, textarea {
 .text-balance {
   text-wrap: balance;
 }
+
+
+@keyframes nn-flow {
+  to {
+    stroke-dashoffset: -36;
+  }
+}
+
+@keyframes nn-neuron-pulse {
+  0%, 100% {
+    opacity: 0.72;
+    transform: scale(0.92);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.16);
+  }
+}
+
+.nn-flow-edge {
+  animation-name: nn-flow;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.nn-neuron-pulse {
+  animation-name: nn-neuron-pulse;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.nn-animation-paused .nn-flow-edge,
+.nn-animation-paused .nn-neuron-pulse {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nn-flow-edge,
+  .nn-neuron-pulse {
+    animation: none !important;
+  }
+}
