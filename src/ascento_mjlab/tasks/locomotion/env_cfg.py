@@ -19,7 +19,7 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
     introduce velocity or height commands, so compatible balance actor weights
     can be transferred without a policy input/output adapter.
 
-    Each reset starts with an immediate 15--35 cm target. After the robot
+    Each reset starts with an immediate 2--3 m target. After the robot
     arrives and settles briefly, another bounded target is sampled. Training
     episodes default to 60 seconds so one episode contains many independent
     go-to-pose attempts instead of a single short movement sequence.
@@ -31,9 +31,9 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
         mode="reset",
         params={
             "asset_name": "robot",
-            "min_distance_m": 0.15,
-            "max_distance_m": 0.35,
-            "arena_half_extent_m": 0.65,
+            "min_distance_m": 2.0,
+            "max_distance_m": 3.0,
+            "arena_half_extent_m": 4.0,
         },
     )
     cfg.events["repeated_random_world_targets"] = EventTermCfg(
@@ -45,7 +45,7 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
             "target_hold_s": 0.35,
             "min_target_distance_m": 0.15,
             "max_target_distance_m": 0.35,
-            "arena_half_extent_m": 0.65,
+            "arena_half_extent_m": 4.0,
             "asset_cfg": ROBOT_CFG,
         },
     )
