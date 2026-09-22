@@ -228,5 +228,5 @@ def test_stop_escalates_from_interrupt_to_term_and_kill(monkeypatch, tmp_path):
     assert signals == [
         (4321, signal.SIGINT),
         (4321, signal.SIGTERM),
-        (4321, signal.SIGKILL),
+        (4321, viewer_service_module._FORCE_KILL_SIGNAL),
     ]
