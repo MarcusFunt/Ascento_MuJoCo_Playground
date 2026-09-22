@@ -172,6 +172,7 @@ def test_stop_signals_only_viewer_process_group(monkeypatch, tmp_path):
         viewer_service_module.os,
         "killpg",
         lambda pgid, sig: signalled.append((pgid, sig)),
+        raising=False,
     )
 
     service = ViewerService(
@@ -198,6 +199,7 @@ def test_stop_escalates_from_interrupt_to_term_and_kill(monkeypatch, tmp_path):
         viewer_service_module.os,
         "killpg",
         lambda pgid, sig: signals.append((pgid, sig)),
+        raising=False,
     )
 
     class ImmediateThread:
