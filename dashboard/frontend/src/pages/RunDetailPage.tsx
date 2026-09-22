@@ -38,6 +38,7 @@ export function RunDetailPage() {
   const telemetry = run.telemetry || {}
   const active = ['starting', 'running', 'stopping'].includes(String(run.state || ''))
   const percent = Number(telemetry.percent_complete || 0)
+  const latest = run.training_health?.latest || {}
 
   return (
     <>
@@ -66,6 +67,19 @@ export function RunDetailPage() {
         <div className="mt-5 flex items-center gap-4">
           <Progress value={percent} className="h-2 flex-1" />
           <strong className="numeric text-sm">{fmtPercent(percent, 1)}</strong>
+        </div>
+        <div className="mt-5 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            ['Reward', fmtNumber(latest.reward, 4)],
+            ['Episode length', fmtNumber(latest.episode_length, 1)],
+            ['KL', fmtNumber(latest.kl, 5)],
+            ['Entropy', fmtNumber(latest.entropy, 4)],
+          ].map(([label, value]) => (
+            <div key={label} className="bg-panel px-4 py-3">
+              <span className="block text-[10px] font-bold uppercase tracking-[0.08em] text-muted">{label}</span>
+              <strong className="numeric mt-1 block text-lg">{value}</strong>
+            </div>
+          ))}
         </div>
       </section>
 
