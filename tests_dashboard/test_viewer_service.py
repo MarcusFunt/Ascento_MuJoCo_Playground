@@ -1,6 +1,8 @@
 import json
 import signal
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import dashboard.viewer_service as viewer_service_module
 import pytest
@@ -41,6 +43,18 @@ def _run(root: Path) -> tuple[RunService, str, Path]:
     return service, run_id, run
 
 
+def _patch_popen(monkeypatch, popen) -> None:
+    monkeypatch.setattr(
+        viewer_service_module,
+        "subprocess",
+        SimpleNamespace(
+            Popen=popen,
+            DEVNULL=subprocess.DEVNULL,
+            STDOUT=subprocess.STDOUT,
+        ),
+    )
+
+
 class FakeProcess:
     def __init__(self, command):
         self.command = command
@@ -67,7 +81,7 @@ def test_viewer_service_launches_isolated_worker_and_rejects_duplicate(
         captured["kwargs"] = kwargs
         return FakeProcess(command)
 
-    monkeypatch.setattr(viewer_service_module.subprocess, "Popen", fake_popen)
+    _patch_popen(monkeypatch, fake_popen)
     service = ViewerService(
         run_service,
         logs_root=tmp_path / "viewer-logs",
@@ -91,9 +105,8 @@ def test_runtime_status_updates_loaded_checkpoint_and_lag(monkeypatch, tmp_path)
     run_service, run_id, run_dir = _run(tmp_path / "artifacts")
     (run_dir / "model_130.pt").write_bytes(b"new-checkpoint")
 
-    monkeypatch.setattr(
-        viewer_service_module.subprocess,
-        "Popen",
+    _patch_popen(
+        monkeypatch,
         lambda command, **kwargs: FakeProcess(command),
     )
     service = ViewerService(
@@ -147,9 +160,8 @@ def test_start_rejects_an_already_occupied_viewer_port(monkeypatch, tmp_path):
 
 def test_stop_signals_only_viewer_process_group(monkeypatch, tmp_path):
     run_service, run_id, _ = _run(tmp_path / "artifacts")
-    monkeypatch.setattr(
-        viewer_service_module.subprocess,
-        "Popen",
+    _patch_popen(
+        monkeypatch,
         lambda command, **kwargs: FakeProcess(command),
     )
     signalled = []
