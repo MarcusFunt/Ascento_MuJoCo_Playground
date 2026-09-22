@@ -211,3 +211,25 @@ def test_custom_sim_timestep_reaches_actuator():
 
     assert {act._physics_dt for act in env.scene["robot"].actuators} == {0.007}
     env.close()
+
+
+def test_locomotion_uses_long_repeated_random_target_curriculum(monkeypatch):
+    monkeypatch.delenv("ASCENTO_LOCOMOTION_EPISODE_LENGTH_S", raising=False)
+    cfg = load_env_cfg("Ascento-Locomotion-Flat")
+
+    assert cfg.episode_length_s == pytest.approx(60.0)
+    assert "balance_push" not in cfg.events
+    assert cfg.events["initialize_world_target"].func.__name__ == "initialize_random_world_target"
+    repeated = cfg.events["repeated_random_world_targets"]
+    assert repeated.func.__name__ == "RepeatedRandomWorldTargetSequence"
+    assert repeated.params["min_target_distance_m"] == pytest.approx(0.15)
+    assert repeated.params["max_target_distance_m"] == pytest.approx(0.35)
+    assert repeated.params["target_hold_s"] == pytest.approx(0.35)
+
+
+def test_locomotion_episode_length_can_be_extended_without_reward_changes(monkeypatch):
+    monkeypatch.setenv("ASCENTO_LOCOMOTION_EPISODE_LENGTH_S", "120")
+    cfg = ascento_mjlab.tasks.locomotion.env_cfg.ascento_locomotion_env_cfg()
+
+    assert cfg.episode_length_s == pytest.approx(120.0)
+    assert cfg.rewards["world_target_proximity"].weight == pytest.approx(4.0)
