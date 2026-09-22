@@ -24,7 +24,6 @@ from ascento_mjlab.viewer.checkpoints import (
 from dashboard.config import REPO_ROOT
 from dashboard.run_service import RunService
 
-
 _FORCE_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 
