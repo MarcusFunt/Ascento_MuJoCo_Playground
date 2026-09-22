@@ -24,7 +24,7 @@ commands when the active environment is not already configured for it.
 | --- | --- | --- | --- | --- |
 | 1 | `Ascento-Balance-Flat` | Supported balance at a per-environment world position and heading target, controlled effort, recovery from planar pushes | Curriculum through 20, 60, 120, and 300 s; a cardinal push between 4–6 s | `balance_gate_v5` |
 | 1b | `Ascento-Balance-Recovery-Flat` | Harden an already-capable balance actor against the measured positive-pitch/high-roll-rate/high-pitch-rate edge | 70-90% original resets plus a 10-to-30% hard subset ramped over 120k control steps; quiet-balance penalties retained | `balance_recovery_edge_v1` then actor-transfer back to `balance_gate_v5` |
-| 2 | `Ascento-Locomotion-Flat` | Standing and world-target locomotion through the balance actor interface | Settle → mild push → recover → 5–20 cm target step → stop | `locomotion_sequence_gate_v1` |
+| 2 | `Ascento-Locomotion-Flat` | Sustained world-target locomotion through the balance actor interface | Immediate repeated 2–3 m random go-to-pose targets; 60 s episodes by default; next target only after a settled stop | `locomotion_sequence_gate_v1` |
 | 3 | `Ascento-Velocity-Flat` | Linear velocity, yaw-rate, and height tracking | Random twist/height resampling every 3–6 s | `velocity_gate_v1` |
 | 4 | `Ascento-Recovery-Flat` | Wide-reset stabilization and recovery after a physical push | Broad initial roll/pitch/velocity envelope; interval push only during training | `recovery_gate_v1` |
 | 5 | `Ascento-Jump-Flat` | Commanded crouch, takeoff, flight, landing, distance, and post-landing stabilization | Flat-ground compound motion command | `jump_gate_v1` |
@@ -109,13 +109,33 @@ After it passes, actor-transfer the candidate back to `Ascento-Balance-Flat`
 and run the full authoritative gate before promotion.
 
 `Ascento-Locomotion-Flat` retains the balance actor's world-position and
-world-heading target channels. Its first curriculum is deliberately narrow:
-wait for 0.5–1 s of settled balance, apply a 0.05–0.15 m/s mostly fore/aft
-push, require recovery, step the target 5–20 cm, and stop. Transfer 79,999
-with the same command above but `--task Ascento-Locomotion-Flat`; only expand
-to arbitrary go-to-pose, waypoint chains, and disturbances while travelling
-after this fixed-seed gate passes and improves target completion without a
-balance-quality regression:
+world-heading target channels. The training curriculum now gives every reset an
+immediate random target 2–3 m away and chains another bounded target each
+time the robot reaches the current one and holds a settled stop for 0.35 s.
+Each new waypoint also sets its heading to the bearing from the robot to the
+waypoint. The existing heading observation, heading reward, yaw-rate tracking,
+and settled-stop criterion therefore all encourage turning into the travel
+direction instead of preserving the yaw from before the waypoint was issued.
+The bearing is held fixed for that segment so a small overshoot near the target
+cannot flip the desired heading by 180 degrees.
+Targets stay inside a widened per-clone arena and locomotion-only environment
+spacing is increased to 10 m so long-range motion does not immediately enter a
+neighbouring clone region. Training episodes default to 60 s. At 2–3 m, the
+existing 0.35 m-scale proximity reward is effectively near zero at target issue,
+so locomotion adds a strong signed progress term based on world-frame closing
+speed. Moving toward the target is rewarded, moving away is penalized, and
+sideways motion contributes approximately zero. The term uses
+`8 * tanh(closing_speed / 0.30 m/s)` before normal environment dt scaling, so
+useful progress is strongly preferred while reward gain saturates at higher
+speeds instead of encouraging unbounded acceleration. This is a reward-ABI
+change and must start a new locomotion lineage rather than resume an older
+locomotion optimizer state.
+
+The deterministic acceptance suite remains the fixed settle/push/recover/15 cm
+sequence; repeated-target training is not itself evidence that disturbance
+recovery or quiet stopping was preserved. Transfer 79,999 with the same command
+above but `--task Ascento-Locomotion-Flat`, then evaluate target completion and
+balance quality on the immutable gate:
 
 ```bash
 ascento evaluate run --checkpoint <79999-locomotion-transfer.pt> \
@@ -210,6 +230,10 @@ Balance tuning can be explored with these explicit environment variables:
 - `ASCENTO_BALANCE_STABILIZATION_WEIGHT`;
 - `ASCENTO_BALANCE_PUSH_INTERVAL_MIN_S`; and
 - `ASCENTO_BALANCE_PUSH_INTERVAL_MAX_S`.
+
+Locomotion uses a 60 s training horizon by default. Override
+`ASCENTO_LOCOMOTION_EPISODE_LENGTH_S` for explicit horizon experiments (for
+example 120 s) without changing reward weights or the observation/action ABI.
 
 Balance initializes a separate absolute XY and world-yaw target for every
 cloned environment at its supported reset pose. The actor receives the position

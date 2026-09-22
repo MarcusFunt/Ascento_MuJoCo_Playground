@@ -8,6 +8,7 @@ from ascento_mjlab.control_contract import LEG_POSITION_SCALE_RAD, WHEEL_VELOCIT
 from ascento_mjlab.physics import PHYSICS_PROFILE
 from ascento_mjlab.tasks.balance.env_cfg import ascento_balance_env_cfg
 from ascento_mjlab.tasks.jump.env_cfg import ascento_jump_env_cfg
+from ascento_mjlab.tasks.locomotion.env_cfg import ascento_locomotion_env_cfg
 from ascento_mjlab.tasks.recovery.env_cfg import ascento_recovery_env_cfg
 
 
@@ -211,3 +212,33 @@ def test_custom_sim_timestep_reaches_actuator():
 
     assert {act._physics_dt for act in env.scene["robot"].actuators} == {0.007}
     env.close()
+
+
+def test_locomotion_uses_long_repeated_random_target_curriculum(monkeypatch):
+    monkeypatch.delenv("ASCENTO_LOCOMOTION_EPISODE_LENGTH_S", raising=False)
+    cfg = load_env_cfg("Ascento-Locomotion-Flat")
+
+    assert cfg.episode_length_s == pytest.approx(60.0)
+    assert "balance_push" not in cfg.events
+    assert cfg.events["initialize_world_target"].func.__name__ == "initialize_random_world_target"
+    initial = cfg.events["initialize_world_target"]
+    assert initial.params["min_distance_m"] == pytest.approx(2.0)
+    assert initial.params["max_distance_m"] == pytest.approx(3.0)
+    repeated = cfg.events["repeated_random_world_targets"]
+    assert repeated.func.__name__ == "RepeatedRandomWorldTargetSequence"
+    assert repeated.params["min_target_distance_m"] == pytest.approx(2.0)
+    assert repeated.params["max_target_distance_m"] == pytest.approx(3.0)
+    assert repeated.params["target_hold_s"] == pytest.approx(0.35)
+    progress = cfg.rewards["world_target_progress"]
+    assert progress.weight == pytest.approx(8.0)
+    assert progress.params["speed_scale"] == pytest.approx(0.30)
+    assert repeated.params["arena_half_extent_m"] == pytest.approx(4.0)
+    assert cfg.scene.env_spacing == pytest.approx(10.0)
+
+
+def test_locomotion_episode_length_can_be_extended_without_reward_changes(monkeypatch):
+    monkeypatch.setenv("ASCENTO_LOCOMOTION_EPISODE_LENGTH_S", "120")
+    cfg = ascento_locomotion_env_cfg()
+
+    assert cfg.episode_length_s == pytest.approx(120.0)
+    assert cfg.rewards["world_target_proximity"].weight == pytest.approx(4.0)
