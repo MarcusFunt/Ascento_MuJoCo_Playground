@@ -4,6 +4,7 @@ from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.registry import load_env_cfg
 
 import ascento_mjlab.tasks  # noqa: F401
+from ascento_mjlab.mdp import events as ascento_events
 from ascento_mjlab.mdp.events import flat_ground_wheel_bottom_heights
 
 
@@ -63,3 +64,55 @@ def test_all_flat_tasks_use_support_aware_root_resets():
     ):
         cfg = load_env_cfg(task)
         assert cfg.events["reset_supported_pose"].func.__name__ == "reset_root_state_supported"
+
+
+def test_balance_recovery_reset_curriculum_ramps_hard_fraction_and_ranges(monkeypatch):
+    class FakeEnv:
+        num_envs = 4
+        device = "cpu"
+        common_step_counter = 0
+
+    calls = []
+
+    def fake_supported(env, env_ids, *, pose_range, velocity_range, asset_cfg):
+        calls.append((env_ids.clone(), pose_range, velocity_range, asset_cfg))
+
+    samples = torch.tensor([0.01, 0.15, 0.50, 0.90])
+    monkeypatch.setattr(ascento_events, "reset_root_state_supported", fake_supported)
+    monkeypatch.setattr(ascento_events.torch, "rand", lambda n, device=None: samples[:n].clone())
+
+    kwargs = dict(
+        asset_cfg=object(),
+        normal_pose_range={"pitch": (-0.08, 0.08)},
+        normal_velocity_range={"pitch": (-0.10, 0.10)},
+        hard_pose_range_start={"pitch": (0.08, 0.10)},
+        hard_pose_range_end={"pitch": (0.08, 0.15)},
+        hard_velocity_range_start={"pitch": (-0.20, 0.20)},
+        hard_velocity_range_end={"pitch": (-0.50, 0.50)},
+        hard_fraction_start=0.10,
+        hard_fraction_end=0.30,
+        ramp_control_steps=100,
+    )
+
+    env = FakeEnv()
+    ascento_events.mixed_balance_recovery_reset(env, None, **kwargs)
+    assert len(calls) == 2
+    normal, hard = calls
+    assert normal[0].tolist() == [1, 2, 3]
+    assert hard[0].tolist() == [0]
+    assert hard[1]["pitch"] == (0.08, 0.10)
+    assert hard[2]["pitch"] == (-0.20, 0.20)
+
+    calls.clear()
+    env.common_step_counter = 100
+    ascento_events.mixed_balance_recovery_reset(env, None, **kwargs)
+    normal, hard = calls
+    assert normal[0].tolist() == [2, 3]
+    assert hard[0].tolist() == [0, 1]
+    assert hard[1]["pitch"] == (0.08, 0.15)
+    assert hard[2]["pitch"] == (-0.50, 0.50)
+
+
+def test_balance_recovery_task_uses_mixed_support_aware_reset():
+    cfg = load_env_cfg("Ascento-Balance-Recovery-Flat")
+    assert cfg.events["reset_supported_pose"].func.__name__ == "mixed_balance_recovery_reset"

@@ -10,6 +10,8 @@ from .balance.env_cfg import ascento_balance_env_cfg
 from .balance.rl_cfg import AscentoBalanceRlCfg
 from .balance_quiet.env_cfg import ascento_balance_quiet_env_cfg
 from .balance_quiet.rl_cfg import AscentoBalanceQuietRlCfg
+from .balance_recovery.env_cfg import ascento_balance_recovery_env_cfg
+from .balance_recovery.rl_cfg import AscentoBalanceRecoveryRlCfg
 from .jump.env_cfg import ascento_jump_env_cfg
 from .jump.rl_cfg import AscentoJumpRlCfg
 from .locomotion.env_cfg import ascento_locomotion_env_cfg
@@ -23,6 +25,7 @@ ASCENTO_TASK_IDS = (
     "Ascento-Balance-Flat",
     "Ascento-Velocity-Flat",
     "Ascento-Balance-Quiet-Flat",
+    "Ascento-Balance-Recovery-Flat",
     "Ascento-Locomotion-Flat",
     "Ascento-Recovery-Flat",
     "Ascento-Jump-Flat",
@@ -53,6 +56,13 @@ def _register_tasks() -> None:
         play_env_cfg=ascento_balance_quiet_env_cfg(play=True),
         rl_cfg=AscentoBalanceQuietRlCfg,
         runner_cls=AscentoProvenanceRunner,
+    )
+    register_mjlab_task(
+        task_id="Ascento-Balance-Recovery-Flat",
+        env_cfg=ascento_balance_recovery_env_cfg(),
+        play_env_cfg=ascento_balance_recovery_env_cfg(play=True),
+        rl_cfg=AscentoBalanceRecoveryRlCfg,
+        runner_cls=HorizonCurriculumRunner,
     )
     register_mjlab_task(
         task_id="Ascento-Locomotion-Flat",

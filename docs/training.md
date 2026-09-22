@@ -23,6 +23,7 @@ commands when the active environment is not already configured for it.
 | Stage | Task | Learns | Training-only conditions | Acceptance suite |
 | --- | --- | --- | --- | --- |
 | 1 | `Ascento-Balance-Flat` | Supported balance at a per-environment world position and heading target, controlled effort, recovery from planar pushes | Curriculum through 20, 60, 120, and 300 s; a cardinal push between 4–6 s | `balance_gate_v5` |
+| 1b | `Ascento-Balance-Recovery-Flat` | Harden an already-capable balance actor against the measured positive-pitch/high-roll-rate/high-pitch-rate edge | 70-90% original resets plus a 10-to-30% hard subset ramped over 120k control steps; quiet-balance penalties retained | `balance_recovery_edge_v1` then actor-transfer back to `balance_gate_v5` |
 | 2 | `Ascento-Locomotion-Flat` | Standing and world-target locomotion through the balance actor interface | Settle → mild push → recover → 5–20 cm target step → stop | `locomotion_sequence_gate_v1` |
 | 3 | `Ascento-Velocity-Flat` | Linear velocity, yaw-rate, and height tracking | Random twist/height resampling every 3–6 s | `velocity_gate_v1` |
 | 4 | `Ascento-Recovery-Flat` | Wide-reset stabilization and recovery after a physical push | Broad initial roll/pitch/velocity envelope; interval push only during training | `recovery_gate_v1` |
@@ -77,6 +78,35 @@ action second-difference and body-rocking terms. Their weight is highest only
 inside the settled-balance envelope, so recovery maneuvers remain available.
 The [v1 offline calibration](../benchmarks/baselines/quiet_reward_calibration_v1.md)
 records the 79,999/oscillation-fixture separation used for the initial weights.
+
+### Balance recovery edge hardening
+
+`Ascento-Balance-Recovery-Flat` is a versioned continuation task for a balance
+actor that already performs well on `balance_gate_v5` but misses the expanded
+reset boundary. It preserves the balance actor ABI and the quiet-balance reward
+terms. Its reset event keeps the original distribution for most episodes while
+progressively adding a targeted hard subset. At the end of the ramp that subset
+matches the expanded gate's roll, translation, and roll/pitch-rate ranges while
+biasing pitch to +0.08..+0.15 rad, the measured weak side of the current actor.
+
+For a 10k PPO run with 24 rollout steps per iteration, the 120,000-control-step
+ramp reaches full difficulty at about iteration 5,000. Do not resume the base
+checkpoint directly across the task ABI. Initialize an actor-only transfer:
+
+```bash
+ascento tools initialize-transfer -- \
+  --source <balance-checkpoint.pt> \
+  --task Ascento-Balance-Recovery-Flat \
+  --output logs/transfers/balance_to_recovery/model_000000.pt
+
+ascento evaluate run \
+  --checkpoint logs/transfers/balance_to_recovery/model_000000.pt \
+  --suite balance_recovery_edge_v1 --batch-size 256 --device cuda:0
+```
+
+The edge suite is a fast diagnostic, not a replacement for `balance_gate_v5`.
+After it passes, actor-transfer the candidate back to `Ascento-Balance-Flat`
+and run the full authoritative gate before promotion.
 
 `Ascento-Locomotion-Flat` retains the balance actor's world-position and
 world-heading target channels. Its first curriculum is deliberately narrow:

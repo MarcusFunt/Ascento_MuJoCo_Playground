@@ -123,6 +123,7 @@ def test_recovery_stage_exports_executable_success_metric_and_training_pushes():
         "Ascento-Balance-Flat",
         "Ascento-Velocity-Flat",
         "Ascento-Recovery-Flat",
+        "Ascento-Balance-Recovery-Flat",
         "Ascento-Jump-Flat",
     ],
 )

@@ -26,6 +26,7 @@ versioned, deterministic by default, and independent of training rewards.
 | `balance_gate_v3` | Balance | Prior 65 Nm balance gate; retained for comparisons before world-target drift gating |
 | `balance_gate_v4` | Balance | Prior world-target balance gate; adds a 120-second maximum target-error limit |
 | `balance_gate_v5` | Balance | Current directional world-target gate; adds reset-heading and yaw-rate limits |
+| `balance_recovery_edge_v1` | Balance recovery | 256-case fast screen concentrated on +0.08..+0.15 rad pitch with expanded roll/pitch-rate and translation ranges |
 | `velocity_gate_v1` | Velocity | Deterministic twist/height command timelines |
 | `recovery_gate_v1` | Recovery | Wide-reset recovery, strict success, time, and continuous hold |
 | `jump_gate_v1` | Jump | Takeoff, landing, recovered landing, distance, pre-impact speed, clearance, and hold |
