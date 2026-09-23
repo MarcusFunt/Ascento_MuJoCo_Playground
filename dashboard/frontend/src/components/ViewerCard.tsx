@@ -27,6 +27,7 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
   const viewerActive = Boolean(viewer && ['starting', 'running', 'stopping'].includes(viewer.state))
   const [checkpoint, setCheckpoint] = useState('latest')
   const [follow, setFollow] = useState(false)
+  const [jacobianHz, setJacobianHz] = useState(2)
 
   useEffect(() => {
     const items = checkpoints.data?.checkpoints || []
@@ -37,7 +38,7 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
   }, [checkpoints.data, runId])
 
   const start = useMutation({
-    mutationFn: () => api.startViewer({ run_id: runId, checkpoint: checkpoint || 'latest', follow }),
+    mutationFn: () => api.startViewer({ run_id: runId, checkpoint: checkpoint || 'latest', follow, jacobian_hz: jacobianHz }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['viewers'] }),
   })
   const stop = useMutation({
@@ -76,7 +77,7 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
               <Button className="ml-3" size="sm" variant="danger" onClick={() => stop.mutate(viewer.id)} disabled={stop.isPending}>Stop active viewer</Button>
             </div>
           ) : null}
-          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_13rem_auto] md:items-end">
             <label>
               <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.06em] text-muted">Checkpoint</span>
               <SelectInput
@@ -97,6 +98,12 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
                     {item.relative_path}{item.iteration !== null && item.iteration !== undefined ? ` · iteration ${item.iteration}` : ''}
                   </option>
                 ))}
+              </SelectInput>
+            </label>
+            <label>
+              <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.06em] text-muted">Jacobian cadence</span>
+              <SelectInput value={jacobianHz} onChange={(event) => setJacobianHz(Number(event.target.value))} disabled={viewerActive}>
+                {[0, 1, 2, 5, 10].map((rate) => <option key={rate} value={rate}>{rate === 0 ? 'Off' : `${rate} Hz`}{rate === 2 ? ' · default' : ''}</option>)}
               </SelectInput>
             </label>
             <Button variant="primary" size="lg" disabled={viewerActive || checkpoints.isLoading || Boolean(checkpoints.error) || !checkpoints.data?.checkpoints?.length || start.isPending} onClick={() => start.mutate()}>
@@ -120,16 +127,18 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
             <input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} disabled={viewerActive} />
             Follow newly completed checkpoints automatically
           </label>
+          <p className="mt-2 text-xs text-muted">Jacobian work runs in the isolated viewer only. 2 Hz is the current default pending measurement on the target GPU.</p>
         </div>
       ) : viewer ? (
         <div className="mt-6">
-          <div className="grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3 lg:grid-cols-7">
             {[
               ['Loaded', viewer.checkpoint || '—'],
               ['Policy iteration', fmtNumber(viewer.checkpoint_iteration, 0)],
               ['Training iteration', fmtNumber(viewer.training_iteration, 0)],
               ['Lag', viewer.lag_iterations === null || viewer.lag_iterations === undefined ? '—' : `${fmtNumber(viewer.lag_iterations, 0)} it`],
               ['Mode', viewer.follow ? 'Follow latest' : 'Fixed'],
+              ['Jacobian', viewer.jacobian_hz === 0 ? 'Off' : `${viewer.jacobian_hz ?? 2} Hz`],
               ['Port', viewer.port || '—'],
             ].map(([label, value]) => (
               <div key={String(label)} className="bg-panel p-3">

@@ -47,7 +47,18 @@ class StructuredTargetAction(ActionTerm):
 
     @property
     def raw_action(self) -> torch.Tensor:
-        return self._raw_actions
+        """Processed normalized actions as a detached diagnostic snapshot."""
+        return self._raw_actions.detach().clone()
+
+    @property
+    def position_targets(self) -> torch.Tensor:
+        """Final leg position targets; callers cannot mutate action-term state."""
+        return self._position_targets.detach().clone()
+
+    @property
+    def velocity_targets(self) -> torch.Tensor:
+        """Final wheel velocity targets; callers cannot mutate action-term state."""
+        return self._velocity_targets.detach().clone()
 
     def process_actions(self, actions: torch.Tensor) -> None:
         if actions.shape[-1] != self.action_dim:

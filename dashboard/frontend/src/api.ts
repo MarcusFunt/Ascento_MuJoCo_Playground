@@ -2,6 +2,11 @@ import type {
   Checkpoint,
   OverviewResponse,
   PolicyArchitecture,
+  IntrospectionSchema,
+  PolicyIntrospectionFrame,
+  IntrospectionCapture,
+  IntrospectionCaptureSummary,
+  IntrospectionExplanation,
   RunDetail,
   RunIndexRow,
   SystemStatus,
@@ -34,6 +39,39 @@ export const api = {
   checkpoints: (id: string) =>
     fetchJson<{ checkpoints: Checkpoint[]; latest?: string | null }>(`/api/runs/${id}/checkpoints`),
   architecture: (id: string) => fetchJson<PolicyArchitecture>(`/api/runs/${id}/architecture`),
+  introspectionSchema: (viewerId: string) =>
+    fetchJson<IntrospectionSchema | { available: false; message: string }>(
+      `/api/viewers/${viewerId}/introspection/schema`,
+    ),
+  introspectionLatest: (viewerId: string) =>
+    fetchJson<PolicyIntrospectionFrame | { available: false; message: string }>(
+      `/api/viewers/${viewerId}/introspection/latest`,
+    ),
+  introspectionStreamUrl: (viewerId: string) => `/api/viewers/${viewerId}/introspection/stream`,
+  introspectionCaptures: (viewerId: string) =>
+    fetchJson<{ viewer_id: string; captures: IntrospectionCaptureSummary[] }>(
+      `/api/viewers/${viewerId}/captures`,
+    ),
+  introspectionCapture: (viewerId: string, eventId: string) =>
+    fetchJson<IntrospectionCapture>(`/api/viewers/${viewerId}/captures/${eventId}`),
+  requestIntrospectionCapture: (viewerId: string) =>
+    fetchJson<{ viewer_id: string; request_id: string; state: string }>(
+      `/api/viewers/${viewerId}/captures`,
+      { method: 'POST', headers: { 'X-Ascento-Control': '1' } },
+    ),
+  requestIntrospectionExplanation: (viewerId: string, payload: Record<string, unknown>) =>
+    fetchJson<{ viewer_id: string; explanation_id: string; state: string }>(
+      `/api/viewers/${viewerId}/explanations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Ascento-Control': '1' },
+        body: JSON.stringify(payload),
+      },
+    ),
+  introspectionExplanation: (viewerId: string, explanationId: string) =>
+    fetchJson<IntrospectionExplanation>(
+      `/api/viewers/${viewerId}/explanations/${explanationId}`,
+    ),
   viewers: () => fetchJson<{ viewers: ViewerState[] }>('/api/viewers'),
   system: (refresh = false) => fetchJson<SystemStatus>(`/api/system${refresh ? '?refresh=true' : ''}`),
   health: () => fetchJson<Record<string, any>>('/api/health'),
@@ -57,7 +95,7 @@ export const api = {
     }),
   compareRuns: (ids: string[]) =>
     fetchJson<Record<string, any>>(`/api/runs/compare?run_ids=${encodeURIComponent(ids.join(','))}`),
-  startViewer: (payload: { run_id: string; checkpoint: string; follow: boolean }) =>
+  startViewer: (payload: { run_id: string; checkpoint: string; follow: boolean; jacobian_hz: number }) =>
     fetchJson<ViewerState>('/api/viewers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Ascento-Control': '1' },

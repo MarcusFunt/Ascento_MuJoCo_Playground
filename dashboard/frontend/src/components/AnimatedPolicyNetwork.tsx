@@ -64,13 +64,11 @@ function transitionStrength(branch: PolicyBranchArchitecture, index: number): nu
 export function AnimatedPolicyNetwork({
   branch,
   branchName,
-  paused,
-  speed,
+  liveActivations,
 }: {
   branch: PolicyBranchArchitecture
   branchName: BranchName
-  paused: boolean
-  speed: number
+  liveActivations?: number[][]
 }) {
   const [selectedLayer, setSelectedLayer] = useState(1)
   const width = 820
@@ -98,7 +96,7 @@ export function AnimatedPolicyNetwork({
   const hidden = selected > 0 && selected < layerCount - 1
 
   return (
-    <div className={paused ? 'nn-animation-paused' : undefined}>
+    <div>
       <div className="overflow-x-auto rounded-lg border border-border bg-background/35">
         <svg
           viewBox={`0 0 ${width} ${height}`}
@@ -125,9 +123,6 @@ export function AnimatedPolicyNetwork({
                 targetIndex,
               })),
             )
-            const activeEdges = edges.filter((edge) =>
-              (edge.sourceIndex * 3 + edge.targetIndex * 5 + transitionIndex) % 11 === 0,
-            ).slice(0, 8)
 
             return (
               <g key={`transition-${transitionIndex}`}>
@@ -141,24 +136,6 @@ export function AnimatedPolicyNetwork({
                     stroke="#66707a"
                     strokeWidth={0.45 + strength * 0.55}
                     opacity={0.045 + strength * 0.055}
-                  />
-                ))}
-                {activeEdges.map((edge, edgeIndex) => (
-                  <line
-                    key={`active-${edge.key}`}
-                    x1={sourceLayer.x + 8}
-                    y1={edge.source.y}
-                    x2={targetLayer.x - 8}
-                    y2={edge.target.y}
-                    stroke={accent}
-                    strokeWidth={0.9 + strength * 0.9}
-                    strokeDasharray="2 16"
-                    opacity={0.72}
-                    className="nn-flow-edge"
-                    style={{
-                      animationDuration: `${Math.max(0.55, 1.65 / speed)}s`,
-                      animationDelay: `${transitionIndex * 0.18 + edgeIndex * 0.08}s`,
-                    }}
                   />
                 ))}
               </g>
@@ -201,22 +178,36 @@ export function AnimatedPolicyNetwork({
 
                 {layer.neurons.map((neuron, neuronIndex) => (
                   <g key={neuron.id}>
-                    <circle
-                      cx={layer.x}
-                      cy={neuron.y}
-                      r={isSelected ? 7.2 : 6.2}
-                      fill={isSelected ? '#171b1f' : '#111417'}
-                      stroke={isSelected ? accent : '#58616a'}
-                      strokeWidth={isSelected ? 1.8 : 1}
-                      className={isSelected ? 'nn-neuron-pulse' : undefined}
-                      style={isSelected ? {
-                        animationDuration: `${Math.max(0.8, 2.2 / speed)}s`,
-                        animationDelay: `${layer.index * 0.16 + neuronIndex * 0.045}s`,
-                        transformOrigin: `${layer.x}px ${neuron.y}px`,
-                      } : undefined}
-                    >
-                      <title>{`${layerLabel(layer.index, layerCount, branchName)} representative neuron ${neuronIndex + 1}`}</title>
-                    </circle>
+                    {(() => {
+                      const activations = layer.index > 0 && layer.index < layerCount - 1
+                        ? liveActivations?.[layer.index - 1]
+                        : undefined
+                      const activationIndex = activations?.length
+                        ? Math.min(activations.length - 1, Math.floor((neuronIndex / layer.neurons.length) * activations.length))
+                        : -1
+                      const activation = activationIndex >= 0 ? activations?.[activationIndex] : undefined
+                      const activationScale = activations?.length
+                        ? Math.max(...activations.map((value) => Math.abs(value)), 1e-6)
+                        : 1
+                      const intensity = activation === undefined ? 0 : Math.min(1, Math.abs(activation) / activationScale)
+                      const activationColor = activation === undefined ? '#111417' : activation >= 0 ? accent : '#db9072'
+                      return (
+                        <circle
+                          cx={layer.x}
+                          cy={neuron.y}
+                          r={isSelected ? 7.2 : 6.2}
+                          fill={activationColor}
+                          fillOpacity={activation === undefined ? 1 : 0.18 + intensity * 0.72}
+                          stroke={isSelected ? accent : activation === undefined ? '#58616a' : activationColor}
+                          strokeOpacity={activation === undefined ? 1 : 0.45 + intensity * 0.55}
+                          strokeWidth={isSelected ? 1.8 : 1}
+                        >
+                          <title>{activation === undefined
+                            ? `${layerLabel(layer.index, layerCount, branchName)} representative neuron ${neuronIndex + 1}; waiting for a live viewer frame`
+                            : `${layerLabel(layer.index, layerCount, branchName)} neuron ${activationIndex + 1}: ${activation.toFixed(5)}`}</title>
+                        </circle>
+                      )
+                    })()}
                     {neuron.outputLabel ? (
                       <text x={layer.x + 13} y={neuron.y + 3} fill="#a8afb7" fontSize="9">{neuron.outputLabel}</text>
                     ) : null}

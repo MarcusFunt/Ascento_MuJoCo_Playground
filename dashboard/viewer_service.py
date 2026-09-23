@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import socket
@@ -21,6 +22,8 @@ from ascento_mjlab.viewer.checkpoints import (
     discover_checkpoints,
     resolve_run_checkpoint,
 )
+from ascento_mjlab.viewer.ipc import IntrospectionIPC
+from ascento_mjlab.viewer.replay import PolicyReplayRecorder
 from dashboard.config import REPO_ROOT
 from dashboard.policy_architecture import inspect_policy_checkpoint
 from dashboard.run_service import RunService
@@ -48,6 +51,19 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _finite_vector(value: Any, expected: int) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == expected
+        and all(
+            isinstance(item, (int, float))
+            and not isinstance(item, bool)
+            and math.isfinite(float(item))
+            for item in value
+        )
+    )
+
+
 @dataclass
 class _ManagedViewer:
     viewer_id: str
@@ -55,10 +71,13 @@ class _ManagedViewer:
     task: str
     port: int
     follow: bool
+    jacobian_hz: float
     selected_checkpoint: CheckpointInfo
     process: subprocess.Popen
     log_path: Path
     status_path: Path
+    introspection_dir: Path
+    capture_root: Path
     started_at: str
     state: str = "starting"
     exit_code: int | None = None
@@ -131,7 +150,10 @@ class ViewerService:
         checkpoint: str = "latest",
         follow: bool = False,
         device: str | None = None,
+        jacobian_hz: float = 2.0,
     ) -> dict[str, Any]:
+        if float(jacobian_hz) not in (0.0, 1.0, 2.0, 5.0, 10.0):
+            raise ValueError("Jacobian frequency must be one of 0, 1, 2, 5, 10 Hz")
         with self._lock:
             if self._active is not None:
                 self._refresh_locked(self._active)
@@ -161,6 +183,10 @@ class ViewerService:
             self.logs_root.mkdir(parents=True, exist_ok=True)
             log_path = self.logs_root / f"{viewer_id}.log"
             status_path = self.logs_root / f"{viewer_id}.json"
+            introspection_dir = self.logs_root / viewer_id / "introspection"
+            introspection_dir.mkdir(parents=True, exist_ok=True)
+            capture_root = ref.path / "viewer_diagnostics" / viewer_id / "events"
+            capture_root.mkdir(parents=True, exist_ok=True)
             command = [
                 sys.executable,
                 "-m",
@@ -179,6 +205,16 @@ class ViewerService:
                 str(status_path),
                 "--stable-age-seconds",
                 str(self.stable_age_seconds),
+                "--jacobian-hz",
+                str(float(jacobian_hz)),
+                "--introspection-dir",
+                str(introspection_dir),
+                "--viewer-id",
+                viewer_id,
+                "--run-id",
+                run_id,
+                "--capture-dir",
+                str(capture_root),
             ]
             if follow:
                 command.append("--follow")
@@ -202,10 +238,13 @@ class ViewerService:
                 task=task,
                 port=self.port,
                 follow=bool(follow),
+                jacobian_hz=float(jacobian_hz),
                 selected_checkpoint=selected,
                 process=process,
                 log_path=log_path,
                 status_path=status_path,
+                introspection_dir=introspection_dir,
+                capture_root=capture_root,
                 started_at=_now(),
             )
             return self._snapshot_locked(self._active)
@@ -232,6 +271,120 @@ class ViewerService:
             except OSError:
                 lines = []
             return {"viewer_id": viewer_id, "lines": lines[-limit:]}
+
+    def introspection_schema(self, viewer_id: str) -> dict[str, Any]:
+        with self._lock:
+            viewer = self._require(viewer_id)
+            value = _read_json(viewer.introspection_dir / "schema.json")
+            return value or {"available": False, "message": "Viewer schema is not ready yet."}
+
+    def introspection_latest(self, viewer_id: str) -> dict[str, Any]:
+        with self._lock:
+            viewer = self._require(viewer_id)
+            value = _read_json(viewer.introspection_dir / "latest.json")
+            return value or {"available": False, "message": "No viewer frame is available yet."}
+
+    def introspection_captures(self, viewer_id: str, *, limit: int = 50) -> dict[str, Any]:
+        with self._lock:
+            viewer = self._require(viewer_id)
+            recorder = PolicyReplayRecorder(
+                viewer.capture_root,
+                viewer_id=viewer_id,
+                run_id=viewer.run_id,
+            )
+            captures = recorder.list_summaries(limit=max(1, min(int(limit), 200)))
+            return {
+                "viewer_id": viewer_id,
+                "captures": [
+                    {key: value for key, value in item.items() if key not in {"frames", "schema"}}
+                    for item in captures
+                ],
+            }
+
+    def introspection_capture(self, viewer_id: str, event_id: str) -> dict[str, Any]:
+        with self._lock:
+            viewer = self._require(viewer_id)
+            recorder = PolicyReplayRecorder(
+                viewer.capture_root,
+                viewer_id=viewer_id,
+                run_id=viewer.run_id,
+            )
+            value = recorder.read_event(event_id)
+            if value is None:
+                raise FileNotFoundError(event_id)
+            return value
+
+    def request_introspection_capture(self, viewer_id: str) -> dict[str, Any]:
+        with self._lock:
+            viewer = self._require(viewer_id)
+            self._refresh_locked(viewer)
+            if viewer.state not in {"starting", "running"}:
+                raise ViewerBusyError("viewer is not running")
+            request_id = IntrospectionIPC(viewer.introspection_dir).request_manual_capture()
+            return {"viewer_id": viewer_id, "request_id": request_id, "state": "queued"}
+
+    def request_introspection_explanation(
+        self,
+        viewer_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock:
+            viewer = self._require(viewer_id)
+            self._refresh_locked(viewer)
+            if viewer.state not in {"starting", "running"}:
+                raise ViewerBusyError("viewer is not running")
+            schema = _read_json(viewer.introspection_dir / "schema.json")
+            latest = _read_json(viewer.introspection_dir / "latest.json")
+            actor_schema = schema.get("actor") if isinstance(schema, dict) else None
+            observation_dim = actor_schema.get("input_dim") if isinstance(actor_schema, dict) else None
+            if not isinstance(observation_dim, int) or observation_dim <= 0:
+                raise ValueError("viewer introspection schema is not ready")
+            checkpoint = str(payload.get("checkpoint") or "")
+            if not isinstance(schema, dict) or checkpoint != schema.get("checkpoint"):
+                raise ValueError("explanations require the checkpoint currently loaded in the viewer")
+            input_raw = payload.get("input_raw")
+            if not _finite_vector(input_raw, observation_dim):
+                raise ValueError(f"input_raw must contain {observation_dim} finite values")
+            action_index = payload.get("action_index")
+            latest_actions = latest.get("actor_output") if isinstance(latest, dict) else None
+            if (
+                not isinstance(action_index, int)
+                or isinstance(action_index, bool)
+                or not isinstance(latest_actions, list)
+                or not 0 <= action_index < len(latest_actions)
+            ):
+                raise ValueError("action_index is outside the current viewer action dimension")
+            baseline_kind = payload.get("baseline_kind")
+            if baseline_kind not in {"normalizer_mean", "episode_start", "selected_frame"}:
+                raise ValueError("unsupported explanation baseline")
+            if baseline_kind == "selected_frame" and not _finite_vector(
+                payload.get("baseline_raw"), observation_dim
+            ):
+                raise ValueError(f"selected-frame baseline must contain {observation_dim} finite values")
+            n_steps = payload.get("n_steps", 32)
+            if not isinstance(n_steps, int) or isinstance(n_steps, bool) or not 8 <= n_steps <= 512:
+                raise ValueError("n_steps must be an integer between 8 and 512")
+            request = {
+                "checkpoint": checkpoint,
+                "input_raw": input_raw,
+                "action_index": action_index,
+                "action_name": str(payload.get("action_name") or f"action_{action_index}"),
+                "baseline_kind": baseline_kind,
+                "baseline_raw": payload.get("baseline_raw"),
+                "baseline_description": str(payload.get("baseline_description") or ""),
+                "n_steps": n_steps,
+                "live_sequence": payload.get("live_sequence"),
+                "episode_id": payload.get("episode_id"),
+                "event_id": payload.get("event_id"),
+            }
+            request_id = IntrospectionIPC(viewer.introspection_dir).queue_explanation_request(request)
+            return {"viewer_id": viewer_id, "explanation_id": request_id, "state": "queued"}
+
+    def introspection_explanation(self, viewer_id: str, explanation_id: str) -> dict[str, Any]:
+        with self._lock:
+            viewer = self._require(viewer_id)
+            value = IntrospectionIPC(viewer.introspection_dir).read_explanation(explanation_id)
+            return value or {"explanation_id": explanation_id, "status": "pending"}
 
     def stop(self, viewer_id: str) -> dict[str, Any]:
         with self._lock:
@@ -356,6 +509,7 @@ class ViewerService:
             "pid": viewer.process.pid,
             "port": viewer.port,
             "follow": viewer.follow,
+            "jacobian_hz": viewer.jacobian_hz,
             "checkpoint": checkpoint,
             "checkpoint_iteration": checkpoint_iteration,
             "training_iteration": training_iteration,
@@ -363,4 +517,15 @@ class ViewerService:
             "started_at": viewer.started_at,
             "loaded_at": runtime.get("loaded_at"),
             "exit_code": viewer.exit_code,
+            "introspection_available": (viewer.introspection_dir / "schema.json").is_file(),
+            "schema_version": (
+                _read_json(viewer.introspection_dir / "schema.json").get("schema_version")
+            ),
+            "latest_sequence": (
+                _read_json(viewer.introspection_dir / "latest.json").get("sequence_id")
+            ),
+            "last_frame_at": (
+                _read_json(viewer.introspection_dir / "latest.json").get("captured_at")
+            ),
+            "capture_count": sum(1 for _ in viewer.capture_root.glob("event_*.json.gz")),
         }

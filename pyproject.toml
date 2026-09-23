@@ -23,6 +23,7 @@ dashboard = [
   "uvicorn[standard]==0.52.4",
 ]
 mcp = ["mcp>=1.0,<2"]
+introspection = ["captum>=0.9,<1"]
 
 [project.scripts]
 clip-motion = "ascento_mjlab.tools.clip_motion:main"

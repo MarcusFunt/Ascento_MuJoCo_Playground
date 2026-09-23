@@ -7,16 +7,19 @@ import { CurriculumRail } from '../components/CurriculumRail'
 import { EditRunDialog } from '../components/EditRunDialog'
 import { PageHeader } from '../components/PageHeader'
 import { PolicyArchitectureCard } from '../components/PolicyArchitectureCard'
+import { PolicyDebugger } from '../components/PolicyDebugger'
 import { StateBadge } from '../components/StateBadge'
 import { ViewerCard } from '../components/ViewerCard'
 import { Button } from '../components/ui/button'
 import { Progress } from '../components/ui/progress'
 import { fmtDate, fmtNumber, fmtPercent, shortCommit } from '../lib/utils'
+import { usePolicyIntrospection } from '../hooks/usePolicyIntrospection'
 
 export function RunDetailPage() {
   const { runId } = useParams({ strict: false }) as { runId: string }
   const [editOpen, setEditOpen] = useState(false)
   const queryClient = useQueryClient()
+  const introspection = usePolicyIntrospection(runId)
   const detail = useQuery({ queryKey: ['run', runId], queryFn: () => api.run(runId), refetchInterval: 10_000 })
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, staleTime: 10_000 })
   const curriculum = useQuery({ queryKey: ['curriculum', runId], queryFn: () => api.curriculum(runId), refetchInterval: 10_000 })
@@ -89,10 +92,30 @@ export function RunDetailPage() {
         <PolicyArchitectureCard
           runId={runId}
           checkpointPath={typeof info.checkpoint_path === 'string' ? info.checkpoint_path : undefined}
+          liveFrame={introspection.displayFrame}
+          runtimeSchema={introspection.displaySchema}
         />
         <ViewerCard
           runId={runId}
           checkpointPath={typeof info.checkpoint_path === 'string' ? info.checkpoint_path : undefined}
+        />
+        <PolicyDebugger
+          viewer={introspection.viewer}
+          schema={introspection.displaySchema}
+          frame={introspection.displayFrame}
+          liveFrame={introspection.frame}
+          connected={introspection.connected}
+          schemaError={introspection.schemaError as Error | null}
+          captures={introspection.captures}
+          capture={introspection.capture}
+          selectedCaptureId={introspection.selectedCaptureId}
+          selectedFrameIndex={introspection.selectedFrameIndex}
+          selectCapture={introspection.selectCapture}
+          selectFrame={introspection.selectFrame}
+          onManualCapture={introspection.manualCapture}
+          manualCapturePending={introspection.manualCapturePending}
+          manualCaptureError={introspection.manualCaptureError as Error | null}
+          captureLoading={introspection.captureLoading}
         />
 
         <section className="rounded-xl border border-border bg-panel p-6">

@@ -8,7 +8,10 @@ import dashboard.viewer_service as viewer_service_module
 import pytest
 from dashboard.health import discover_dashboard_runs
 from dashboard.run_service import RunService
-from dashboard.viewer_service import ViewerBusyError, ViewerService
+from dashboard.viewer_service import ViewerBusyError, ViewerNotFoundError, ViewerService
+
+from ascento_mjlab.viewer.ipc import IntrospectionIPC
+from ascento_mjlab.viewer.replay import PolicyReplayRecorder
 
 
 def _run(root: Path) -> tuple[RunService, str, Path]:
@@ -76,7 +79,7 @@ def test_viewer_service_launches_isolated_worker_and_rejects_duplicate(
     monkeypatch,
     tmp_path,
 ):
-    run_service, run_id, _ = _run(tmp_path / "artifacts")
+    run_service, run_id, run_dir = _run(tmp_path / "artifacts")
     captured = {}
 
     def fake_popen(command, **kwargs):
@@ -97,11 +100,109 @@ def test_viewer_service_launches_isolated_worker_and_rejects_duplicate(
     assert started["state"] == "starting"
     assert started["checkpoint"] == "model_100.pt"
     assert "--follow" in captured["command"]
+    assert "--jacobian-hz" in captured["command"]
+    assert "--introspection-dir" in captured["command"]
+    assert "--viewer-id" in captured["command"]
+    assert "--run-id" in captured["command"]
+    assert "--capture-dir" in captured["command"]
     assert "ascento_mjlab.viewer.worker" in captured["command"]
     assert captured["kwargs"]["start_new_session"] is True
 
     with pytest.raises(ViewerBusyError, match="already active"):
         service.start(run_id=run_id)
+
+
+def test_viewer_introspection_reads_only_its_managed_runtime_directory(monkeypatch, tmp_path):
+    run_service, run_id, _ = _run(tmp_path / "artifacts")
+    _patch_popen(monkeypatch, lambda command, **kwargs: FakeProcess(command))
+    service = ViewerService(run_service, logs_root=tmp_path / "viewer-logs", stable_age_seconds=0)
+    monkeypatch.setattr(service, "_port_open", lambda: False)
+    started = service.start(run_id=run_id)
+
+    schema_path = tmp_path / "viewer-logs" / started["id"] / "introspection" / "schema.json"
+    latest_path = schema_path.with_name("latest.json")
+    schema_path.write_text('{"schema_version":1,"actor":{"input_dim":41}}', encoding="utf-8")
+    latest_path.write_text('{"sequence_id":7,"critic_value":0.5}', encoding="utf-8")
+
+    assert service.introspection_schema(started["id"]) == {
+        "schema_version": 1,
+        "actor": {"input_dim": 41},
+    }
+    assert service.introspection_latest(started["id"]) == {
+        "sequence_id": 7,
+        "critic_value": 0.5,
+    }
+    with pytest.raises(ViewerNotFoundError):
+        service.introspection_latest("not-the-managed-viewer")
+
+
+def test_viewer_capture_artifacts_are_scoped_and_manual_requests_are_queued(
+    monkeypatch,
+    tmp_path,
+):
+    run_service, run_id, run_dir = _run(tmp_path / "artifacts")
+    _patch_popen(monkeypatch, lambda command, **kwargs: FakeProcess(command))
+    service = ViewerService(run_service, logs_root=tmp_path / "viewer-logs", stable_age_seconds=0)
+    monkeypatch.setattr(service, "_port_open", lambda: False)
+    started = service.start(run_id=run_id)
+    viewer_id = started["id"]
+    capture_dir = run_dir / "viewer_diagnostics" / viewer_id / "events"
+    recorder = PolicyReplayRecorder(capture_dir, viewer_id=viewer_id, run_id=run_id)
+    recorder.persist(
+        event_type="manual",
+        frames=[SimpleNamespace(to_dict=lambda: {"sequence_id": 7})],
+        trigger_sequence=7,
+        trigger_reason="operator request",
+        checkpoint="model_100.pt",
+        checkpoint_iteration=100,
+        schema={"schema_version": 1},
+    )
+
+    listed = service.introspection_captures(viewer_id)
+    event_id = listed["captures"][0]["event_id"]
+    capture = service.introspection_capture(viewer_id, event_id)
+    queued = service.request_introspection_capture(viewer_id)
+
+    assert listed["captures"][0]["event_type"] == "manual"
+    assert capture["frames"] == [{"sequence_id": 7}]
+    assert queued["state"] == "queued"
+    assert list((tmp_path / "viewer-logs" / viewer_id / "introspection").glob("capture-request-*.json"))
+
+
+def test_introspection_explanation_is_validated_and_spooled_for_viewer(monkeypatch, tmp_path):
+    run_service, run_id, _ = _run(tmp_path / "artifacts")
+    _patch_popen(monkeypatch, lambda command, **kwargs: FakeProcess(command))
+    service = ViewerService(run_service, logs_root=tmp_path / "viewer-logs", stable_age_seconds=0)
+    monkeypatch.setattr(service, "_port_open", lambda: False)
+    started = service.start(run_id=run_id)
+    viewer_id = started["id"]
+    introspection_dir = tmp_path / "viewer-logs" / viewer_id / "introspection"
+    (introspection_dir / "schema.json").write_text(
+        json.dumps({"checkpoint": "model_100.pt", "actor": {"input_dim": 2}}),
+        encoding="utf-8",
+    )
+    (introspection_dir / "latest.json").write_text(
+        json.dumps({"actor_output": [0.1, -0.2]}), encoding="utf-8"
+    )
+
+    queued = service.request_introspection_explanation(
+        viewer_id,
+        {
+            "checkpoint": "model_100.pt",
+            "input_raw": [0.2, -0.4],
+            "action_index": 1,
+            "action_name": "right_knee",
+            "baseline_kind": "normalizer_mean",
+            "n_steps": 32,
+            "live_sequence": 9,
+        },
+    )
+    request = IntrospectionIPC(introspection_dir).consume_explanation_request()
+
+    assert queued["state"] == "queued"
+    assert queued["explanation_id"] == request["explanation_id"]
+    assert request["input_raw"] == [0.2, -0.4]
+    assert service.introspection_explanation(viewer_id, queued["explanation_id"])["status"] == "pending"
 
 
 def test_runtime_status_updates_loaded_checkpoint_and_lag(monkeypatch, tmp_path):

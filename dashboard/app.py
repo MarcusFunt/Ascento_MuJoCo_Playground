@@ -8,12 +8,14 @@ import math
 import os
 import threading
 import time
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from ascento_mjlab.viewer.ipc import CaptureBusyError, ExplanationBusyError
 from dashboard.config import load_config, validate_startup
 from dashboard.curriculum import curriculum_for_run
 from dashboard.database import DashboardDatabase
@@ -96,6 +98,21 @@ class ViewerCreateRequest(BaseModel):
     checkpoint: str = "latest"
     follow: bool = False
     device: str | None = None
+    jacobian_hz: float = 2.0
+
+
+class ViewerExplanationRequest(BaseModel):
+    checkpoint: str
+    input_raw: list[float]
+    action_index: int
+    action_name: str
+    baseline_kind: Literal["normalizer_mean", "episode_start", "selected_frame"]
+    baseline_raw: list[float] | None = None
+    baseline_description: str = ""
+    n_steps: int = 32
+    live_sequence: int | None = None
+    episode_id: int | None = None
+    event_id: str | None = None
 
 
 def _run(run_id: str):
@@ -622,6 +639,7 @@ def start_viewer(payload: ViewerCreateRequest, request: Request):
             checkpoint=payload.checkpoint,
             follow=payload.follow,
             device=payload.device,
+            jacobian_hz=payload.jacobian_hz,
         )
     except KeyError as error:
         raise HTTPException(status_code=404, detail="training run not found") from error
@@ -649,6 +667,125 @@ def viewer_logs(viewer_id: str, tail: int = 300):
         return VIEWER_SERVICE.logs(viewer_id, tail=tail)
     except ViewerNotFoundError as error:
         raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
+@app.get("/api/viewers/{viewer_id}/introspection/schema")
+def viewer_introspection_schema(viewer_id: str):
+    try:
+        return VIEWER_SERVICE.introspection_schema(viewer_id)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
+@app.get("/api/viewers/{viewer_id}/introspection/latest")
+def viewer_introspection_latest(viewer_id: str):
+    try:
+        return VIEWER_SERVICE.introspection_latest(viewer_id)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
+@app.get("/api/viewers/{viewer_id}/introspection/captures")
+@app.get("/api/viewers/{viewer_id}/captures")
+def viewer_introspection_captures(viewer_id: str, limit: int = 50):
+    try:
+        return VIEWER_SERVICE.introspection_captures(viewer_id, limit=limit)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
+@app.get("/api/viewers/{viewer_id}/introspection/captures/{event_id}")
+@app.get("/api/viewers/{viewer_id}/captures/{event_id}")
+def viewer_introspection_capture(viewer_id: str, event_id: str):
+    try:
+        return VIEWER_SERVICE.introspection_capture(viewer_id, event_id)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="capture not found") from error
+
+
+@app.post("/api/viewers/{viewer_id}/introspection/captures", status_code=202)
+@app.post("/api/viewers/{viewer_id}/captures", status_code=202)
+def request_viewer_introspection_capture(viewer_id: str, request: Request):
+    if request.headers.get("x-ascento-control") != "1":
+        raise HTTPException(status_code=403, detail="missing dashboard control header")
+    try:
+        return VIEWER_SERVICE.request_introspection_capture(viewer_id)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+    except ViewerBusyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except CaptureBusyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/viewers/{viewer_id}/introspection/explanations", status_code=202)
+@app.post("/api/viewers/{viewer_id}/explanations", status_code=202)
+def request_viewer_introspection_explanation(
+    viewer_id: str,
+    payload: ViewerExplanationRequest,
+    request: Request,
+):
+    if request.headers.get("x-ascento-control") != "1":
+        raise HTTPException(status_code=403, detail="missing dashboard control header")
+    try:
+        return VIEWER_SERVICE.request_introspection_explanation(viewer_id, payload.model_dump())
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+    except ViewerBusyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ExplanationBusyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.get("/api/viewers/{viewer_id}/introspection/explanations/{explanation_id}")
+@app.get("/api/viewers/{viewer_id}/explanations/{explanation_id}")
+def viewer_introspection_explanation(viewer_id: str, explanation_id: str):
+    try:
+        return VIEWER_SERVICE.introspection_explanation(viewer_id, explanation_id)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
+@app.get("/api/viewers/{viewer_id}/introspection/stream")
+async def viewer_introspection_stream(viewer_id: str):
+    try:
+        VIEWER_SERVICE.get(viewer_id)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+
+    async def events():
+        last_sequence = None
+        idle_polls = 0
+        while True:
+            try:
+                frame = VIEWER_SERVICE.introspection_latest(viewer_id)
+            except ViewerNotFoundError:
+                return
+            sequence = frame.get("sequence_id")
+            if isinstance(sequence, int) and sequence != last_sequence:
+                payload = json.dumps(frame, separators=(",", ":"), allow_nan=False)
+                yield f"id: {sequence}\nevent: frame\ndata: {payload}\n\n"
+                last_sequence = sequence
+                idle_polls = 0
+            else:
+                idle_polls += 1
+                if idle_polls % 150 == 0:
+                    yield ": keep-alive\n\n"
+            await asyncio.sleep(0.1)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.delete("/api/viewers/{viewer_id}", status_code=202)
