@@ -18,6 +18,7 @@ def test_checkpoint_save_is_published_atomically(monkeypatch, tmp_path):
     monkeypatch.setattr(MjlabOnPolicyRunner, "save", fake_base_save)
     monkeypatch.setattr(provenance, "current_plant_contract", lambda: {"plant": 1})
     monkeypatch.setattr(provenance, "current_action_contract", lambda: {"action": 1})
+    monkeypatch.setattr(provenance, "canonical_task_cfg_for_runtime_cfg", lambda cfg: cfg)
     monkeypatch.setattr(
         provenance,
         "current_task_contract",

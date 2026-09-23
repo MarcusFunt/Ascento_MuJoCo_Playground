@@ -2,6 +2,7 @@ import torch
 from mjlab.rl import MjlabOnPolicyRunner
 from mjlab.tasks.registry import load_env_cfg
 
+from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
 from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.plant_contract import (
     PLANT_CONTRACT_SCHEMA_VERSION,
@@ -97,6 +98,29 @@ def test_checkpoint_embeds_the_plant_contract_and_supports_safe_actor_transfer(
     assert transfer_runner.current_learning_iteration == 0
     assert transfer_runner.env.unwrapped.common_step_counter == 0
     assert loaded["actor_state_dict"] == {}
+
+
+def test_viewer_checkpoint_save_uses_the_canonical_training_task_contract(tmp_path):
+    runner = object.__new__(AscentoProvenanceRunner)
+    import ascento_mjlab.tasks  # noqa: F401
+
+    viewer_cfg = load_env_cfg("Ascento-Balance-Flat", play=True)
+    canonical_cfg = load_env_cfg("Ascento-Balance-Flat", play=False)
+    runner.env = type(
+        "Env",
+        (),
+        {"unwrapped": type("Base", (), {"common_step_counter": 0, "cfg": viewer_cfg})()},
+    )()
+    runner.current_learning_iteration = 0
+    runner.cfg = {"num_steps_per_env": 24, "upload_model": False}
+    runner.alg = type("Algorithm", (), {"save": lambda self: {"actor_state_dict": {}}})()
+    runner.logger = type("Logger", (), {})()
+    path = tmp_path / "viewer-model.pt"
+
+    runner.save(str(path))
+
+    payload = torch.load(path, weights_only=False)
+    require_current_checkpoint_contracts(payload["infos"], canonical_cfg)
 
 
 def test_training_resume_restores_exact_environment_step_counter(monkeypatch):

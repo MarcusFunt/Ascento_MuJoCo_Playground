@@ -42,11 +42,12 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
         }
 
     def save(self, path: str, infos: dict[str, Any] | None = None) -> None:
+        contract_cfg = canonical_task_cfg_for_runtime_cfg(self.env.unwrapped.cfg)
         provenance = {
             **(infos or {}),
             "plant_contract": current_plant_contract(),
             "action_contract": current_action_contract(),
-            "task_contract": current_task_contract(self.env.unwrapped.cfg),
+            "task_contract": current_task_contract(contract_cfg),
             "environment_progress": self._environment_progress(),
         }
         target = Path(path).expanduser().resolve()
