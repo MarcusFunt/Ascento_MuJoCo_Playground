@@ -104,6 +104,9 @@ dashboard = [
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
+introspection = [
+    { name = "captum" },
+]
 mcp = [
     { name = "mcp" },
 ]
@@ -117,6 +120,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", marker = "extra == 'dashboard'", specifier = ">=1.16,<2" },
+    { name = "captum", marker = "extra == 'introspection'", specifier = ">=0.9,<1" },
     { name = "fastapi", marker = "extra == 'dashboard'", specifier = "==0.141.1" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0,<2" },
     { name = "mjlab", specifier = "==1.6.0" },
@@ -128,7 +132,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform != 'darwin' and extra == 'cu128'", specifier = ">=2.7.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "ascento-mjlab", extra = "cu128" } },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'dashboard'", specifier = "==0.52.4" },
 ]
-provides-extras = ["cu128", "cpu", "dashboard", "mcp"]
+provides-extras = ["cu128", "cpu", "dashboard", "mcp", "introspection"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -209,6 +213,25 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/54/79/875f9558179573d40a9cc743038ac2bf67dfb79cecb1e8b5d70e88c94c3d/bcrypt-5.0.0-pp311-pypy311_pp73-manylinux_2_28_x86_64.whl", hash = "sha256:046ad6db88edb3c5ece4369af997938fb1c19d6a699b9c1b27b0db432faae4c4", size = 273791, upload-time = "2025-09-25T19:50:39.913Z" },
     { url = "https://files.pythonhosted.org/packages/bc/fe/975adb8c216174bf70fc17535f75e85ac06ed5252ea077be10d9cff5ce24/bcrypt-5.0.0-pp311-pypy311_pp73-manylinux_2_34_aarch64.whl", hash = "sha256:dcd58e2b3a908b5ecc9b9df2f0085592506ac2d5110786018ee5e160f28e0911", size = 270746, upload-time = "2025-09-25T19:50:43.306Z" },
     { url = "https://files.pythonhosted.org/packages/e4/f8/972c96f5a2b6c4b3deca57009d93e946bbdbe2241dca9806d502f29dd3ee/bcrypt-5.0.0-pp311-pypy311_pp73-manylinux_2_34_x86_64.whl", hash = "sha256:6b8f520b61e8781efee73cba14e3e8c9556ccfb375623f4f97429544734545b4", size = 273375, upload-time = "2025-09-25T19:50:45.43Z" },
+]
+
+[[package]]
+name = "captum"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-13-ascento-mjlab-cpu' and extra == 'extra-13-ascento-mjlab-cu128')" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-13-ascento-mjlab-cpu' and extra == 'extra-13-ascento-mjlab-cu128')" },
+    { name = "packaging" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(sys_platform != 'darwin' and extra == 'extra-13-ascento-mjlab-cu128') or (extra == 'extra-13-ascento-mjlab-cpu' and extra == 'extra-13-ascento-mjlab-cu128')" },
+    { name = "torch", version = "2.14.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or (extra == 'extra-13-ascento-mjlab-cpu' and extra == 'extra-13-ascento-mjlab-cu128') or (extra != 'extra-13-ascento-mjlab-cpu' and extra != 'extra-13-ascento-mjlab-cu128')" },
+    { name = "torch", version = "2.14.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-13-ascento-mjlab-cpu') or (extra == 'extra-13-ascento-mjlab-cpu' and extra == 'extra-13-ascento-mjlab-cu128')" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f7/9e/f31758e20c3d2b42b05420936b75f663e7aeae9ba63b84aee5cad1b044a3/captum-0.9.0.tar.gz", hash = "sha256:e4868e22b68224f1a5355d2b7966803c021cf9fe5d893f51f587b4002a666b54", size = 363381, upload-time = "2026-04-17T06:11:39.577Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/01/75/c99571fee171bb9d34d3e1df5fdb16d57e2c4c15339eb220e6e6e4539f1c/captum-0.9.0-py3-none-any.whl", hash = "sha256:cda38e1d42c37591d71560bb2f5813ac4cae8d8543afac45279c7efd5945997e", size = 455196, upload-time = "2026-04-17T06:11:38.229Z" },
 ]
 
 [[package]]
