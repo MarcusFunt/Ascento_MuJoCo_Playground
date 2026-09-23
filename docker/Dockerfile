@@ -39,6 +39,7 @@ RUN --mount=type=cache,id=ascento-pip,target=/root/.cache/pip \
 
 WORKDIR /workspace
 COPY pyproject.toml uv.lock README.md ./
+COPY alembic.ini ./
 COPY src ./src
 COPY dashboard ./dashboard
 COPY tests_mjlab ./tests_mjlab
