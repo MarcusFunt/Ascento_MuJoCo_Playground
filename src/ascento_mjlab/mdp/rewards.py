@@ -102,6 +102,7 @@ def world_target_proximity(
 def world_target_progress_velocity(
     env: ManagerBasedRlEnv,
     speed_scale: float = 0.35,
+    stop_distance_m: float = 0.35,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """Signed dense reward for instantaneous progress toward the XY target.
@@ -112,8 +113,8 @@ def world_target_progress_velocity(
     limit simply by driving faster. The upright factor avoids paying for
     ballistic motion after the robot has effectively fallen.
     """
-    if speed_scale <= 0.0:
-        raise ValueError("speed_scale must be positive")
+    if speed_scale <= 0.0 or stop_distance_m <= 0.0:
+        raise ValueError("speed_scale and stop_distance_m must be positive")
     asset: Entity = env.scene[asset_cfg.name]
     to_target = world_target_xy(env) - asset.data.root_link_pos_w[:, :2]
     distance = torch.linalg.vector_norm(to_target, dim=1)
@@ -121,7 +122,26 @@ def world_target_progress_velocity(
     closing_speed = torch.sum(asset.data.root_link_lin_vel_w[:, :2] * direction, dim=1)
     closing_speed = torch.where(distance > 1.0e-3, closing_speed, torch.zeros_like(closing_speed))
     upright_factor = torch.clamp(-asset.data.projected_gravity_b[:, 2], min=0.0, max=1.0)
-    return torch.tanh(closing_speed / speed_scale) * upright_factor
+    approach_factor = torch.clamp(distance / stop_distance_m, min=0.0, max=1.0)
+    return torch.tanh(closing_speed / speed_scale) * upright_factor * approach_factor
+
+
+def world_target_speed_penalty(
+    env: ManagerBasedRlEnv,
+    std: float = 0.35,
+    speed_scale: float = 0.30,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Penalize residual planar speed near the target without taxing travel."""
+    if std <= 0.0 or speed_scale <= 0.0:
+        raise ValueError("std and speed_scale must be positive")
+    asset: Entity = env.scene[asset_cfg.name]
+    error = asset.data.root_link_pos_w[:, :2] - world_target_xy(env)
+    distance_sq = torch.sum(torch.square(error), dim=1)
+    speed_sq = torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=1)
+    near_target = torch.exp(-distance_sq / (std * std))
+    return near_target * speed_sq / (speed_scale * speed_scale)
+
 
 def world_target_heading(
     env: ManagerBasedRlEnv,
@@ -235,9 +255,7 @@ def settled_balance(
     planar_speed_sq = torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=1)
     angular_speed_sq = torch.sum(torch.square(asset.data.root_link_ang_vel_b), dim=1)
     current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
-    heading_error_sq = torch.square(
-        wrapped_angle_difference(world_target_yaw(env), current_yaw)
-    )
+    heading_error_sq = torch.square(wrapped_angle_difference(world_target_yaw(env), current_yaw))
     height_error_sq = torch.square(asset.data.root_link_pos_w[:, 2] - 0.75)
     left = env.scene["left_wheel_contact"].data.found
     right = env.scene["right_wheel_contact"].data.found

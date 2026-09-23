@@ -365,12 +365,14 @@ class OneShotPlanarVelocityPush:
 
 
 class RepeatedRandomWorldTargetSequence:
-    """Chain nearby random go-to-pose targets for the full episode.
+    """Mix sustained waypoint travel with gate-like retarget-and-stop episodes.
 
     A target is replaced only after the robot is both close to it and settled
     for a short dwell. This keeps the locomotion objective dense without
     rewarding fly-through behavior, and provides many movement attempts per
-    long episode instead of a single target step.
+    long episode instead of a single target step. A configurable subset of
+    episodes instead receives one mild planar push, one short forward target,
+    and then holds that target for the remainder of the episode.
     """
 
     def __init__(self, cfg, env) -> None:
@@ -378,15 +380,33 @@ class RepeatedRandomWorldTargetSequence:
         self._settled_at_target_s = torch.zeros(
             env.num_envs, dtype=torch.float32, device=env.device
         )
+        self._episode_elapsed_s = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+        self._episode_initialized = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        self._gate_like = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        self._gate_pushed = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        self._gate_retargeted = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        self._push = OneShotPlanarVelocityPush(None, env)
 
     def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
         if env_ids is None:
             self._settled_at_target_s.zero_()
+            self._episode_elapsed_s.zero_()
+            self._episode_initialized.zero_()
+            self._gate_like.zero_()
+            self._gate_pushed.zero_()
+            self._gate_retargeted.zero_()
+            self._push.reset()
             return
         ids = _resolved_env_ids_placeholder(
             env_ids, self._settled_at_target_s.device, self._settled_at_target_s.numel()
         )
         self._settled_at_target_s[ids] = 0.0
+        self._episode_elapsed_s[ids] = 0.0
+        self._episode_initialized[ids] = False
+        self._gate_like[ids] = False
+        self._gate_pushed[ids] = False
+        self._gate_retargeted[ids] = False
+        self._push.reset(ids)
 
     def __call__(
         self,
@@ -398,28 +418,92 @@ class RepeatedRandomWorldTargetSequence:
         min_target_distance_m: float = 0.15,
         max_target_distance_m: float = 0.35,
         arena_half_extent_m: float = 0.65,
+        gate_like_fraction: float = 0.25,
+        gate_push_time_s: float = 4.0,
+        gate_min_delta_v: float = 0.05,
+        gate_max_delta_v: float = 0.15,
+        gate_retarget_time_s: float = 9.0,
+        gate_min_target_distance_m: float = 0.10,
+        gate_max_target_distance_m: float = 0.20,
         asset_cfg: SceneEntityCfg,
     ) -> None:
         if target_reached_distance_m <= 0.0:
             raise ValueError("target_reached_distance_m must be positive")
         if target_hold_s <= 0.0:
             raise ValueError("target_hold_s must be positive")
+        if not 0.0 <= gate_like_fraction <= 1.0:
+            raise ValueError("gate_like_fraction must be in [0, 1]")
+        if gate_push_time_s < 0.0 or gate_retarget_time_s < gate_push_time_s:
+            raise ValueError("gate retarget time must be no earlier than the push time")
+        if not 0.0 < gate_min_delta_v <= gate_max_delta_v:
+            raise ValueError("gate push requires 0 < min_delta_v <= max_delta_v")
+        if not 0.0 < gate_min_target_distance_m <= gate_max_target_distance_m:
+            raise ValueError("gate target distance requires 0 < min <= max")
 
         ids = _resolved_env_ids(env, env_ids)
         if ids.numel() == 0:
             return
         asset = env.scene[asset_cfg.name]
+        new_ids = ids[~self._episode_initialized[ids]]
+        if new_ids.numel() > 0:
+            self._gate_like[new_ids] = (
+                torch.rand(new_ids.numel(), device=env.device) < gate_like_fraction
+            )
+            self._episode_initialized[new_ids] = True
+        self._episode_elapsed_s[ids] += float(env.step_dt)
+
+        gate_ids = ids[self._gate_like[ids]]
+        push_ids = gate_ids[
+            (self._episode_elapsed_s[gate_ids] >= gate_push_time_s) & ~self._gate_pushed[gate_ids]
+        ]
+        if push_ids.numel() > 0:
+            self._push(
+                env,
+                push_ids,
+                min_delta_v=gate_min_delta_v,
+                max_delta_v=gate_max_delta_v,
+                asset_cfg=asset_cfg,
+            )
+            self._gate_pushed[push_ids] = True
+
+        retarget_ids = gate_ids[
+            (self._episode_elapsed_s[gate_ids] >= gate_retarget_time_s)
+            & ~self._gate_retargeted[gate_ids]
+        ]
+        if retarget_ids.numel() > 0:
+            distances = torch.empty(retarget_ids.numel(), device=env.device).uniform_(
+                gate_min_target_distance_m, gate_max_target_distance_m
+            )
+            forward_b = torch.zeros((retarget_ids.numel(), 3), device=env.device)
+            forward_b[:, 0] = 1.0
+            forward_w = quat_apply(asset.data.root_link_quat_w[retarget_ids], forward_b)
+            forward_xy = forward_w[:, :2]
+            forward_xy /= torch.linalg.vector_norm(forward_xy, dim=1, keepdim=True).clamp_min(
+                1.0e-6
+            )
+            state = _world_target_state(env, asset_name=asset_cfg.name)
+            state["target_xy"][retarget_ids] = (
+                asset.data.root_link_pos_w[retarget_ids, :2] + distances.unsqueeze(1) * forward_xy
+            )
+            state["target_yaw"][retarget_ids] = yaw_from_quaternion_wxyz(
+                asset.data.root_link_quat_w[retarget_ids]
+            )
+            self._gate_retargeted[retarget_ids] = True
+
+        regular_ids = ids[~self._gate_like[ids]]
+        if regular_ids.numel() == 0:
+            return
         distance = torch.linalg.vector_norm(
-            asset.data.root_link_pos_w[ids, :2] - world_target_xy(env)[ids], dim=1
+            asset.data.root_link_pos_w[regular_ids, :2] - world_target_xy(env)[regular_ids], dim=1
         )
-        settled = _is_settled_for_locomotion(env, asset, ids)
+        settled = _is_settled_for_locomotion(env, asset, regular_ids)
         at_target = (distance <= target_reached_distance_m) & settled
-        self._settled_at_target_s[ids] = torch.where(
+        self._settled_at_target_s[regular_ids] = torch.where(
             at_target,
-            self._settled_at_target_s[ids] + float(env.step_dt),
-            torch.zeros_like(self._settled_at_target_s[ids]),
+            self._settled_at_target_s[regular_ids] + float(env.step_dt),
+            torch.zeros_like(self._settled_at_target_s[regular_ids]),
         )
-        ready = ids[self._settled_at_target_s[ids] >= target_hold_s]
+        ready = regular_ids[self._settled_at_target_s[regular_ids] >= target_hold_s]
         if ready.numel() == 0:
             return
 

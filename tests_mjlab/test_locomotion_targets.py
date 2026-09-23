@@ -24,8 +24,12 @@ class _Asset:
             root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(count, 1),
             projected_gravity_b=torch.tensor([[0.0, 0.0, -1.0]]).repeat(count, 1),
             root_link_lin_vel_b=torch.zeros((count, 3)),
+            root_link_vel_w=torch.zeros((count, 6)),
             root_link_ang_vel_b=torch.zeros((count, 3)),
         )
+
+    def write_root_link_velocity_to_sim(self, velocity, env_ids):
+        self.data.root_link_vel_w[env_ids] = velocity
 
 
 def _env(count: int = 4):
@@ -97,6 +101,7 @@ def test_repeated_target_sequence_requires_a_settled_hold_before_resampling():
             min_target_distance_m=0.15,
             max_target_distance_m=0.35,
             arena_half_extent_m=0.65,
+            gate_like_fraction=0.0,
             asset_cfg=cfg,
         )
         assert torch.allclose(world_target_xy(env), asset.data.root_link_pos_w[:, :2])
@@ -109,6 +114,7 @@ def test_repeated_target_sequence_requires_a_settled_hold_before_resampling():
         min_target_distance_m=0.15,
         max_target_distance_m=0.35,
         arena_half_extent_m=0.65,
+        gate_like_fraction=0.0,
         asset_cfg=cfg,
     )
 
@@ -116,3 +122,52 @@ def test_repeated_target_sequence_requires_a_settled_hold_before_resampling():
         world_target_xy(env) - asset.data.root_link_pos_w[:, :2], dim=1
     )
     assert float(distance[0]) >= 0.15 - 1e-6
+
+
+def test_repeated_target_sequence_has_gate_like_push_retarget_and_hold():
+    torch.manual_seed(3)
+    env = _env(count=1)
+    asset = env.scene["robot"]
+    env.ascento_world_target_state = {
+        "target_xy": asset.data.root_link_pos_w[:, :2] + torch.tensor([[2.5, 0.0]]),
+        "target_yaw": torch.zeros(1),
+    }
+    sequence = RepeatedRandomWorldTargetSequence(None, env)
+    cfg = SimpleNamespace(name="robot")
+    params = {
+        "gate_like_fraction": 1.0,
+        "gate_push_time_s": 0.2,
+        "gate_retarget_time_s": 0.4,
+        "gate_min_delta_v": 0.05,
+        "gate_max_delta_v": 0.15,
+        "gate_min_target_distance_m": 0.10,
+        "gate_max_target_distance_m": 0.20,
+        "asset_cfg": cfg,
+    }
+
+    sequence(env, None, **params)
+    assert torch.equal(asset.data.root_link_vel_w[:, :2], torch.zeros((1, 2)))
+    sequence(env, None, **params)
+    push_magnitude = torch.linalg.vector_norm(asset.data.root_link_vel_w[:, :2], dim=1)
+    assert 0.05 <= float(push_magnitude[0]) <= 0.15
+    assert torch.allclose(
+        world_target_xy(env),
+        asset.data.root_link_pos_w[:, :2] + torch.tensor([[2.5, 0.0]]),
+    )
+
+    sequence(env, None, **params)
+    old_target = world_target_xy(env).clone()
+    sequence(env, None, **params)
+    target_offset = world_target_xy(env) - asset.data.root_link_pos_w[:, :2]
+    target_distance = torch.linalg.vector_norm(target_offset, dim=1)
+    assert 0.10 <= float(target_distance[0]) <= 0.20
+    assert not torch.allclose(world_target_xy(env), old_target)
+    assert torch.allclose(world_target_yaw(env), torch.zeros(1), atol=1e-6)
+
+    settled_target = world_target_xy(env).clone()
+    asset.data.root_link_pos_w[:, :2] = settled_target
+    asset.data.root_link_vel_w.zero_()
+    asset.data.root_link_lin_vel_b.zero_()
+    for _ in range(20):
+        sequence(env, None, **params)
+    assert torch.equal(world_target_xy(env), settled_target)

@@ -51,13 +51,25 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
             "min_target_distance_m": 2.0,
             "max_target_distance_m": 3.0,
             "arena_half_extent_m": 4.0,
+            "gate_like_fraction": 0.25,
+            "gate_push_time_s": 4.0,
+            "gate_min_delta_v": 0.05,
+            "gate_max_delta_v": 0.15,
+            "gate_retarget_time_s": 9.0,
+            "gate_min_target_distance_m": 0.10,
+            "gate_max_target_distance_m": 0.20,
             "asset_cfg": ROBOT_CFG,
         },
     )
     cfg.rewards["world_target_progress"] = RewardTermCfg(
         func=ascento_mdp.rewards.world_target_progress_velocity,
         weight=8.0,
-        params={"speed_scale": 0.30, "asset_cfg": ROBOT_CFG},
+        params={"speed_scale": 0.30, "stop_distance_m": 0.35, "asset_cfg": ROBOT_CFG},
+    )
+    cfg.rewards["world_target_speed_penalty"] = RewardTermCfg(
+        func=ascento_mdp.rewards.world_target_speed_penalty,
+        weight=-2.0,
+        params={"std": 0.35, "speed_scale": 0.30, "asset_cfg": ROBOT_CFG},
     )
     if not play:
         episode_length_s = float(os.environ.get("ASCENTO_LOCOMOTION_EPISODE_LENGTH_S", "60.0"))

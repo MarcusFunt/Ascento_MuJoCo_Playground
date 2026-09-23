@@ -14,12 +14,20 @@ from ascento_mjlab.mdp.rewards import (
     world_target_heading,
     world_target_progress_velocity,
     world_target_proximity,
+    world_target_speed_penalty,
 )
 
 
 def _env():
     robot = SimpleNamespace(
-        joint_names=("left_hip", "left_knee", "left_wheel", "right_hip", "right_knee", "right_wheel"),
+        joint_names=(
+            "left_hip",
+            "left_knee",
+            "left_wheel",
+            "right_hip",
+            "right_knee",
+            "right_wheel",
+        ),
         data=SimpleNamespace(
             root_link_pos_w=torch.tensor([[0.02, -0.01, 0.75]]),
             root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
@@ -28,7 +36,7 @@ def _env():
             root_link_lin_vel_w=torch.zeros((1, 3)),
             root_link_ang_vel_b=torch.zeros((1, 3)),
             joint_pos=torch.tensor([[-3.14159, -3.14159, 0.0, -3.14159, -3.14159, 0.0]]),
-        )
+        ),
     )
     contact = SimpleNamespace(data=SimpleNamespace(found=torch.ones((1, 1), dtype=torch.bool)))
     return SimpleNamespace(
@@ -56,7 +64,7 @@ def test_world_target_proximity_decays_with_absolute_world_drift():
     assert world_target_proximity(env, asset_cfg=asset_cfg).item() == pytest.approx(1.0)
     env.scene["robot"].data.root_link_pos_w[0, 0] += 0.5
     assert world_target_proximity(env, asset_cfg=asset_cfg).item() == pytest.approx(
-        torch.exp(torch.tensor(-(0.5 / 0.35) ** 2)).item()
+        torch.exp(torch.tensor(-((0.5 / 0.35) ** 2))).item()
     )
 
 
@@ -79,6 +87,37 @@ def test_world_target_progress_reward_is_signed_and_bounded():
     assert abs(toward.item()) < 1.0
 
 
+def test_world_target_progress_fades_inside_the_braking_distance():
+    env = _env()
+    initialize_world_target(env)
+    asset_cfg = SimpleNamespace(name="robot")
+    robot = env.scene["robot"]
+    robot.data.root_link_lin_vel_w[0, 0] = 0.30
+
+    env.ascento_world_target_state["target_xy"][0, 0] += 2.5
+    far = world_target_progress_velocity(env, speed_scale=0.30, asset_cfg=asset_cfg)
+    env.ascento_world_target_state["target_xy"][0, 0] = robot.data.root_link_pos_w[0, 0] + 0.175
+    near = world_target_progress_velocity(env, speed_scale=0.30, asset_cfg=asset_cfg)
+
+    assert far.item() == pytest.approx(torch.tanh(torch.tensor(1.0)).item())
+    assert near.item() == pytest.approx(far.item() * 0.5)
+
+
+def test_world_target_speed_penalty_focuses_on_stopping_near_the_goal():
+    env = _env()
+    initialize_world_target(env)
+    asset_cfg = SimpleNamespace(name="robot")
+    robot = env.scene["robot"]
+    robot.data.root_link_lin_vel_b[0, 0] = 0.30
+
+    at_target = world_target_speed_penalty(env, asset_cfg=asset_cfg)
+    env.ascento_world_target_state["target_xy"][0, 0] += 2.5
+    far_from_target = world_target_speed_penalty(env, asset_cfg=asset_cfg)
+
+    assert at_target.item() == pytest.approx(1.0)
+    assert far_from_target.item() < 1.0e-8
+
+
 def test_world_target_observation_is_yaw_invariant_but_target_is_world_framed():
     env = _env()
     initialize_world_target(env)
@@ -86,9 +125,7 @@ def test_world_target_observation_is_yaw_invariant_but_target_is_world_framed():
     env.ascento_world_target_state["target_xy"][0] += torch.tensor([1.0, 0.0])
 
     assert torch.allclose(world_target_error_body(env, asset_cfg), torch.tensor([[1.0, 0.0]]))
-    env.scene["robot"].data.root_link_quat_w[0] = torch.tensor(
-        [2**-0.5, 0.0, 0.0, 2**-0.5]
-    )
+    env.scene["robot"].data.root_link_quat_w[0] = torch.tensor([2**-0.5, 0.0, 0.0, 2**-0.5])
     assert torch.allclose(
         world_target_error_body(env, asset_cfg), torch.tensor([[0.0, -1.0]]), atol=1.0e-6
     )
@@ -98,9 +135,7 @@ def test_world_target_heading_is_reset_relative_wrapped_and_opposes_spin():
     env = _env()
     asset_cfg = SimpleNamespace(name="robot")
     initialize_world_target(env)
-    env.scene["robot"].data.root_link_quat_w[0] = torch.tensor(
-        [2**-0.5, 0.0, 0.0, 2**-0.5]
-    )
+    env.scene["robot"].data.root_link_quat_w[0] = torch.tensor([2**-0.5, 0.0, 0.0, 2**-0.5])
 
     assert torch.allclose(
         world_target_heading_error(env, asset_cfg), torch.tensor([[-torch.pi / 2]]), atol=1.0e-6

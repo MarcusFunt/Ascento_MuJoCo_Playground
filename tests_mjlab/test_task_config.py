@@ -226,12 +226,22 @@ def test_locomotion_uses_long_repeated_random_target_curriculum(monkeypatch):
     assert initial.params["max_distance_m"] == pytest.approx(3.0)
     repeated = cfg.events["repeated_random_world_targets"]
     assert repeated.func.__name__ == "RepeatedRandomWorldTargetSequence"
+    assert repeated.params["gate_like_fraction"] == pytest.approx(0.25)
+    assert repeated.params["gate_push_time_s"] == pytest.approx(4.0)
+    assert repeated.params["gate_retarget_time_s"] == pytest.approx(9.0)
+    assert repeated.params["gate_min_target_distance_m"] == pytest.approx(0.10)
+    assert repeated.params["gate_max_target_distance_m"] == pytest.approx(0.20)
     assert repeated.params["min_target_distance_m"] == pytest.approx(2.0)
     assert repeated.params["max_target_distance_m"] == pytest.approx(3.0)
     assert repeated.params["target_hold_s"] == pytest.approx(0.35)
     progress = cfg.rewards["world_target_progress"]
     assert progress.weight == pytest.approx(8.0)
     assert progress.params["speed_scale"] == pytest.approx(0.30)
+    assert progress.params["stop_distance_m"] == pytest.approx(0.35)
+    braking = cfg.rewards["world_target_speed_penalty"]
+    assert braking.weight == pytest.approx(-2.0)
+    assert braking.params["std"] == pytest.approx(0.35)
+    assert braking.params["speed_scale"] == pytest.approx(0.30)
     assert repeated.params["arena_half_extent_m"] == pytest.approx(4.0)
     assert cfg.scene.env_spacing == pytest.approx(10.0)
 
