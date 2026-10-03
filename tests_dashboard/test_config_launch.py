@@ -308,6 +308,23 @@ def test_launcher_extracts_runtime_device_seed_and_world_size():
     }
 
 
+def test_launcher_extracts_per_metric_horizon_quality_failures():
+    status = _runtime_status_from_line(
+        "HORIZON_CURRICULUM horizon_s=20.0 stage=1 qualified_windows=0 "
+        "timeout_fraction=1.0000 quality_fraction=0.5000 "
+        "quality_fail_tilt_rms=0 quality_fail_action_rate_rms=100 "
+        "quality_fail_action_second_difference_rms=300 "
+        "quality_fail_insufficient_stationary_samples=112"
+    )
+
+    assert status["horizon_quality_failure_counts"] == {
+        "tilt_rms": 0,
+        "action_rate_rms": 100,
+        "action_second_difference_rms": 300,
+        "insufficient_stationary_samples": 112,
+    }
+
+
 def test_launcher_uses_injected_repository_version_without_git(monkeypatch):
     monkeypatch.setattr(launch, "_git_value", lambda *args: None)
     monkeypatch.setenv("ASCENTO_REPOSITORY_COMMIT", "container-commit")

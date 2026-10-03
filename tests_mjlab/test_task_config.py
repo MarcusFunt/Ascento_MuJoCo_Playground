@@ -84,6 +84,23 @@ def test_balance_rl_config_enforces_normalized_actions_and_instrumented_ppo():
     assert cfg.algorithm.lam == pytest.approx(0.97)
 
 
+def test_quiet_balance_is_versioned_and_uses_horizon_curriculum():
+    from mjlab.tasks.registry import load_runner_cls
+
+    from ascento_mjlab.horizon_curriculum import HorizonCurriculumRunner
+
+    balance_cfg = load_env_cfg("Ascento-Balance-Flat")
+    quiet_cfg = load_env_cfg("Ascento-Balance-Quiet-Flat")
+
+    assert balance_cfg.task_id == "Ascento-Balance-Flat"
+    assert "settled_action_second_difference" not in balance_cfg.rewards
+    assert quiet_cfg.task_id == "Ascento-Balance-Quiet-Flat"
+    assert quiet_cfg.rewards["settled_action_second_difference"].weight == pytest.approx(-0.50)
+    assert quiet_cfg.rewards["settled_body_rocking"].weight == pytest.approx(-0.10)
+    assert "balance_push" not in quiet_cfg.events
+    assert load_runner_cls("Ascento-Balance-Quiet-Flat") is HorizonCurriculumRunner
+
+
 def test_velocity_stage_has_no_reward_that_penalizes_its_commands():
     from mjlab.tasks.registry import load_runner_cls
 

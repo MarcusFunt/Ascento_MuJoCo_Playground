@@ -619,6 +619,9 @@ def build_run_info(run_dir: Path, root: Path, stage: str) -> dict[str, Any]:
         "horizon_stationary_quality_fraction": _first(
             (status, manifest), "horizon_stationary_quality_fraction"
         ),
+        "horizon_quality_failure_counts": _first(
+            (status, manifest), "horizon_quality_failure_counts"
+        ),
         "rollout_steps_per_env": rollout_steps_per_env,
         "num_envs": num_envs,
         "long_horizon_candidate_checkpoint": _first(

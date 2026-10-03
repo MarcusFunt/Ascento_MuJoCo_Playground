@@ -38,6 +38,8 @@ HORIZON_CURRICULUM_RE = re.compile(
     r"(?:\s+transition=(?P<transition>\S+))?"
     r"(?:\s+timeout_fraction=(?P<timeout>\S+))?"
     r"(?:\s+quality_fraction=(?P<quality>\S+))?"
+    r"(?:\s+(?P<quality_failures>quality_fail_[a-z0-9_]+=\d+"
+    r"(?:\s+quality_fail_[a-z0-9_]+=\d+)*))?"
     r"(?:\s+candidate_checkpoint=(?P<candidate>\S+))?"
 )
 CHECKPOINT_READ_ERRORS = (EOFError, OSError, pickle.UnpicklingError, RuntimeError, ValueError)
@@ -260,6 +262,13 @@ def _runtime_status_from_line(line: str) -> dict[str, Any]:
             values["horizon_timeout_fraction"] = float(horizon.group("timeout"))
         if horizon.group("quality") is not None:
             values["horizon_stationary_quality_fraction"] = float(horizon.group("quality"))
+        if horizon.group("quality_failures") is not None:
+            values["horizon_quality_failure_counts"] = {
+                name: int(count)
+                for name, count in re.findall(
+                    r"quality_fail_([a-z0-9_]+)=(\d+)", horizon.group("quality_failures")
+                )
+            }
         if horizon.group("candidate") is not None:
             values["long_horizon_candidate_checkpoint"] = horizon.group("candidate")
     return values

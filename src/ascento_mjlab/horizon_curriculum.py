@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,42 @@ from .provenance_runner import AscentoProvenanceRunner
 
 HORIZON_SCHEDULE_S = (20.0, 60.0, 120.0, 300.0)
 """Successive episode horizons used by balance and velocity training."""
+
+
+@dataclass(frozen=True)
+class QualityEpisodeOutcome:
+    """Quality result for one completed episode, including each failed condition."""
+
+    failed_conditions: tuple[str, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return not self.failed_conditions
+
+
+def _quality_episode_outcomes(
+    samples: torch.Tensor,
+    rms: torch.Tensor,
+    thresholds: torch.Tensor,
+    metric_names: tuple[str, ...],
+    minimum_samples: int,
+    insufficient_samples_name: str,
+) -> list[QualityEpisodeOutcome]:
+    enough_samples = samples >= minimum_samples
+    # Keep the historical ``rms <= threshold`` pass condition: negating it
+    # rejects NaNs as well as values above the threshold.
+    metric_failures = ~(rms <= thresholds.unsqueeze(0)) & enough_samples.unsqueeze(1)
+    failures_by_episode = metric_failures.cpu().tolist()
+    enough_by_episode = enough_samples.cpu().tolist()
+    outcomes = []
+    for metric_failures_for_episode, enough in zip(failures_by_episode, enough_by_episode, strict=True):
+        failed_conditions = tuple(
+            name for name, failed in zip(metric_names, metric_failures_for_episode, strict=True) if failed
+        )
+        if not enough:
+            failed_conditions += (insufficient_samples_name,)
+        outcomes.append(QualityEpisodeOutcome(failed_conditions))
+    return outcomes
 
 
 class HorizonCurriculumRunner(AscentoProvenanceRunner):
@@ -76,8 +113,9 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
         self._top_horizon_success_windows = 0
         self._best_top_horizon_timeout_fraction = -1.0
         self._pending_completion_outcomes: list[bool] = []
-        self._pending_quality_outcomes: list[bool] = []
+        self._pending_quality_outcomes: list[QualityEpisodeOutcome] = []
         self._quality_passes_in_window = 0
+        self._quality_failure_counts = {name: 0 for name in self.quality_failure_names}
         self._last_quality_fraction = 0.0
         self._stationary_quality_sums = torch.zeros(
             (env.num_envs, len(self.stationary_quality_thresholds)), device=env.device
@@ -100,6 +138,10 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
     @property
     def _at_top_horizon(self) -> bool:
         return self._schedule_index == len(HORIZON_SCHEDULE_S) - 1
+
+    @property
+    def quality_failure_names(self) -> tuple[str, ...]:
+        return (*self.stationary_quality_thresholds, "insufficient_stationary_samples")
 
     def _step(self, actions: torch.Tensor) -> tuple[Any, torch.Tensor, torch.Tensor, dict]:
         self._accumulate_stationary_quality(actions)
@@ -172,10 +214,10 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
         self._stationary_quality_sums += torch.where(mask, torch.square(values), 0.0)
         self._stationary_quality_samples += stationary.float()
 
-    def _finish_quality_episodes(self, done_ids: torch.Tensor) -> list[bool]:
+    def _finish_quality_episodes(self, done_ids: torch.Tensor) -> list[QualityEpisodeOutcome]:
         """Convert accumulated per-environment stationarity into pass/fail outcomes."""
         if not hasattr(self, "_stationary_quality_sums"):
-            return [True] * int(done_ids.numel())
+            return [QualityEpisodeOutcome()] * int(done_ids.numel())
         samples = self._stationary_quality_samples[done_ids]
         rms = torch.sqrt(
             self._stationary_quality_sums[done_ids] / samples.clamp_min(1.0).unsqueeze(1)
@@ -183,10 +225,17 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
         thresholds = torch.tensor(
             tuple(self.stationary_quality_thresholds.values()), device=rms.device, dtype=rms.dtype
         )
-        passed = (samples >= self.stationary_min_samples) & torch.all(rms <= thresholds, dim=1)
+        outcomes = _quality_episode_outcomes(
+            samples,
+            rms,
+            thresholds,
+            tuple(self.stationary_quality_thresholds),
+            self.stationary_min_samples,
+            "insufficient_stationary_samples",
+        )
         self._stationary_quality_sums[done_ids] = 0.0
         self._stationary_quality_samples[done_ids] = 0.0
-        return [bool(value) for value in passed.cpu().tolist()]
+        return outcomes
 
     def _record_completion_outcomes(self, timeouts: torch.Tensor) -> None:
         """Queue ordered timeout outcomes and evaluate only complete windows."""
@@ -199,7 +248,9 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
         timeout_values = [bool(value) for value in timeouts.cpu().tolist()]
         self._pending_completion_outcomes.extend(timeout_values)
         if len(quality_queue) < len(timeout_values):
-            quality_queue.extend([True] * (len(timeout_values) - len(quality_queue)))
+            quality_queue.extend(
+                [QualityEpisodeOutcome()] * (len(timeout_values) - len(quality_queue))
+            )
         while len(self._pending_completion_outcomes) >= self.completion_window_episodes:
             window = self._pending_completion_outcomes[: self.completion_window_episodes]
             del self._pending_completion_outcomes[: self.completion_window_episodes]
@@ -207,7 +258,11 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
             del quality_queue[: self.completion_window_episodes]
             self._completed_in_window = self.completion_window_episodes
             self._timeouts_in_window = sum(window)
-            self._quality_passes_in_window = sum(quality_window)
+            self._quality_passes_in_window = sum(outcome.passed for outcome in quality_window)
+            self._quality_failure_counts = {
+                name: sum(name in outcome.failed_conditions for outcome in quality_window)
+                for name in self.quality_failure_names
+            }
             self._evaluate_completion_window()
 
     def _evaluate_completion_window(self) -> None:
@@ -281,6 +336,7 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
         self._emit_status(
             timeout_fraction=timeout_fraction,
             quality_fraction=quality_fraction,
+            quality_failure_counts=getattr(self, "_quality_failure_counts", {}),
             transition=transition,
             candidate_saved=candidate_saved,
         )
@@ -343,6 +399,7 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
         *,
         timeout_fraction: float | None,
         quality_fraction: float | None = None,
+        quality_failure_counts: dict[str, int] | None = None,
         transition: str = "held",
         candidate_saved: bool = False,
     ) -> None:
@@ -360,6 +417,9 @@ class HorizonCurriculumRunner(AscentoProvenanceRunner):
             parts.append(f"timeout_fraction={timeout_fraction:.4f}")
         if quality_fraction is not None:
             parts.append(f"quality_fraction={quality_fraction:.4f}")
+            for name in self.quality_failure_names:
+                count = (quality_failure_counts or {}).get(name, 0)
+                parts.append(f"quality_fail_{name}={count}")
         if candidate_saved:
             parts.append(f"candidate_checkpoint={self.top_horizon_candidate_name}")
         print("HORIZON_CURRICULUM " + " ".join(parts), flush=True)
@@ -381,6 +441,10 @@ class VelocityHorizonCurriculumRunner(HorizonCurriculumRunner):
         "velocity_tracking_rmse": 0.25,
         "height_tracking_rmse": 0.08,
     }
+
+    @property
+    def quality_failure_names(self) -> tuple[str, ...]:
+        return (*self.tracking_quality_thresholds, "insufficient_tracking_samples")
 
     def __init__(
         self,
@@ -421,10 +485,10 @@ class VelocityHorizonCurriculumRunner(HorizonCurriculumRunner):
         self._tracking_quality_sums += torch.stack((velocity_error_sq, height_error_sq), dim=1)
         self._tracking_quality_samples += 1.0
 
-    def _finish_quality_episodes(self, done_ids: torch.Tensor) -> list[bool]:
+    def _finish_quality_episodes(self, done_ids: torch.Tensor) -> list[QualityEpisodeOutcome]:
         """Require adequate twist and height tracking before horizon promotion."""
         if not hasattr(self, "_tracking_quality_sums"):
-            return [True] * int(done_ids.numel())
+            return [QualityEpisodeOutcome()] * int(done_ids.numel())
         samples = self._tracking_quality_samples[done_ids]
         rms = torch.sqrt(
             self._tracking_quality_sums[done_ids] / samples.clamp_min(1.0).unsqueeze(1)
@@ -432,7 +496,14 @@ class VelocityHorizonCurriculumRunner(HorizonCurriculumRunner):
         thresholds = torch.tensor(
             tuple(self.tracking_quality_thresholds.values()), device=rms.device, dtype=rms.dtype
         )
-        passed = (samples >= self.tracking_min_samples) & torch.all(rms <= thresholds, dim=1)
+        outcomes = _quality_episode_outcomes(
+            samples,
+            rms,
+            thresholds,
+            tuple(self.tracking_quality_thresholds),
+            self.tracking_min_samples,
+            "insufficient_tracking_samples",
+        )
         self._tracking_quality_sums[done_ids] = 0.0
         self._tracking_quality_samples[done_ids] = 0.0
-        return [bool(value) for value in passed.cpu().tolist()]
+        return outcomes

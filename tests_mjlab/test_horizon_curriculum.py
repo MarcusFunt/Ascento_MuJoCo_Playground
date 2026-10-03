@@ -127,6 +127,62 @@ def test_horizon_does_not_promote_when_stationary_quality_fails(monkeypatch):
     assert runner.env.unwrapped.cfg.episode_length_s == 20.0
 
 
+def test_stationary_quality_reports_failed_metrics_per_episode():
+    runner = _runner()
+    runner._stationary_quality_sums = torch.zeros((3, len(runner.stationary_quality_thresholds)))
+    runner._stationary_quality_samples = torch.tensor([60.0, 60.0, 49.0])
+    runner._stationary_quality_sums[0, 4] = 60.0 * (0.02**2)
+    runner._stationary_quality_sums[1, 5] = 60.0 * (0.02**2)
+
+    outcomes = runner._finish_quality_episodes(torch.tensor([0, 1, 2]))
+
+    assert [outcome.failed_conditions for outcome in outcomes] == [
+        ("action_rate_rms",),
+        ("action_second_difference_rms",),
+        ("insufficient_stationary_samples",),
+    ]
+
+
+def test_stationary_quality_rejects_nan_metrics():
+    runner = _runner()
+    runner._stationary_quality_sums = torch.zeros((1, len(runner.stationary_quality_thresholds)))
+    runner._stationary_quality_samples = torch.tensor([60.0])
+    runner._stationary_quality_sums[0, 0] = float("nan")
+
+    outcomes = runner._finish_quality_episodes(torch.tensor([0]))
+
+    assert outcomes[0].failed_conditions == ("tilt_rms",)
+
+
+def test_completion_window_logs_overlapping_quality_failure_counts(monkeypatch):
+    runner = _runner()
+    runner._stationary_quality_sums = torch.zeros(
+        (runner.completion_window_episodes, len(runner.stationary_quality_thresholds))
+    )
+    runner._stationary_quality_samples = torch.full((runner.completion_window_episodes,), 60.0)
+    runner._stationary_quality_sums[0, 4] = 60.0 * (0.02**2)
+    runner._stationary_quality_sums[1, 5] = 60.0 * (0.02**2)
+    runner._stationary_quality_samples[2] = 49.0
+    outcomes = runner._finish_quality_episodes(
+        torch.arange(runner.completion_window_episodes)
+    )
+    runner._pending_quality_outcomes.extend(outcomes)
+    statuses = []
+    monkeypatch.setattr(runner, "_emit_status", lambda **values: statuses.append(values))
+
+    runner._record_completion_outcomes(torch.ones(runner.completion_window_episodes, dtype=torch.bool))
+
+    assert statuses[0]["quality_failure_counts"] == {
+        "tilt_rms": 0,
+        "planar_speed_rms": 0,
+        "heading_error_rms": 0,
+        "effort_rms": 0,
+        "action_rate_rms": 1,
+        "action_second_difference_rms": 1,
+        "insufficient_stationary_samples": 1,
+    }
+
+
 def test_velocity_quality_accepts_matched_twist_and_height_commands():
     runner = _velocity_runner(
         actual_twist=torch.tensor([[0.40, 0.0, 0.40], [-0.25, 0.0, 0.0]]),
@@ -138,7 +194,10 @@ def test_velocity_quality_accepts_matched_twist_and_height_commands():
     for _ in range(VelocityHorizonCurriculumRunner.tracking_min_samples):
         runner._accumulate_stationary_quality(torch.empty((2, 6)))
 
-    assert runner._finish_quality_episodes(torch.tensor([0, 1])) == [True, True]
+    assert [outcome.passed for outcome in runner._finish_quality_episodes(torch.tensor([0, 1]))] == [
+        True,
+        True,
+    ]
 
 
 def test_velocity_quality_rejects_survival_without_command_tracking():
@@ -152,7 +211,7 @@ def test_velocity_quality_rejects_survival_without_command_tracking():
     for _ in range(VelocityHorizonCurriculumRunner.tracking_min_samples):
         runner._accumulate_stationary_quality(torch.empty((1, 6)))
 
-    assert runner._finish_quality_episodes(torch.tensor([0])) == [False]
+    assert [outcome.passed for outcome in runner._finish_quality_episodes(torch.tensor([0]))] == [False]
 
 
 def test_horizon_rollover_preserves_surplus_completions(monkeypatch):

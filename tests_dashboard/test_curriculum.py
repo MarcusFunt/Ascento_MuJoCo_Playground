@@ -6,13 +6,18 @@ from dashboard.curriculum import curriculum_for_run
 def test_horizon_curriculum_exposes_promotion_and_failure_gates():
     detail = {
         "run_info": {
-            "task": "Ascento-Balance-Flat",
+            "task": "Ascento-Balance-Quiet-Flat",
             "episode_horizon_s": 60.0,
             "horizon_stage": 2,
             "horizon_qualified_windows": 4,
             "horizon_failed_windows": 0,
             "horizon_timeout_fraction": 0.941,
             "horizon_stationary_quality_fraction": 0.927,
+            "horizon_quality_failure_counts": {
+                "action_rate_rms": 81,
+                "action_second_difference_rms": 230,
+                "insufficient_stationary_samples": 12,
+            },
             "horizon_transition": "held",
         },
         "telemetry": {"iteration": 4833},
@@ -32,6 +37,11 @@ def test_horizon_curriculum_exposes_promotion_and_failure_gates():
     assert curriculum["promotion"]["required_windows"] == 6
     assert curriculum["promotion"]["timeout_threshold"] == 0.90
     assert curriculum["promotion"]["quality_threshold"] == 0.90
+    assert curriculum["promotion"]["quality_failure_counts"] == {
+        "action_rate_rms": 81,
+        "action_second_difference_rms": 230,
+        "insufficient_stationary_samples": 12,
+    }
     assert curriculum["demotion"]["required_windows"] == 4
     assert curriculum["protected"] is False
 

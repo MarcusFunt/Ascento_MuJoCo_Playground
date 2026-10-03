@@ -18,6 +18,9 @@ def ascento_balance_quiet_env_cfg(play: bool = False, num_envs: int = 512):
     changing the old checkpoint's reward contract.
     """
     cfg = ascento_balance_env_cfg(play=play, num_envs=num_envs)
+    # Keep this task focused on undisturbed equilibrium quality. Recovery
+    # disturbances belong to the separately configured recovery curriculum.
+    cfg.events.pop("balance_push", None)
     cfg.rewards["settled_action_second_difference"] = RewardTermCfg(
         func=ascento_mdp.rewards.settled_action_second_difference_penalty,
         weight=-0.50,

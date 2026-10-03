@@ -12,6 +12,7 @@ HORIZON_FAILURE_THRESHOLD = 0.50
 
 HORIZON_TASKS = {
     "Ascento-Balance-Flat",
+    "Ascento-Balance-Quiet-Flat",
     "Ascento-Velocity-Flat",
     "Ascento-Balance-Recovery-Flat",
 }
@@ -122,6 +123,7 @@ def curriculum_for_run(detail: dict[str, Any] | None) -> dict[str, Any] | None:
                 "timeout_threshold": HORIZON_SUCCESS_THRESHOLD,
                 "quality_fraction": _number(run_info.get("horizon_stationary_quality_fraction")),
                 "quality_threshold": HORIZON_SUCCESS_THRESHOLD,
+                "quality_failure_counts": run_info.get("horizon_quality_failure_counts"),
             },
             "demotion": {
                 "failed_windows": failed,
