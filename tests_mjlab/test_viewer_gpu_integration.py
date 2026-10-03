@@ -1,3 +1,4 @@
+import itertools
 import socket
 from dataclasses import asdict
 from pathlib import Path
@@ -13,7 +14,10 @@ from mjlab.viewer.viser.viewer import CheckpointManager
 
 import ascento_mjlab.tasks  # noqa: F401
 from ascento_mjlab.evaluation.policy import RslRlPolicyAdapter
+from ascento_mjlab.structured_action import StructuredTargetAction
 from ascento_mjlab.viewer.checkpoints import discover_checkpoints
+from ascento_mjlab.viewer.introspection import PolicyIntrospector, StructuredActionObserver
+from ascento_mjlab.viewer.introspection_contract import resolve_runtime_handles
 from ascento_mjlab.viewer.worker import (
     _FollowViserPlayViewer,
     _load_actor_transactionally,
@@ -47,11 +51,35 @@ def _viewer_stack(tmp_path: Path):
     env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
     runner_cls = load_runner_cls(task) or MjlabOnPolicyRunner
     runner = runner_cls(env, asdict(agent_cfg), device="cuda:0")
+    structured_action_term = next(
+        (
+            base_env.action_manager.get_term(name)
+            for name in base_env.action_manager.active_terms
+            if isinstance(base_env.action_manager.get_term(name), StructuredTargetAction)
+        ),
+        None,
+    )
+    assert structured_action_term is not None
+    action_observer = StructuredActionObserver(structured_action_term)
+    handles = resolve_runtime_handles(runner)
+    sequence_counter = itertools.count(1)
+    current_policy = None
 
     def load_policy(name: str):
+        nonlocal current_policy
         path = tmp_path / name
         _load_actor_transactionally(runner, path, canonical_cfg, device="cuda:0")
-        return _ViewerPolicy(RslRlPolicyAdapter(runner, path, deterministic=True))
+        candidate = _ViewerPolicy(
+            RslRlPolicyAdapter(runner, path, deterministic=True),
+            PolicyIntrospector(handles, checkpoint=name, jacobian_hz=0),
+            action_observer,
+            sequence_counter.__next__,
+            wrapper_clip=agent_cfg.clip_actions,
+        )
+        if current_policy is not None:
+            current_policy.close()
+        current_policy = candidate
+        return candidate
 
     def fetch_available():
         return [
@@ -59,12 +87,17 @@ def _viewer_stack(tmp_path: Path):
             for info in discover_checkpoints(tmp_path, stable_age_seconds=0)
         ]
 
-    return env, runner, load_policy, fetch_available
+    def close_observers():
+        if current_policy is not None:
+            current_policy.close()
+        action_observer.close()
+
+    return env, runner, load_policy, fetch_available, close_observers
 
 
 def _run_switch_case(tmp_path: Path, *, follow: bool) -> tuple[str, str]:
     tmp_path.mkdir(parents=True, exist_ok=True)
-    env, runner, load_policy, fetch_available = _viewer_stack(tmp_path)
+    env, runner, load_policy, fetch_available, close_observers = _viewer_stack(tmp_path)
     first = tmp_path / "model_100.pt"
     _save(runner, first, 100)
     policy = load_policy(first.name)
@@ -99,6 +132,7 @@ def _run_switch_case(tmp_path: Path, *, follow: bool) -> tuple[str, str]:
         return before, manager.current_name
     finally:
         viewer.close()
+        close_observers()
         env.close()
         server.stop()
 

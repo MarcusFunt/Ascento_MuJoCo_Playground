@@ -62,6 +62,12 @@ class RunRef:
     relative_path: str
 
 
+def invalidate_discovery_cache(root: Path) -> None:
+    """Force the next lookup to see newly created or removed run markers."""
+    with _DISCOVERY_LOCK:
+        _DISCOVERY_CACHE.pop(root.expanduser().resolve(), None)
+
+
 def _inside(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())

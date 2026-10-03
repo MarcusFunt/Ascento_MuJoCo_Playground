@@ -161,6 +161,29 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
     assert metadata["run_id"] == created["id"]
 
 
+def test_create_run_is_immediately_visible_after_cached_empty_discovery(monkeypatch, tmp_path):
+    class FakeProcess:
+        pid = 4321
+
+    monkeypatch.setattr(
+        "dashboard.run_service.subprocess.Popen",
+        lambda *_args, **_kwargs: FakeProcess(),
+    )
+    monkeypatch.setattr(
+        "dashboard.run_service.working_tree_state",
+        lambda _: WorkingTreeState("abc123", "main", (), ()),
+    )
+    service = RunService(tmp_path)
+
+    assert service_compare_ids(service, tmp_path) == []
+    created = service.create({"display_name": "Campaign stage"})
+
+    progress = service.progress(created["id"])
+
+    assert progress["id"] == created["id"]
+    assert progress["state"] == "starting"
+
+
 def test_create_rejects_horizon_for_non_progressive_tasks(tmp_path):
     service = RunService(tmp_path)
 

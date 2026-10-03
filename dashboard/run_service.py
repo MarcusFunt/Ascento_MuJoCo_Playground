@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from dashboard.config import REPO_ROOT
 from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
+from dashboard.monitor import invalidate_discovery_cache
 from dashboard.provenance import working_tree_state
 from dashboard.task_catalog import horizon_task_ids, task_ids
 from dashboard.versioning import annotate_run_summary, classify_run_version
@@ -303,6 +304,10 @@ class RunService:
             )
         except OSError as error:
             raise OSError(f"cannot initialize run directory {run_dir}: {error}") from error
+
+        # A preflight run listing may have cached an empty discovery snapshot.
+        # The new starting marker must be visible to the immediate progress poll.
+        invalidate_discovery_cache(self.artifact_root)
 
         command = [
             sys.executable,
