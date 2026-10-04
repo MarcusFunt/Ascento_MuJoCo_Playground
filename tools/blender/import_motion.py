@@ -24,7 +24,6 @@ from typing import Any
 
 import numpy as np
 
-
 SIM_TO_URDF_JOINT = {
   "left_hip": "ascento/hip_left",
   "left_knee": "ascento/knee_left",
@@ -639,7 +638,7 @@ def _mesh_object(
     face_material_indices.append(palette_indices[rgba_key])
   for material in palette:
     mesh.materials.append(material)
-  for polygon, material_index in zip(mesh.polygons, face_material_indices):
+  for polygon, material_index in zip(mesh.polygons, face_material_indices, strict=True):
     polygon.material_index = material_index
     polygon.use_smooth = True
   return obj
@@ -1268,7 +1267,9 @@ def _apply_wheel_floor_clearance(
     root_matrix = root_object.evaluated_get(depsgraph).matrix_world.copy()
     root_inverse = root_matrix.inverted()
 
-    def local_wheel_points(source_objects: list[Any]) -> list[Vector]:
+    def local_wheel_points(
+      source_objects: list[Any], root_inverse: Any, depsgraph: Any
+    ) -> list[Vector]:
       return [
         root_inverse @ (wheel.evaluated_get(depsgraph).matrix_world @ Vector(corner))
         for source in source_objects
@@ -1290,10 +1291,10 @@ def _apply_wheel_floor_clearance(
     correction_rotation = Quaternion((1.0, 0.0, 0.0, 0.0))
     support_points: list[Vector] = []
     if has_side_pair and all(supported):
-      left_points = local_wheel_points(wheels_by_side["left"])
-      right_points = local_wheel_points(wheels_by_side["right"])
+      left_points = local_wheel_points(wheels_by_side["left"], root_inverse, depsgraph)
+      right_points = local_wheel_points(wheels_by_side["right"], root_inverse, depsgraph)
 
-      def wheel_bottom(points: list[Vector], roll: float) -> float:
+      def wheel_bottom(points: list[Vector], roll: float, root_matrix: Any) -> float:
         roll_rotation = Quaternion((1.0, 0.0, 0.0), roll)
         return min((root_matrix @ (roll_rotation @ point)).z for point in points)
 
@@ -1302,12 +1303,18 @@ def _apply_wheel_floor_clearance(
       # root already leans, which is exactly when one wheel appears suspended.
       limit = math.radians(12.0)
       lower, upper = -limit, limit
-      lower_delta = wheel_bottom(left_points, lower) - wheel_bottom(right_points, lower)
-      upper_delta = wheel_bottom(left_points, upper) - wheel_bottom(right_points, upper)
+      lower_delta = wheel_bottom(left_points, lower, root_matrix) - wheel_bottom(
+        right_points, lower, root_matrix
+      )
+      upper_delta = wheel_bottom(left_points, upper, root_matrix) - wheel_bottom(
+        right_points, upper, root_matrix
+      )
       if lower_delta * upper_delta <= 0.0:
         for _iteration in range(32):
           middle = (lower + upper) * 0.5
-          middle_delta = wheel_bottom(left_points, middle) - wheel_bottom(right_points, middle)
+          middle_delta = wheel_bottom(left_points, middle, root_matrix) - wheel_bottom(
+            right_points, middle, root_matrix
+          )
           if lower_delta * middle_delta <= 0.0:
             upper = middle
             upper_delta = middle_delta
@@ -1318,15 +1325,18 @@ def _apply_wheel_floor_clearance(
       else:
         roll = min(
           (-limit, 0.0, limit),
-          key=lambda angle: abs(wheel_bottom(left_points, angle) - wheel_bottom(right_points, angle)),
+          key=lambda angle: abs(
+            wheel_bottom(left_points, angle, root_matrix)
+            - wheel_bottom(right_points, angle, root_matrix)
+          ),
         )
       correction_rotation = Quaternion((1.0, 0.0, 0.0), roll)
       support_points = left_points + right_points
     elif has_side_pair and any(supported):
       side = "left" if supported[0] else "right"
-      support_points = local_wheel_points(wheels_by_side[side])
+      support_points = local_wheel_points(wheels_by_side[side], root_inverse, depsgraph)
     elif assume_grounded and not has_side_pair:
-      support_points = local_wheel_points(wheel_meshes)
+      support_points = local_wheel_points(wheel_meshes, root_inverse, depsgraph)
 
     if support_points:
       # Evaluate the corrected wheel points in world space. Adding only their
@@ -1335,7 +1345,7 @@ def _apply_wheel_floor_clearance(
       corrected_world_points = [root_matrix @ (correction_rotation @ point) for point in support_points]
       vertical_correction = floor_z - min(point.z for point in corrected_world_points)
     else:
-      all_points = local_wheel_points(wheel_meshes)
+      all_points = local_wheel_points(wheel_meshes, root_inverse, depsgraph)
       lowest_world_z = min((root_matrix @ point).z for point in all_points)
       vertical_correction = max(0.0, floor_z - lowest_world_z)
 

@@ -81,7 +81,7 @@ class CinematicCameraTests(unittest.TestCase):
     scene.collection.objects.link(robot_mesh)
     robot_mesh.parent = root_object
     robot_mesh["ascento_visual_mesh"] = True
-    for frame, position, quaternion in zip(range(1, 14), root_pos, root_quat):
+    for frame, position, quaternion in zip(range(1, 14), root_pos, root_quat, strict=True):
       root_object.location = tuple(position)
       root_object.rotation_mode = "QUATERNION"
       root_object.rotation_quaternion = tuple(quaternion)
