@@ -231,7 +231,7 @@
     "capture_root": {
       "default": "captures",
       "formats": [
-        "NPZ state channels",
+        "NPZ state channels with named joints and task/physics provenance",
         "optional MP4 clips"
       ]
     },

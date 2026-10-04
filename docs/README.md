@@ -9,6 +9,7 @@ operate them.
 | Understand the simulator, plant, modules, and boundaries | [Architecture](architecture.md) |
 | Set up, update, and operate a workstation or container | [Operations](operations.md) |
 | Train or continue a policy | [Training](training.md) |
+| Capture a motion clip and turn it into a Blender scene | [Motion capture and Blender animation](animation.md) |
 | Decide whether a checkpoint passes | [Evaluation](evaluation.md) |
 | Use every `ascento` command | [CLI reference](cli-reference.md) |
 | Let an agent monitor or operate the project | [MCP reference](mcp-reference.md) |
