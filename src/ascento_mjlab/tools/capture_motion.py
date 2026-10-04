@@ -21,6 +21,7 @@ import ascento_mjlab.tasks  # noqa: F401
 from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
 from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
+from ascento_mjlab.robot_cfg import JOINT_NAMES
 from ascento_mjlab.task_contract import current_task_contract_for_task
 
 
@@ -221,6 +222,7 @@ def capture(
                     "checkpoint": str(checkpoint) if checkpoint is not None else "",
                     "model_sha256": checkpoint_hash,
                     "physics_profile": PHYSICS_PROFILE.name,
+                    "joint_names": json.dumps(JOINT_NAMES),
                     "reward_schema": REWARD_SCHEMA_VERSION,
                     "action_contract": current_action_contract()["id"],
                     "task_contract": current_task_contract_for_task(task)["topology_sha256"],

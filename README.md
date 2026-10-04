@@ -14,6 +14,7 @@ documentation set is indexed in [docs/README.md](docs/README.md):
   task/gate workflow;
 - [operations](docs/operations.md), [dashboard](docs/dashboard.md), and
   [troubleshooting](docs/troubleshooting.md);
+- [motion capture and Blender animation](docs/animation.md);
 - the complete [CLI reference](docs/cli-reference.md) and
   [MCP reference](docs/mcp-reference.md);
 - machine-readable inventories in
@@ -28,7 +29,7 @@ agent-oriented guide for using the same CLI safely.
 ## Architecture
 
 ```text
-MJCF → MuJoCo Warp → mjlab managers → RSL-RL PPO → RecorderManager → animation export
+MJCF → MuJoCo Warp → mjlab managers → RSL-RL PPO → RecorderManager → Blender animation
 ```
 
 mjlab owns scene/entity construction, action and observation managers, commands,
@@ -406,6 +407,7 @@ specific important plant regression.
 - `src/ascento_mjlab/mdp/`: Ascento observations, rewards, resets, semantics, metrics.
 - `src/ascento_mjlab/tasks/`: balance, velocity, recovery, and flat-jump configs.
 - `src/ascento_mjlab/tools/`: smoke, model inspection, plant comparison, capture, clip processing, and motion-quality ranking.
+- `tools/blender/import_motion.py`: URDF mesh and captured motion importer for Blender.
 - `dashboard/`: run-management, monitoring, System/update UI, and host-supervisor client.
 - `scripts/host_supervisor.py`: fixed-operation host update boundary.
 - `tests_mjlab/`: migration unit and integration tests.
