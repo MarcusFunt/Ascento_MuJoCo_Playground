@@ -44,6 +44,12 @@ _TASKS: tuple[dict[str, Any], ...] = (
         "supports_horizon": False,
     },
     {
+        "id": "Ascento-Locomotion-Gate-Hold-Flat",
+        "label": "Locomotion (gate hold)",
+        "description": "Locomotion with a held reset target for the gate-like training subset.",
+        "supports_horizon": False,
+    },
+    {
         "id": "Ascento-Velocity-Flat",
         "label": "Velocity",
         "description": "Command tracking with adaptive 20→60→120→300 s horizons.",
