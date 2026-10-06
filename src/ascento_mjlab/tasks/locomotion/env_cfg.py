@@ -23,10 +23,11 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
     height commands, so compatible balance actor weights can be transferred
     without a policy input/output adapter.
 
-    Each reset starts with an immediate 2--3 m target. After the robot
-    arrives and settles briefly, another bounded target is sampled. Training
-    episodes default to 60 seconds so one episode contains many independent
-    go-to-pose attempts instead of a single short movement sequence.
+    During training, each reset starts with an immediate 2--3 m target. After
+    the robot arrives and settles briefly, another bounded target is sampled.
+    Training episodes default to 60 seconds so one episode contains many
+    independent go-to-pose attempts. In play mode the target starts at the
+    reset pose and remains under evaluator or viewer control.
     """
     cfg = ascento_balance_quiet_env_cfg(play=play, num_envs=num_envs)
     cfg.scene.env_spacing = 10.0
@@ -78,4 +79,27 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
             raise ValueError("ASCENTO_LOCOMOTION_EPISODE_LENGTH_S must be positive")
         cfg.episode_length_s = episode_length_s
     cfg.task_id = "Ascento-Locomotion-Flat"
+    return cfg
+
+
+def ascento_locomotion_gate_hold_env_cfg(play: bool = False, num_envs: int = 512):
+    """Use a stationary reset target for the existing gate-like episode subset.
+
+    This opt-in task differs from ``Ascento-Locomotion-Flat`` only in the
+    initial target of its gate-like episodes. The 25% mixture, 4 s push,
+    9 s retarget, regular 2--3 m target sequence, rewards, observations,
+    and PPO configuration remain identical.
+    """
+    cfg = ascento_locomotion_env_cfg(play=play, num_envs=num_envs)
+    if not play:
+        target_params = dict(cfg.events["initialize_world_target"].params)
+        sequence_params = cfg.events["repeated_random_world_targets"].params
+        target_params["gate_like_fraction"] = sequence_params["gate_like_fraction"]
+        cfg.events["initialize_world_target"] = EventTermCfg(
+            func=ascento_mdp.events.initialize_gate_hold_locomotion_target,
+            mode="reset",
+            params=target_params,
+        )
+        sequence_params["gate_like_initial_hold"] = True
+    cfg.task_id = "Ascento-Locomotion-Gate-Hold-Flat"
     return cfg

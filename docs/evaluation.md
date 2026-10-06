@@ -28,6 +28,8 @@ versioned, deterministic by default, and independent of training rewards.
 | `balance_gate_v5` | Balance | Current directional world-target gate; adds reset-heading and yaw-rate limits |
 | `balance_recovery_edge_v1` | Balance recovery | 256-case fast screen concentrated on +0.08..+0.15 rad pitch with expanded roll/pitch-rate and translation ranges |
 | `velocity_gate_v1` | Velocity | Deterministic twist/height command timelines |
+| `locomotion_sequence_gate_v1` | Locomotion | Historical 15 cm body-relative target after a push; retained unchanged for comparison |
+| `locomotion_waypoint_gate_v2` | Locomotion | Fixed world-map waypoints from 15 cm to 3 m, heading changes, a three-goal route, pushes, and sustained stop quality |
 | `recovery_gate_v1` | Recovery | Wide-reset recovery, strict success, time, and continuous hold |
 | `jump_gate_v1` | Jump | Takeoff, landing, recovered landing, distance, pre-impact speed, clearance, and hold |
 
@@ -96,6 +98,47 @@ Examples of task metrics include:
 - recovery: strict binary success, time from start, and stable-hold duration;
 - jump: takeoff, landing, recovered landing, post-landing hold, distance error,
   landing speed, clearance, and shaping magnitude.
+
+### World-waypoint gate
+
+`locomotion_waypoint_gate_v2` is a simulation gate with 240 fixed-seed scenarios
+in five 48-case families. A `world_target_pose = [x, y, yaw]` command sets an
+absolute target in each clone's local flat-world map frame: XY is relative to
+that clone's simulation origin and yaw is the world heading. The evaluator's
+exact reset starts at the current pose as the hold target. The 15 cm family
+retains the older gate's 4-second push, 9-second target command, and 20-second
+horizon; longer families command 1 m, 2 m, and 3 m targets. The 3 m target asks
+for a 90-degree final heading. The route family commands three distinct map
+waypoints and applies a push between its second and third commands.
+
+For this suite, a waypoint completes only after **0.75 seconds continuously**
+within 0.10 m position error, 0.20 rad heading error, 0.08 m/s planar speed,
+0.08 rad tilt, 0.25 rad/s roll/pitch and yaw rate, with both wheels supported.
+Every commanded waypoint must complete before the next one is counted. The
+final target must be inside that same envelope for **1.0 second immediately
+before the horizon**. The gate also measures the full last 2 seconds after the
+final command. A brief radius crossing therefore cannot establish route
+completion or a stable stop. Failed/short episodes receive a finite failing
+value for stop-window numeric metrics, so percentiles cannot omit them.
+
+Each family gates survival (`Wilson lower >= 0.85`), full waypoint sequence and
+final stopped state (`Wilson lower >= 0.80`), final position (`p95 <= 0.10 m`),
+heading (`p95 <= 0.20 rad`), and speed (`p95 <= 0.08 m/s`). The last 2 seconds
+also gate position, heading, speed, tilt (`p95 <= 0.05 rad`), body rocking
+(`p95 <= 0.03 rad/s`), raw-action rate (`p95 <= 0.05`), raw-action second
+difference (`p95 <= 0.18`), and high-frequency action-power ratio
+(`p95 <= 0.10`, 10-Hz low-pass residual). The near-push family additionally
+gates recovery (`Wilson lower >= 0.80`). These are frozen waypoint-stop limits;
+the high-frequency ratio uses a continuous-filter **final-window** definition,
+whereas the quiet-quality suite samples stationary periods. Evaluate the
+quiet-quality and `balance_gate_v5` suites separately before selecting a model.
+
+Run a checkpoint against the waypoint suite with a GPU batch that fits 12 GiB:
+
+```bash
+ascento evaluate run --checkpoint /absolute/path/model.pt \
+  --suite locomotion_waypoint_gate_v2 --batch-size 48 --device cuda:0
+```
 
 The consistency audit verifies scenario/result identity and count, integer step
 timing, end-of-horizon semantics, finite values, physical effort bounds, metric

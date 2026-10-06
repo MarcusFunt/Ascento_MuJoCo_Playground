@@ -171,3 +171,19 @@ def test_repeated_target_sequence_has_gate_like_push_retarget_and_hold():
     for _ in range(20):
         sequence(env, None, **params)
     assert torch.equal(world_target_xy(env), settled_target)
+
+
+
+def test_gate_hold_reset_labels_and_holds_only_gate_like_targets():
+    from ascento_mjlab.mdp.events import (
+        initialize_gate_hold_locomotion_target,
+        world_target_xy,
+    )
+
+    env = _env(count=2)
+    current = env.scene["robot"].data.root_link_pos_w[:, :2].clone()
+
+    initialize_gate_hold_locomotion_target(env, gate_like_fraction=1.0)
+
+    assert env.ascento_locomotion_gate_like.tolist() == [True, True]
+    assert torch.allclose(world_target_xy(env), current)

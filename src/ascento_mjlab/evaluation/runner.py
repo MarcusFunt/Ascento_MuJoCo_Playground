@@ -66,7 +66,7 @@ def task_capabilities(task: str) -> set[str]:
     if "Balance" in task:
         capabilities.add("balance")
     if "Locomotion" in task:
-        capabilities.add("locomotion")
+        capabilities.update({"locomotion", "command:world_target_pose", "waypoint_dwell"})
     if "Speed" in task:
         capabilities.update({"command:speed", "speed_tracking"})
     if "Velocity" in task:
@@ -270,24 +270,60 @@ def _apply_world_target_offset(
         )
 
 
+def _apply_world_target_pose(
+    base_env: ManagerBasedRlEnv,
+    updates: list[tuple[int, tuple[float, ...]]],
+) -> None:
+    """Set absolute XY/yaw goals in each clone's local world-map frame.
+
+    Clone origins are translations of the same flat map.  This lets a suite
+    specify fixed map coordinates once and replay them in vectorized worlds.
+    """
+    target_xy = world_target_xy(base_env)
+    target_yaw = world_target_yaw(base_env)
+    origins = base_env.scene.env_origins
+    for env_id, values in updates:
+        if len(values) != 3:
+            raise RuntimeError("Command 'world_target_pose' expects x, y, and yaw values")
+        x, y, yaw = values
+        target_xy[env_id, 0] = origins[env_id, 0] + x
+        target_xy[env_id, 1] = origins[env_id, 1] + y
+        target_yaw[env_id] = torch.atan2(
+            torch.sin(target_yaw.new_tensor(yaw)), torch.cos(target_yaw.new_tensor(yaw))
+        )
+
+
 def _apply_commands(
     base_env: ManagerBasedRlEnv, scenarios: list[ScenarioSpec], step: int
 ) -> torch.Tensor:
-    target_updates = [
+    offset_updates = [
         (env_id, point.values)
         for env_id, scenario in enumerate(scenarios)
         for point in scenario.commands
         if point.step == step and point.name == "world_target_offset"
     ]
-    if target_updates:
-        _apply_world_target_offset(base_env, target_updates)
-    target_commanded = torch.zeros(base_env.num_envs, dtype=torch.bool, device=base_env.device)
-    if target_updates:
-        target_commanded[
-            torch.tensor([env_id for env_id, _ in target_updates], device=base_env.device)
-        ] = True
+    pose_updates = [
+        (env_id, point.values)
+        for env_id, scenario in enumerate(scenarios)
+        for point in scenario.commands
+        if point.step == step and point.name == "world_target_pose"
+    ]
+    offset_ids = {env_id for env_id, _ in offset_updates}
+    pose_ids = {env_id for env_id, _ in pose_updates}
+    if offset_ids & pose_ids:
+        raise RuntimeError("A scenario cannot set two world targets on the same step")
+    if offset_updates:
+        _apply_world_target_offset(base_env, offset_updates)
+    if pose_updates:
+        _apply_world_target_pose(base_env, pose_updates)
+    target_commanded = torch.zeros(
+        base_env.num_envs, dtype=torch.bool, device=base_env.device
+    )
+    updated_ids = sorted(offset_ids | pose_ids)
+    if updated_ids:
+        target_commanded[torch.tensor(updated_ids, device=base_env.device)] = True
     for name, updates in _command_values_for_step(scenarios, step).items():
-        if name == "world_target_offset":
+        if name in {"world_target_offset", "world_target_pose"}:
             continue
         term_name = "speed" if name == "speed_fraction" else name
         try:
@@ -721,6 +757,58 @@ def _run_batch(
     sum_post_target_heading_error_sq = torch.zeros(count, device=dev)
     post_target_samples = torch.zeros(count, device=dev)
 
+    # Waypoint accounting is intentionally separate from the legacy
+    # target_arrived metric, which records a single radius crossing.  The v2
+    # gate requires sustained arrival at every command and a fresh final stop.
+    waypoint_steps_by_env = [
+        [point.step for point in scenario.commands if point.name == "world_target_pose"]
+        for scenario in scenarios
+    ]
+    if any(len(steps) != len(set(steps)) for steps in waypoint_steps_by_env):
+        raise ValueError("A scenario cannot command two world target poses on one step")
+    waypoint_count = torch.tensor(
+        [len(steps) for steps in waypoint_steps_by_env], dtype=torch.long, device=dev
+    )
+    has_waypoints = bool((waypoint_count > 0).any().item())
+    waypoint_schedule: dict[int, list[int]] = {}
+    for env_id, steps in enumerate(waypoint_steps_by_env):
+        for command_step in steps:
+            if not 0 <= command_step < scenarios[env_id].horizon_steps:
+                raise ValueError("World target pose must fall within its scenario horizon")
+            waypoint_schedule.setdefault(command_step, []).append(env_id)
+    waypoint_active = torch.zeros(count, dtype=torch.bool, device=dev)
+    waypoint_confirmed = torch.zeros(count, dtype=torch.bool, device=dev)
+    waypoint_completed_count = torch.zeros(count, dtype=torch.long, device=dev)
+    waypoint_dwell_count = torch.zeros(count, dtype=torch.long, device=dev)
+    waypoint_last_dwell_time_s = torch.full((count,), float("nan"), device=dev)
+    waypoint_final_error = torch.full((count,), 10.0, device=dev)
+    waypoint_final_heading_error = torch.full((count,), float(np.pi), device=dev)
+    waypoint_final_speed = torch.full((count,), 10.0, device=dev)
+    waypoint_dwell_steps = max(1, round(0.75 / step_dt))
+    waypoint_final_hold_steps = max(1, round(1.00 / step_dt))
+    waypoint_window_steps = max(1, round(2.00 / step_dt))
+    waypoint_window_start = torch.tensor(
+        [
+            max(scenario.horizon_steps - waypoint_window_steps, steps[-1])
+            if steps else scenario.horizon_steps + 1
+            for scenario, steps in zip(scenarios, waypoint_steps_by_env, strict=True)
+        ],
+        dtype=torch.long,
+        device=dev,
+    )
+    waypoint_window_count = torch.zeros(count, device=dev)
+    waypoint_window_error_sq = torch.zeros(count, device=dev)
+    waypoint_window_heading_sq = torch.zeros(count, device=dev)
+    waypoint_window_speed_sq = torch.zeros(count, device=dev)
+    waypoint_window_tilt_sq = torch.zeros(count, device=dev)
+    waypoint_window_rocking_sq = torch.zeros(count, device=dev)
+    waypoint_window_action_rate_sq = torch.zeros(count, device=dev)
+    waypoint_window_action_second_difference_sq = torch.zeros(count, device=dev)
+    waypoint_window_action_sum = torch.zeros((count, action_dim), device=dev)
+    waypoint_window_action_sq_sum = torch.zeros_like(waypoint_window_action_sum)
+    waypoint_window_high_frequency_power_sum = torch.zeros(count, device=dev)
+    waypoint_low_pass = torch.zeros((count, action_dim), device=dev)
+
     prev_xy = initial_xy.clone()
     final_xy_snapshot = initial_xy.clone()
 
@@ -766,6 +854,18 @@ def _run_batch(
                 for env_id in pending_ids.detach().cpu().tolist():
                     termination_reason[env_id] = termination_reason[env_id] or "backend_timeout"
 
+            if has_waypoints and step in waypoint_schedule:
+                new_waypoint_ids = torch.tensor(
+                    waypoint_schedule[step], dtype=torch.long, device=dev
+                )
+                waypoint_completed_count[new_waypoint_ids] += (
+                    waypoint_active[new_waypoint_ids]
+                    & waypoint_confirmed[new_waypoint_ids]
+                ).long()
+                waypoint_active[new_waypoint_ids] = True
+                waypoint_confirmed[new_waypoint_ids] = False
+                waypoint_dwell_count[new_waypoint_ids] = 0
+                waypoint_last_dwell_time_s[new_waypoint_ids] = float("nan")
             target_commanded |= _apply_commands(base_env, scenarios, step)
             twist_target = (
                 _command_target(scenarios, step, name="twist", dim=3, device=dev)
@@ -961,6 +1061,79 @@ def _run_batch(
                 & (heading_error <= 0.15)
                 & both_supported
             )
+            if has_waypoints:
+                # A crossing is not an arrival.  Require an uninterrupted
+                # physical stop at the active target, including the requested
+                # heading and two-wheel support.  Reset the count on every
+                # departure; the final-stop metric uses the count at horizon.
+                waypoint_stop_now = (
+                    active
+                    & waypoint_active
+                    & (target_error <= 0.10)
+                    & (heading_error <= 0.20)
+                    & (planar_speed <= 0.08)
+                    & (tilt <= 0.08)
+                    & (angular_xy <= 0.25)
+                    & (yaw_rate <= 0.25)
+                    & both_supported
+                )
+                waypoint_dwell_count = torch.where(
+                    active & waypoint_active,
+                    torch.where(
+                        waypoint_stop_now,
+                        waypoint_dwell_count + 1,
+                        torch.zeros_like(waypoint_dwell_count),
+                    ),
+                    waypoint_dwell_count,
+                )
+                newly_confirmed = (
+                    waypoint_stop_now
+                    & ~waypoint_confirmed
+                    & (waypoint_dwell_count >= waypoint_dwell_steps)
+                )
+                waypoint_last_dwell_time_s[newly_confirmed] = (step + 1) * step_dt
+                waypoint_confirmed |= newly_confirmed
+                waypoint_final_error = torch.where(
+                    active & waypoint_active, target_error, waypoint_final_error
+                )
+                waypoint_final_heading_error = torch.where(
+                    active & waypoint_active, heading_error, waypoint_final_heading_error
+                )
+                waypoint_final_speed = torch.where(
+                    active & waypoint_active, planar_speed, waypoint_final_speed
+                )
+
+                # The last two seconds are an explicit post-command stop
+                # window.  Updating the low pass over the whole rollout keeps
+                # approach transients from being mistaken for stop vibration.
+                waypoint_alpha = float(step_dt / (step_dt + 1.0 / (2.0 * np.pi * 10.0)))
+                waypoint_low_pass = torch.where(
+                    active[:, None],
+                    waypoint_low_pass + waypoint_alpha * (raw_action - waypoint_low_pass),
+                    waypoint_low_pass,
+                )
+                waypoint_window = active & waypoint_active & (step >= waypoint_window_start)
+                waypoint_window_weight = waypoint_window.float()
+                waypoint_window_count += waypoint_window_weight
+                waypoint_window_error_sq += target_error.square() * waypoint_window_weight
+                waypoint_window_heading_sq += heading_error.square() * waypoint_window_weight
+                waypoint_window_speed_sq += planar_speed.square() * waypoint_window_weight
+                waypoint_window_tilt_sq += tilt.square() * waypoint_window_weight
+                waypoint_window_rocking_sq += angular_xy.square() * waypoint_window_weight
+                waypoint_window_action_rate_sq += (
+                    action_rate_sq * waypoint_window_weight
+                )
+                waypoint_window_action_second_difference_sq += (
+                    action_second_difference_sq * waypoint_window_weight
+                )
+                waypoint_window_action_sum += raw_action * waypoint_window_weight[:, None]
+                waypoint_window_action_sq_sum += (
+                    raw_action.square() * waypoint_window_weight[:, None]
+                )
+                waypoint_window_high_frequency_power_sum += (
+                    torch.mean(torch.square(raw_action - waypoint_low_pass), dim=1)
+                    * waypoint_window_weight
+                )
             settle_stable_count = torch.where(
                 active & ~settled & stable_now,
                 settle_stable_count + 1,
@@ -1474,6 +1647,94 @@ def _run_batch(
             )
             arrays["zero_command_speed_rms_mps"] = torch.sqrt(
                 sum_zero_command_speed_sq / sum_zero_command_speed_count.clamp(min=1.0)
+            )
+        if has_waypoints:
+            completed_count = waypoint_completed_count + (
+                waypoint_active & waypoint_confirmed
+            ).long()
+            final_stopped = (
+                finished_success
+                & waypoint_active
+                & (waypoint_dwell_count >= waypoint_final_hold_steps)
+            )
+            sequence_complete = (
+                final_stopped
+                & (waypoint_count > 0)
+                & (completed_count == waypoint_count)
+            )
+            # Missing any part of the final window is a failure, rather than
+            # dropping that episode from the numeric gate's percentile.
+            expected_window_count = torch.full_like(
+                waypoint_window_count, float(waypoint_window_steps)
+            )
+            valid_window = (
+                finished_success
+                & waypoint_active
+                & (waypoint_window_count >= expected_window_count.float() - 0.5)
+            )
+            window_denom = waypoint_window_count.clamp(min=1.0)
+            window_failure = torch.full((count,), 10.0, device=dev)
+            window_action_centered_power = (
+                waypoint_window_action_sq_sum
+                - waypoint_window_action_sum.square() / window_denom[:, None]
+            ).clamp(min=0.0)
+            window_action_power = window_action_centered_power.sum(dim=1) / (
+                window_denom * action_dim
+            )
+            window_hf_power = waypoint_window_high_frequency_power_sum / window_denom
+            window_hf_ratio = window_hf_power / window_action_power.clamp(min=1.0e-12)
+            arrays.update(
+                {
+                    "waypoint_count": waypoint_count.float(),
+                    "waypoint_completed_count": completed_count.float(),
+                    "waypoint_completion_fraction": completed_count.float()
+                    / waypoint_count.clamp(min=1).float(),
+                    "waypoint_sequence_complete": sequence_complete.float(),
+                    "waypoint_final_stopped": final_stopped.float(),
+                    "waypoint_final_dwell_s": waypoint_dwell_count.float() * step_dt,
+                    "waypoint_last_dwell_time_s": waypoint_last_dwell_time_s,
+                    "waypoint_final_error": waypoint_final_error,
+                    "waypoint_final_heading_error": waypoint_final_heading_error,
+                    "waypoint_final_speed": waypoint_final_speed,
+                    "waypoint_stop_window_error_rms": torch.where(
+                        valid_window,
+                        torch.sqrt(waypoint_window_error_sq / window_denom),
+                        window_failure,
+                    ),
+                    "waypoint_stop_window_heading_rms": torch.where(
+                        valid_window,
+                        torch.sqrt(waypoint_window_heading_sq / window_denom),
+                        window_failure,
+                    ),
+                    "waypoint_stop_window_speed_rms": torch.where(
+                        valid_window,
+                        torch.sqrt(waypoint_window_speed_sq / window_denom),
+                        window_failure,
+                    ),
+                    "waypoint_stop_window_tilt_rms": torch.where(
+                        valid_window,
+                        torch.sqrt(waypoint_window_tilt_sq / window_denom),
+                        window_failure,
+                    ),
+                    "waypoint_stop_window_rocking_rms": torch.where(
+                        valid_window,
+                        torch.sqrt(waypoint_window_rocking_sq / window_denom),
+                        window_failure,
+                    ),
+                    "waypoint_stop_window_action_rate_rms": torch.where(
+                        valid_window,
+                        torch.sqrt(waypoint_window_action_rate_sq / window_denom),
+                        window_failure,
+                    ),
+                    "waypoint_stop_window_action_second_difference_rms": torch.where(
+                        valid_window,
+                        torch.sqrt(waypoint_window_action_second_difference_sq / window_denom),
+                        window_failure,
+                    ),
+                    "waypoint_stop_window_high_frequency_action_power_ratio": torch.where(
+                        valid_window, window_hf_ratio, window_failure
+                    ),
+                }
             )
         if is_velocity_task:
             arrays["velocity_tracking_rmse"] = torch.sqrt(sum_velocity_tracking_sq / denom)

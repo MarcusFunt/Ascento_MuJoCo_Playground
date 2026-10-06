@@ -212,6 +212,7 @@ export type PolicyArchitecture = {
 export type ViewerState = {
   id: string
   run_id: string
+  task?: string
   state: string
   checkpoint?: string
   checkpoint_iteration?: number | null
@@ -221,6 +222,47 @@ export type ViewerState = {
   jacobian_hz?: number
   port?: number
   exit_code?: number | null
+}
+
+export type Waypoint = {
+  id: string
+  x_m: number
+  y_m: number
+  yaw_rad: number | null
+}
+
+export type WaypointCommand = {
+  operation: 'set' | 'queue' | 'hold' | 'resume' | 'cancel'
+  x_m?: number
+  y_m?: number
+  yaw_rad?: number | null
+}
+
+export type WaypointState = {
+  available: true
+  frame: 'sim_world'
+  state: 'holding' | 'driving' | 'paused' | 'arrived'
+  robot: {
+    x_m: number
+    y_m: number
+    yaw_rad: number
+    speed_m_s: number
+    yaw_rate_rad_s: number
+    tilt_rad: number
+    both_wheels_supported: boolean
+  }
+  target: { x_m: number; y_m: number; yaw_rad: number }
+  active: Waypoint | null
+  queue: Waypoint[]
+  distance_m: number
+  dwell_s: number
+  completed: number
+  last_command: {
+    request_id?: string | null
+    operation?: WaypointCommand['operation']
+    state?: 'applied' | 'rejected'
+    error?: string
+  } | null
 }
 
 export type ObservationFeature = {

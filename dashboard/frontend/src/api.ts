@@ -14,6 +14,8 @@ import type {
   TaskOption,
   TelemetryRecord,
   ViewerState,
+  WaypointCommand,
+  WaypointState,
 } from './types'
 
 export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -56,6 +58,21 @@ export const api = {
     ),
   introspectionCapture: (viewerId: string, eventId: string) =>
     fetchJson<IntrospectionCapture>(`/api/viewers/${viewerId}/captures/${eventId}`),
+  waypointState: (viewerId: string) =>
+    fetchJson<WaypointState | { available: false; message: string }>(
+      `/api/viewers/${viewerId}/waypoints`,
+    ),
+  commandWaypoint: (viewerId: string, command: WaypointCommand) =>
+    fetchJson<{
+      viewer_id: string
+      request_id: string
+      state: string
+      command: WaypointCommand
+    }>(`/api/viewers/${viewerId}/waypoints`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Ascento-Control': '1' },
+      body: JSON.stringify(command),
+    }),
   requestIntrospectionCapture: (viewerId: string) =>
     fetchJson<{ viewer_id: string; request_id: string; state: string }>(
       `/api/viewers/${viewerId}/captures`,

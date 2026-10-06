@@ -18,6 +18,8 @@ BINARY_METRICS = {
     "jump_landing",
     "jump_recovered_landing",
     "target_arrived",
+    "waypoint_sequence_complete",
+    "waypoint_final_stopped",
 }
 
 

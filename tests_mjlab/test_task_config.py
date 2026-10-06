@@ -294,3 +294,17 @@ def test_speed_selectable_locomotion_has_a_normalized_speed_command():
     assert actor_term.params["command_name"] == "speed"
     assert actor_term.params["max_speed_mps"] == pytest.approx(0.5)
     assert critic_term == actor_term
+
+
+
+def test_gate_hold_locomotion_task_reuses_base_training_contract():
+    from ascento_mjlab.tasks.locomotion.env_cfg import ascento_locomotion_gate_hold_env_cfg
+
+    cfg = ascento_locomotion_gate_hold_env_cfg()
+    reset = cfg.events["initialize_world_target"]
+    sequence = cfg.events["repeated_random_world_targets"]
+
+    assert cfg.task_id == "Ascento-Locomotion-Gate-Hold-Flat"
+    assert reset.func.__name__ == "initialize_gate_hold_locomotion_target"
+    assert reset.params["gate_like_fraction"] == sequence.params["gate_like_fraction"]
+    assert sequence.params["gate_like_initial_hold"] is True

@@ -24,6 +24,7 @@ from ascento_mjlab.viewer.checkpoints import (
 )
 from ascento_mjlab.viewer.ipc import IntrospectionIPC
 from ascento_mjlab.viewer.replay import PolicyReplayRecorder
+from ascento_mjlab.viewer.waypoints import normalize_waypoint_command
 from dashboard.config import REPO_ROOT
 from dashboard.policy_architecture import inspect_policy_checkpoint
 from dashboard.run_service import RunService
@@ -299,6 +300,49 @@ class ViewerService:
             viewer = self._require(viewer_id)
             value = _read_json(viewer.introspection_dir / "latest.json")
             return value or {"available": False, "message": "No viewer frame is available yet."}
+
+    def waypoint_state(self, viewer_id: str) -> dict[str, Any]:
+        """Return the viewer's measured route state and robot pose."""
+        with self._lock:
+            viewer = self._require(viewer_id)
+            if viewer.task not in {
+                "Ascento-Locomotion-Flat",
+                "Ascento-Locomotion-Gate-Hold-Flat",
+            }:
+                return {
+                    "available": False,
+                    "message": "Waypoint control is available for locomotion viewers.",
+                }
+            value = IntrospectionIPC(viewer.introspection_dir).read_waypoint_state()
+            return value or {
+                "available": False,
+                "message": "Waypoint state is not ready yet.",
+            }
+
+    def command_waypoint(
+        self, viewer_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Queue one code or dashboard command for the viewer simulation thread."""
+        command = normalize_waypoint_command(payload)
+        with self._lock:
+            viewer = self._require(viewer_id)
+            self._refresh_locked(viewer)
+            if viewer.state != "running":
+                raise ViewerBusyError("viewer is not running")
+            if viewer.task not in {
+                "Ascento-Locomotion-Flat",
+                "Ascento-Locomotion-Gate-Hold-Flat",
+            }:
+                raise ValueError("waypoint control requires a locomotion viewer")
+            request_id = IntrospectionIPC(viewer.introspection_dir).queue_waypoint_command(
+                command, source="dashboard"
+            )
+            return {
+                "viewer_id": viewer_id,
+                "request_id": request_id,
+                "state": "queued",
+                "command": command,
+            }
 
     def introspection_captures(self, viewer_id: str, *, limit: int = 50) -> dict[str, Any]:
         with self._lock:

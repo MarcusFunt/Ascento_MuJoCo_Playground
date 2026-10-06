@@ -1428,6 +1428,45 @@ def initialize_random_world_target(
         )
 
 
+def initialize_gate_hold_locomotion_target(
+    env,
+    env_ids: torch.Tensor | slice | None = None,
+    *,
+    asset_name: str = "robot",
+    min_distance_m: float = 2.0,
+    max_distance_m: float = 3.0,
+    arena_half_extent_m: float = 4.0,
+    gate_like_fraction: float = 0.25,
+) -> None:
+    """Give gate-like episodes a reset-pose hold; keep regular targets unchanged.
+
+    Sampling the episode type in the reset event makes the stationary target
+    visible in the first actor observation. The interval event reads this same
+    mask, so the push and retarget still happen at their existing times.
+    """
+    if not 0.0 <= gate_like_fraction <= 1.0:
+        raise ValueError("gate_like_fraction must be in [0, 1]")
+    ids = _resolved_env_ids(env, env_ids)
+    if ids.numel() == 0:
+        return
+    initialize_random_world_target(
+        env,
+        ids,
+        asset_name=asset_name,
+        min_distance_m=min_distance_m,
+        max_distance_m=max_distance_m,
+        arena_half_extent_m=arena_half_extent_m,
+    )
+    gate_like = getattr(env, "ascento_locomotion_gate_like", None)
+    if gate_like is None:
+        gate_like = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        env.ascento_locomotion_gate_like = gate_like
+    gate_like[ids] = torch.rand(ids.numel(), device=env.device) < gate_like_fraction
+    gate_ids = ids[gate_like[ids]]
+    if gate_ids.numel() > 0:
+        initialize_world_target(env, gate_ids, asset_name=asset_name)
+
+
 def world_target_xy(env) -> torch.Tensor:
     """Return the current per-environment world-frame XY target.
 
@@ -1602,6 +1641,7 @@ class RepeatedRandomWorldTargetSequence:
         gate_retarget_time_s: float = 9.0,
         gate_min_target_distance_m: float = 0.10,
         gate_max_target_distance_m: float = 0.20,
+        gate_like_initial_hold: bool = False,
         asset_cfg: SceneEntityCfg,
     ) -> None:
         if (precision_anchor_fraction is None) != (recovery_retarget_anchor_fraction is None):
@@ -1677,9 +1717,15 @@ class RepeatedRandomWorldTargetSequence:
         new_ids = ids[~self._episode_initialized[ids]]
         if new_ids.numel() > 0:
             if self._fixed_cohort_ids is None:
-                self._gate_like[new_ids] = (
-                    torch.rand(new_ids.numel(), device=env.device) < current_gate_like_fraction
-                )
+                if gate_like_initial_hold:
+                    assigned = getattr(env, "ascento_locomotion_gate_like", None)
+                    if not isinstance(assigned, torch.Tensor) or assigned.shape != self._gate_like.shape:
+                        raise RuntimeError("gate-like initial hold requires reset episode labels")
+                    self._gate_like[new_ids] = assigned[new_ids]
+                else:
+                    self._gate_like[new_ids] = (
+                        torch.rand(new_ids.numel(), device=env.device) < current_gate_like_fraction
+                    )
                 cohort_ids = torch.where(
                     self._gate_like[new_ids],
                     GENERALIST_COHORT_RECOVERY_RETARGET_ANCHOR,
@@ -2510,6 +2556,7 @@ __all__ = [
     "GENERALIST_ATTEMPT_TERMINAL_RETARGETED",
     "GENERALIST_ATTEMPT_TERMINAL_EPISODE_END",
     "generalist_gate_recovery_stable",
+    "initialize_gate_hold_locomotion_target",
     "initialize_random_world_target",
     "initialize_world_target",
     "mixed_balance_recovery_reset",

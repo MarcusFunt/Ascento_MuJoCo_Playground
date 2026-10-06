@@ -308,3 +308,32 @@ runner does not have the project's CUDA/MuJoCo-Warp runtime.
 
 If multi-viewer support is needed later, `ViewerService` can allocate a bounded port pool
 and process table without changing the worker or browser protocol.
+
+## Simulation waypoint control
+
+Locomotion viewers expose world-frame waypoint controls in Viser and through the
+dashboard API. Both paths queue commands for the viewer's simulation thread;
+they write the same target XY and yaw channels already consumed by the policy.
+Coordinates are metres relative to the clone's flat-world origin. A goal can
+replace the current route or append to it. Hold pauses at the measured pose,
+resume continues the active goal, and cancel clears the route and holds the
+current pose. A waypoint advances only after position, heading, speed, yaw rate,
+upright tilt, and two-wheel support remain within the viewer's arrival limits
+for 0.5 seconds.
+
+The live route state is available at `GET /api/viewers/{viewer_id}/waypoints`.
+Send a command with `POST /api/viewers/{viewer_id}/waypoints` and the dashboard's
+`X-Ascento-Control: 1` header. For example:
+
+```json
+{
+  "operation": "set",
+  "x_m": 1.0,
+  "y_m": 0.5,
+  "yaw_rad": 1.5708
+}
+```
+
+Segments are limited to 3 m and goals must stay inside the simulation arena.
+These coordinates refer to the simulator map; a real-world overlay still needs
+a localization estimate and a calibrated transform between map and camera.

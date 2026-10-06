@@ -162,3 +162,103 @@ def test_guard_morphology_replay_smoke_suite_is_small_and_diagnostic():
         "medium_target",
         "long_target",
     }
+
+
+
+def test_waypoint_gate_suite_has_versioned_pose_routes_and_hard_stop_gates():
+    from ascento_mjlab.evaluation.runner import task_capabilities
+
+    suite = load_suite(Path("benchmarks/suites/locomotion_waypoint_gate_v2.toml"))
+    scenarios = materialize_suite(suite, step_dt=0.02)
+
+    assert suite.task == "Ascento-Locomotion-Flat"
+    assert len(scenarios) == 240
+    assert {"command:world_target_pose", "waypoint_dwell"} <= set(suite.required_capabilities)
+    assert {"command:world_target_pose", "waypoint_dwell"} <= task_capabilities(suite.task)
+    assert {"waypoint_sequence_complete", "waypoint_stop_window_action_second_difference_rms"} <= {
+        gate.metric for gate in suite.gates
+    }
+    route = next(s for s in scenarios if s.family == "route_push")
+    assert [point.name for point in route.commands] == ["world_target_pose"] * 3
+
+
+def test_evaluator_world_target_pose_applies_origin_and_marks_commanded():
+    from types import SimpleNamespace
+
+    import pytest
+    import torch
+
+    from ascento_mjlab.evaluation.runner import _apply_commands
+    from ascento_mjlab.evaluation.schema import CommandPoint, ScenarioSpec
+
+    origin = torch.tensor([[10.0, -2.0, 0.0]])
+    class Scene(dict):
+        pass
+
+    scene = Scene(
+        robot=SimpleNamespace(
+            data=SimpleNamespace(
+                root_link_pos_w=torch.tensor([[10.0, -2.0, 0.75]]),
+                root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+            )
+        )
+    )
+    scene.env_origins = origin
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        scene=scene,
+        ascento_world_target_state={
+            "target_xy": torch.zeros((1, 2)),
+            "target_yaw": torch.zeros(1),
+        },
+    )
+    scenario = ScenarioSpec(
+        scenario_id="pose/0",
+        family="pose",
+        task="Ascento-Locomotion-Flat",
+        horizon_steps=100,
+        reset={},
+        commands=(CommandPoint(step=4, name="world_target_pose", values=(1.0, 0.5, 1.2)),),
+    )
+
+    commanded = _apply_commands(env, [scenario], 4)
+
+    assert commanded.tolist() == [True]
+    assert env.ascento_world_target_state["target_xy"].tolist() == [[11.0, -1.5]]
+    assert env.ascento_world_target_state["target_yaw"].item() == pytest.approx(1.2)
+
+
+def test_evaluator_rejects_two_targets_for_one_environment_on_one_step():
+    from types import SimpleNamespace
+
+    import torch
+
+    from ascento_mjlab.evaluation.runner import _apply_commands
+    from ascento_mjlab.evaluation.schema import CommandPoint, ScenarioSpec
+
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        scene=SimpleNamespace(env_origins=torch.zeros((1, 3))),
+        ascento_world_target_state={
+            "target_xy": torch.zeros((1, 2)),
+            "target_yaw": torch.zeros(1),
+        },
+    )
+    scenario = ScenarioSpec(
+        scenario_id="ambiguous/0",
+        family="pose",
+        task="Ascento-Locomotion-Flat",
+        horizon_steps=10,
+        reset={},
+        commands=(
+            CommandPoint(step=0, name="world_target_offset", values=(1.0, 0.0, 0.0)),
+            CommandPoint(step=0, name="world_target_pose", values=(1.0, 0.0, 0.0)),
+        ),
+    )
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="two world targets"):
+        _apply_commands(env, [scenario], 0)

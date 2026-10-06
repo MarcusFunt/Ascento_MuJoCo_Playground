@@ -418,3 +418,39 @@ def test_stop_escalates_from_interrupt_to_term_and_kill(monkeypatch, tmp_path):
         (4321, signal.SIGTERM),
         (4321, viewer_service_module._FORCE_KILL_SIGNAL),
     ]
+
+
+
+def test_dashboard_waypoint_command_is_queued_for_running_locomotion_viewer(
+    monkeypatch, tmp_path
+):
+    run_service, run_id, run_dir = _run(tmp_path / "artifacts")
+    status_path = run_dir / "run_status.json"
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    status["task"] = "Ascento-Locomotion-Flat"
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+    _patch_popen(monkeypatch, lambda command, **kwargs: FakeProcess(command))
+    service = ViewerService(
+        run_service, logs_root=tmp_path / "viewer-logs", stable_age_seconds=0
+    )
+    monkeypatch.setattr(service, "_port_open", lambda: False)
+    started = service.start(run_id=run_id)
+    viewer_id = started["id"]
+    monkeypatch.setattr(service, "_port_open", lambda: True)
+
+    queued = service.command_waypoint(
+        viewer_id,
+        {"operation": "set", "x_m": 1.0, "y_m": -0.5, "yaw_rad": 0.25},
+    )
+    requests = IntrospectionIPC(
+        tmp_path / "viewer-logs" / viewer_id / "introspection"
+    ).consume_waypoint_commands()
+
+    assert queued["state"] == "queued"
+    assert requests[0]["request_id"] == queued["request_id"]
+    assert requests[0]["command"] == {
+        "operation": "set",
+        "x_m": 1.0,
+        "y_m": -0.5,
+        "yaw_rad": 0.25,
+    }

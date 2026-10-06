@@ -1,0 +1,697 @@
+schema_version = 1
+suite_id = "locomotion_waypoint_gate_v2"
+task = "Ascento-Locomotion-Flat"
+root_seed = 601773
+policy_mode = "deterministic"
+required_capabilities = ["locomotion", "exact_reset", "force_disturbance", "deterministic_policy", "command:world_target_pose", "waypoint_dwell"]
+
+# A frozen simulation navigation contract. Coordinates are absolute in each
+# clone's flat world-map frame (relative to its env origin); yaw is world yaw.
+# The near case retains v1's 4 s push, 9 s command, and 20 s horizon.
+# A waypoint only completes after 0.75 s continuously inside the evaluator's
+# position/heading/speed/balance/contact envelope. The final waypoint must
+# still satisfy that envelope for 1 s at the horizon. The last 2 s are a
+# separately measured stop window; a single radius crossing cannot pass.
+
+[[families]]
+id = "near_push_015"
+kind = "disturbance"
+count = 48
+horizon_s = 20.0
+commands = [
+  { time_s = 9.0, name = "world_target_pose", values = [0.15, 0.0, 0.0] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-0.25, 0.25]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+[families.disturbance]
+start_s = 4.0
+duration_s = 0.10
+directions = ["+x", "-x", "+y", "-y"]
+equivalent_delta_v = [0.05, 0.10, 0.15]
+
+[[families]]
+id = "one_meter"
+kind = "command_timeline"
+count = 48
+horizon_s = 30.0
+commands = [
+  { time_s = 3.0, name = "world_target_pose", values = [1.0, 0.0, 0.0] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "two_meter"
+kind = "command_timeline"
+count = 48
+horizon_s = 40.0
+commands = [
+  { time_s = 3.0, name = "world_target_pose", values = [2.0, 0.0, 0.0] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "three_meter_turn"
+kind = "command_timeline"
+count = 48
+horizon_s = 55.0
+commands = [
+  { time_s = 3.0, name = "world_target_pose", values = [3.0, 0.0, 1.5707963267948966] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "route_push"
+kind = "disturbance"
+count = 48
+horizon_s = 60.0
+commands = [
+  { time_s = 3.0, name = "world_target_pose", values = [1.0, 0.0, 0.0] },
+  { time_s = 20.0, name = "world_target_pose", values = [1.0, 1.0, 1.5707963267948966] },
+  { time_s = 38.0, name = "world_target_pose", values = [0.0, 1.0, 3.141592653589793] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+[families.disturbance]
+start_s = 30.0
+duration_s = 0.10
+directions = ["+x", "-x", "+y", "-y"]
+equivalent_delta_v = [0.05, 0.10, 0.15]
+
+# Hard stop limits are purpose-built for the last two seconds after a waypoint
+# command. The 0.10 high-frequency ratio matches the quiet-quality numerical
+# limit but samples a different window; run that suite separately as well.
+# Action-rate 0.05 and second-difference 0.18 are stop-window limits in raw
+# policy action units. Wilson lower limits are deliberately practical for 48
+# fixed-seed scenarios per family: all-success gives about 0.926.
+
+[[gates]]
+id = "near_push_015_survival"
+family = "near_push_015"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.85
+
+[[gates]]
+id = "near_push_015_all_waypoints_dwelled"
+family = "near_push_015"
+metric = "waypoint_sequence_complete"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "near_push_015_final_stop_held"
+family = "near_push_015"
+metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "near_push_015_final_position"
+family = "near_push_015"
+metric = "waypoint_final_error"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "near_push_015_final_heading"
+family = "near_push_015"
+metric = "waypoint_final_heading_error"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "near_push_015_final_speed"
+family = "near_push_015"
+metric = "waypoint_final_speed"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "near_push_015_stop_window_position"
+family = "near_push_015"
+metric = "waypoint_stop_window_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "near_push_015_stop_window_heading"
+family = "near_push_015"
+metric = "waypoint_stop_window_heading_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "near_push_015_stop_window_speed"
+family = "near_push_015"
+metric = "waypoint_stop_window_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "near_push_015_stop_window_tilt"
+family = "near_push_015"
+metric = "waypoint_stop_window_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "near_push_015_stop_window_rocking"
+family = "near_push_015"
+metric = "waypoint_stop_window_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "near_push_015_stop_window_action_rate"
+family = "near_push_015"
+metric = "waypoint_stop_window_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "near_push_015_stop_window_action_second_difference"
+family = "near_push_015"
+metric = "waypoint_stop_window_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.18
+
+[[gates]]
+id = "near_push_015_stop_window_high_frequency_action_power"
+family = "near_push_015"
+metric = "waypoint_stop_window_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "one_meter_survival"
+family = "one_meter"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.85
+
+[[gates]]
+id = "one_meter_all_waypoints_dwelled"
+family = "one_meter"
+metric = "waypoint_sequence_complete"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "one_meter_final_stop_held"
+family = "one_meter"
+metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "one_meter_final_position"
+family = "one_meter"
+metric = "waypoint_final_error"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "one_meter_final_heading"
+family = "one_meter"
+metric = "waypoint_final_heading_error"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "one_meter_final_speed"
+family = "one_meter"
+metric = "waypoint_final_speed"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "one_meter_stop_window_position"
+family = "one_meter"
+metric = "waypoint_stop_window_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "one_meter_stop_window_heading"
+family = "one_meter"
+metric = "waypoint_stop_window_heading_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "one_meter_stop_window_speed"
+family = "one_meter"
+metric = "waypoint_stop_window_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "one_meter_stop_window_tilt"
+family = "one_meter"
+metric = "waypoint_stop_window_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "one_meter_stop_window_rocking"
+family = "one_meter"
+metric = "waypoint_stop_window_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "one_meter_stop_window_action_rate"
+family = "one_meter"
+metric = "waypoint_stop_window_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "one_meter_stop_window_action_second_difference"
+family = "one_meter"
+metric = "waypoint_stop_window_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.18
+
+[[gates]]
+id = "one_meter_stop_window_high_frequency_action_power"
+family = "one_meter"
+metric = "waypoint_stop_window_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "two_meter_survival"
+family = "two_meter"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.85
+
+[[gates]]
+id = "two_meter_all_waypoints_dwelled"
+family = "two_meter"
+metric = "waypoint_sequence_complete"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "two_meter_final_stop_held"
+family = "two_meter"
+metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "two_meter_final_position"
+family = "two_meter"
+metric = "waypoint_final_error"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "two_meter_final_heading"
+family = "two_meter"
+metric = "waypoint_final_heading_error"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "two_meter_final_speed"
+family = "two_meter"
+metric = "waypoint_final_speed"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "two_meter_stop_window_position"
+family = "two_meter"
+metric = "waypoint_stop_window_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "two_meter_stop_window_heading"
+family = "two_meter"
+metric = "waypoint_stop_window_heading_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "two_meter_stop_window_speed"
+family = "two_meter"
+metric = "waypoint_stop_window_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "two_meter_stop_window_tilt"
+family = "two_meter"
+metric = "waypoint_stop_window_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "two_meter_stop_window_rocking"
+family = "two_meter"
+metric = "waypoint_stop_window_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "two_meter_stop_window_action_rate"
+family = "two_meter"
+metric = "waypoint_stop_window_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "two_meter_stop_window_action_second_difference"
+family = "two_meter"
+metric = "waypoint_stop_window_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.18
+
+[[gates]]
+id = "two_meter_stop_window_high_frequency_action_power"
+family = "two_meter"
+metric = "waypoint_stop_window_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "three_meter_turn_survival"
+family = "three_meter_turn"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.85
+
+[[gates]]
+id = "three_meter_turn_all_waypoints_dwelled"
+family = "three_meter_turn"
+metric = "waypoint_sequence_complete"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "three_meter_turn_final_stop_held"
+family = "three_meter_turn"
+metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "three_meter_turn_final_position"
+family = "three_meter_turn"
+metric = "waypoint_final_error"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "three_meter_turn_final_heading"
+family = "three_meter_turn"
+metric = "waypoint_final_heading_error"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "three_meter_turn_final_speed"
+family = "three_meter_turn"
+metric = "waypoint_final_speed"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "three_meter_turn_stop_window_position"
+family = "three_meter_turn"
+metric = "waypoint_stop_window_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "three_meter_turn_stop_window_heading"
+family = "three_meter_turn"
+metric = "waypoint_stop_window_heading_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "three_meter_turn_stop_window_speed"
+family = "three_meter_turn"
+metric = "waypoint_stop_window_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "three_meter_turn_stop_window_tilt"
+family = "three_meter_turn"
+metric = "waypoint_stop_window_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "three_meter_turn_stop_window_rocking"
+family = "three_meter_turn"
+metric = "waypoint_stop_window_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "three_meter_turn_stop_window_action_rate"
+family = "three_meter_turn"
+metric = "waypoint_stop_window_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "three_meter_turn_stop_window_action_second_difference"
+family = "three_meter_turn"
+metric = "waypoint_stop_window_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.18
+
+[[gates]]
+id = "three_meter_turn_stop_window_high_frequency_action_power"
+family = "three_meter_turn"
+metric = "waypoint_stop_window_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+
+[[gates]]
+id = "route_push_all_waypoints_dwelled"
+family = "route_push"
+metric = "waypoint_sequence_complete"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "route_push_final_stop_held"
+family = "route_push"
+metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "route_push_final_position"
+family = "route_push"
+metric = "waypoint_final_error"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "route_push_final_heading"
+family = "route_push"
+metric = "waypoint_final_heading_error"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "route_push_final_speed"
+family = "route_push"
+metric = "waypoint_final_speed"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "route_push_stop_window_position"
+family = "route_push"
+metric = "waypoint_stop_window_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "route_push_stop_window_heading"
+family = "route_push"
+metric = "waypoint_stop_window_heading_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "route_push_stop_window_speed"
+family = "route_push"
+metric = "waypoint_stop_window_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "route_push_stop_window_tilt"
+family = "route_push"
+metric = "waypoint_stop_window_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_push_stop_window_rocking"
+family = "route_push"
+metric = "waypoint_stop_window_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "route_push_stop_window_action_rate"
+family = "route_push"
+metric = "waypoint_stop_window_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_push_stop_window_action_second_difference"
+family = "route_push"
+metric = "waypoint_stop_window_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.18
+
+[[gates]]
+id = "route_push_stop_window_high_frequency_action_power"
+family = "route_push"
+metric = "waypoint_stop_window_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "near_push_recovery"
+family = "near_push_015"
+metric = "recovered"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "route_push_survival"
+family = "route_push"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.85

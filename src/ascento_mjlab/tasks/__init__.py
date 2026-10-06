@@ -19,7 +19,10 @@ from .generalist_locomotion.env_cfg import ascento_generalist_locomotion_env_cfg
 from .generalist_locomotion.rl_cfg import AscentoGeneralistLocomotionRlCfg
 from .jump.env_cfg import ascento_jump_env_cfg
 from .jump.rl_cfg import AscentoJumpRlCfg
-from .locomotion.env_cfg import ascento_locomotion_env_cfg
+from .locomotion.env_cfg import (
+    ascento_locomotion_env_cfg,
+    ascento_locomotion_gate_hold_env_cfg,
+)
 from .locomotion.rl_cfg import AscentoLocomotionRlCfg
 from .locomotion_speed.env_cfg import ascento_locomotion_speed_env_cfg
 from .locomotion_speed.rl_cfg import AscentoLocomotionSpeedRlCfg
@@ -36,6 +39,7 @@ ASCENTO_TASK_IDS = (
     "Ascento-Locomotion-Flat",
     "Ascento-Generalist-Locomotion-Flat",
     "Ascento-Locomotion-Speed-Flat",
+    "Ascento-Locomotion-Gate-Hold-Flat",
     "Ascento-Recovery-Flat",
     "Ascento-Jump-Flat",
 )
@@ -92,6 +96,13 @@ def _register_tasks() -> None:
         env_cfg=ascento_locomotion_speed_env_cfg(),
         play_env_cfg=ascento_locomotion_speed_env_cfg(play=True),
         rl_cfg=AscentoLocomotionSpeedRlCfg,
+        runner_cls=AscentoProvenanceRunner,
+    )
+    register_mjlab_task(
+        task_id="Ascento-Locomotion-Gate-Hold-Flat",
+        env_cfg=ascento_locomotion_gate_hold_env_cfg(),
+        play_env_cfg=ascento_locomotion_gate_hold_env_cfg(play=True),
+        rl_cfg=AscentoLocomotionRlCfg,
         runner_cls=AscentoProvenanceRunner,
     )
     register_mjlab_task(

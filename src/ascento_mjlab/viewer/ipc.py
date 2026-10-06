@@ -29,8 +29,10 @@ class IntrospectionIPC:
         self.directory = directory.expanduser().resolve()
         self.schema_path = self.directory / "schema.json"
         self.latest_path = self.directory / "latest.json"
+        self.waypoint_state_path = self.directory / "waypoints.json"
         self.publish_interval = 1.0 / float(publish_hz)
         self._last_publish: float | None = None
+        self._last_waypoint_publish: float | None = None
 
     def publish_schema(
         self,
@@ -76,6 +78,52 @@ class IntrospectionIPC:
 
     def read_latest(self) -> dict[str, Any] | None:
         return _read_json(self.latest_path)
+
+    def queue_waypoint_command(
+        self, payload: dict[str, Any], *, source: str = "dashboard"
+    ) -> str:
+        """Queue a world-goal command for the viewer's simulation thread."""
+        request_id = uuid4().hex
+        path = self.directory / f"waypoint-request-{time.time_ns():020d}-{request_id}.json"
+        _atomic_write_json(
+            path,
+            {"request_id": request_id, "source": source, "command": payload},
+        )
+        return request_id
+
+    def consume_waypoint_commands(self, *, limit: int = 64) -> list[dict[str, Any]]:
+        """Claim pending commands in creation order without blocking the viewer."""
+        commands: list[dict[str, Any]] = []
+        for path in sorted(self.directory.glob("waypoint-request-*.json"))[:limit]:
+            claimed = path.with_suffix(".processing")
+            try:
+                path.replace(claimed)
+            except FileNotFoundError:
+                continue
+            try:
+                value = _read_json(claimed)
+                if value is not None:
+                    commands.append(value)
+            finally:
+                claimed.unlink(missing_ok=True)
+        return commands
+
+    def publish_waypoint_state(
+        self, state: dict[str, Any], *, force: bool = False, now: float | None = None
+    ) -> bool:
+        current = time.monotonic() if now is None else float(now)
+        if (
+            not force
+            and self._last_waypoint_publish is not None
+            and current - self._last_waypoint_publish < self.publish_interval
+        ):
+            return False
+        _atomic_write_json(self.waypoint_state_path, state)
+        self._last_waypoint_publish = current
+        return True
+
+    def read_waypoint_state(self) -> dict[str, Any] | None:
+        return _read_json(self.waypoint_state_path)
 
     def request_manual_capture(self, *, requested_by: str = "dashboard") -> str:
         request_id = uuid4().hex

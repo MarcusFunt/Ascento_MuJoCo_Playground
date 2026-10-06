@@ -12,7 +12,9 @@ import time
 from collections import deque
 from dataclasses import asdict, replace
 from pathlib import Path
+from queue import Empty, SimpleQueue
 from typing import Any
+from uuid import uuid4
 
 import torch
 import viser
@@ -54,6 +56,7 @@ from .replay import (
     TransitionSnapshot,
     checkpoint_iteration,
 )
+from .waypoints import WaypointController
 
 
 def _write_json(path: Path | None, value: dict[str, Any]) -> None:
@@ -177,6 +180,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         replay_recorder: PolicyReplayRecorder | None = None,
         checkpoint_schema_provider=None,
         event_detector: EventTriggerDetector | None = None,
+        waypoint_controller: WaypointController | None = None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -191,6 +195,11 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         self._checkpoint_schema_provider = checkpoint_schema_provider
         self._event_detector = event_detector or EventTriggerDetector()
         self._episode_start_observations: dict[int, list[float]] = {}
+        self._waypoint_controller = waypoint_controller
+        self._waypoint_local_commands: SimpleQueue[dict[str, Any]] = SimpleQueue()
+        self._waypoint_status_html = None
+        self._waypoint_marker = None
+        self._waypoint_next_update = 0.0
 
         self._diagnostic_html = None
         self._diagnostic_freeze = None
@@ -212,8 +221,114 @@ class _FollowViserPlayViewer(ViserPlayViewer):
 
     def setup(self) -> None:
         super().setup()
+        if self._waypoint_controller is not None:
+            self._setup_waypoint_controls()
+            self._update_waypoint_display(force=True)
         self._setup_diagnostic_hud()
         self._update_diagnostic_hud(force=True)
+
+    def _setup_waypoint_controls(self) -> None:
+        """Add world-coordinate controls to the human Viser viewer."""
+        with self._server.gui.add_folder("Simulation waypoints"):
+            self._server.gui.add_html(
+                "<div style='font-size:0.85em'>Coordinates are metres in the "
+                "MuJoCo world frame. Each segment is limited to 3 m.</div>"
+            )
+            x_input = self._server.gui.add_number("World X (m)", initial_value=0.5, step=0.1)
+            y_input = self._server.gui.add_number("World Y (m)", initial_value=0.0, step=0.1)
+            use_yaw = self._server.gui.add_checkbox(
+                "Use explicit final heading", initial_value=False
+            )
+            yaw_input = self._server.gui.add_number(
+                "Final heading (deg)", initial_value=0.0, min=-180.0, max=180.0, step=5.0
+            )
+            replace_button = self._server.gui.add_button("Replace route with waypoint")
+            queue_button = self._server.gui.add_button("Queue waypoint")
+            hold_button = self._server.gui.add_button("Hold current pose")
+            resume_button = self._server.gui.add_button("Resume route")
+            cancel_button = self._server.gui.add_button("Cancel route")
+            self._waypoint_status_html = self._server.gui.add_html("")
+
+            def submit(operation: str) -> None:
+                command: dict[str, Any] = {"operation": operation}
+                if operation in {"set", "queue"}:
+                    command["x_m"] = float(x_input.value)
+                    command["y_m"] = float(y_input.value)
+                    command["yaw_rad"] = (
+                        math.radians(float(yaw_input.value)) if use_yaw.value else None
+                    )
+                if self._introspection_ipc is not None:
+                    self._introspection_ipc.queue_waypoint_command(command, source="viser")
+                else:
+                    self._waypoint_local_commands.put(
+                        {"request_id": uuid4().hex, "source": "viser", "command": command}
+                    )
+
+            @replace_button.on_click
+            def _(_) -> None:
+                submit("set")
+
+            @queue_button.on_click
+            def _(_) -> None:
+                submit("queue")
+
+            @hold_button.on_click
+            def _(_) -> None:
+                submit("hold")
+
+            @resume_button.on_click
+            def _(_) -> None:
+                submit("resume")
+
+            @cancel_button.on_click
+            def _(_) -> None:
+                submit("cancel")
+
+        self._waypoint_marker = self._server.scene.add_icosphere(
+            "/ascento/active_waypoint",
+            radius=0.10,
+            color=(52, 152, 219),
+            position=(0.0, 0.0, 0.10),
+            visible=False,
+        )
+
+    def _update_waypoint_display(self, *, force: bool = False) -> None:
+        controller = self._waypoint_controller
+        if controller is None:
+            return
+        now = time.monotonic()
+        if not force and now < self._waypoint_next_update:
+            return
+        self._waypoint_next_update = now + 0.10
+        state = controller.snapshot()
+        if self._introspection_ipc is not None:
+            self._introspection_ipc.publish_waypoint_state(state, force=force)
+        if self._waypoint_marker is not None:
+            active = state["active"]
+            self._waypoint_marker.visible = active is not None
+            if active is not None:
+                self._waypoint_marker.position = (
+                    active["x_m"], active["y_m"], 0.10
+                )
+        if self._waypoint_status_html is not None:
+            active = state["active"]
+            label = (
+                f"({active['x_m']:.2f}, {active['y_m']:.2f}) m"
+                if active is not None else "none"
+            )
+            last = state["last_command"] or {}
+            error = last.get("error")
+            error_html = (
+                f"<div style='color:#ef4444'>{html.escape(str(error))}</div>"
+                if error else ""
+            )
+            self._waypoint_status_html.content = (
+                "<div style='font-size:0.85em;line-height:1.4'>"
+                f"<strong>{html.escape(state['state'])}</strong> · active {label}"
+                f"<br/>distance {state['distance_m']:.2f} m · "
+                f"queued {len(state['queue'])} · completed {state['completed']}"
+                f"{error_html}</div>"
+            )
 
     def _setup_diagnostic_hud(self) -> None:
         """Create a root-level panel that stays visible beside all mjlab tabs."""
@@ -279,6 +394,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
     def _process_actions(self) -> None:
         now = time.monotonic()
         manager = getattr(self, "_ckpt_mgr", None)
+        previous_checkpoint = manager.current_name if manager is not None else None
         if self._follow and manager is not None and now >= self._next_follow_poll:
             self._next_follow_poll = now + self._follow_poll_seconds
             entries = manager.fetch_available()
@@ -289,7 +405,41 @@ class _FollowViserPlayViewer(ViserPlayViewer):
                 and latest != self._follow_rejected_checkpoint
             ):
                 self._actions.append((ViewerAction.FETCH_CHECKPOINT, "latest"))
+        reset_requested = any(action == ViewerAction.RESET for action, _ in self._actions)
         super()._process_actions()
+        if self._waypoint_controller is not None:
+            checkpoint_changed = (
+                manager is not None and manager.current_name != previous_checkpoint
+            )
+            if reset_requested or checkpoint_changed:
+                self._waypoint_controller.advance(reset=True)
+            commands = []
+            while True:
+                try:
+                    commands.append(self._waypoint_local_commands.get_nowait())
+                except Empty:
+                    break
+            if self._introspection_ipc is not None:
+                commands.extend(self._introspection_ipc.consume_waypoint_commands())
+            for request in commands:
+                command = request.get("command")
+                if not isinstance(command, dict):
+                    continue
+                try:
+                    self._waypoint_controller.apply(
+                        command,
+                        request_id=request.get("request_id"),
+                        source=str(request.get("source") or "code"),
+                    )
+                except ValueError as error:
+                    self._waypoint_controller.reject(
+                        command,
+                        error,
+                        request_id=request.get("request_id"),
+                        source=str(request.get("source") or "code"),
+                    )
+            if commands or reset_requested or checkpoint_changed:
+                self._update_waypoint_display(force=True)
 
     def _handle_custom_action(self, action: ViewerAction, payload: Any) -> bool:
         manager = getattr(self, "_ckpt_mgr", None)
@@ -329,10 +479,20 @@ class _FollowViserPlayViewer(ViserPlayViewer):
 
     def sync_env_to_viewer(self) -> None:
         super().sync_env_to_viewer()
+        self._update_waypoint_display()
         self._update_diagnostic_hud()
 
     def _execute_step(self) -> bool:
         succeeded = super()._execute_step()
+        if succeeded and self._waypoint_controller is not None:
+            transition = (
+                self._transition_observer.latest
+                if self._transition_observer is not None else None
+            )
+            self._waypoint_controller.advance(
+                reset=bool(transition.reset) if transition is not None else False
+            )
+            self._update_waypoint_display()
         if succeeded and isinstance(self.policy, _ViewerPolicy):
             transition = (
                 self._transition_observer.latest if self._transition_observer is not None else None
@@ -1038,6 +1198,11 @@ def run_viewer(
     agent_cfg = load_rl_cfg(task)
 
     base_env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
+    waypoint_controller = (
+        WaypointController(base_env)
+        if task in {"Ascento-Locomotion-Flat", "Ascento-Locomotion-Gate-Hold-Flat"}
+        else None
+    )
     env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
     runner_cls = load_runner_cls(task) or MjlabOnPolicyRunner
     runner = runner_cls(env, asdict(agent_cfg), device=device)
@@ -1220,6 +1385,7 @@ def run_viewer(
         replay_recorder=replay_recorder,
         checkpoint_schema_provider=lambda: dict(active_schema),
         event_detector=event_detector,
+        waypoint_controller=waypoint_controller,
     )
 
     try:

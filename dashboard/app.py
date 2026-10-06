@@ -106,6 +106,13 @@ class ViewerCreateRequest(BaseModel):
     jacobian_hz: float = 2.0
 
 
+class ViewerWaypointRequest(BaseModel):
+    operation: Literal["set", "queue", "hold", "resume", "cancel"]
+    x_m: float | None = None
+    y_m: float | None = None
+    yaw_rad: float | None = None
+
+
 class ViewerExplanationRequest(BaseModel):
     checkpoint: str
     input_raw: list[float]
@@ -741,6 +748,30 @@ def viewer_logs(viewer_id: str, tail: int = 300):
         return VIEWER_SERVICE.logs(viewer_id, tail=tail)
     except ViewerNotFoundError as error:
         raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
+@app.get("/api/viewers/{viewer_id}/waypoints")
+def viewer_waypoints(viewer_id: str):
+    try:
+        return VIEWER_SERVICE.waypoint_state(viewer_id)
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+
+
+@app.post("/api/viewers/{viewer_id}/waypoints", status_code=202)
+def command_viewer_waypoint(
+    viewer_id: str, payload: ViewerWaypointRequest, request: Request
+):
+    if request.headers.get("x-ascento-control") != "1":
+        raise HTTPException(status_code=403, detail="missing dashboard control header")
+    try:
+        return VIEWER_SERVICE.command_waypoint(viewer_id, payload.model_dump())
+    except ViewerNotFoundError as error:
+        raise HTTPException(status_code=404, detail="viewer not found") from error
+    except ViewerBusyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.get("/api/viewers/{viewer_id}/introspection/schema")
