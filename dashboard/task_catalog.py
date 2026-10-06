@@ -50,6 +50,24 @@ _TASKS: tuple[dict[str, Any], ...] = (
         "supports_horizon": False,
     },
     {
+        "id": "Ascento-Locomotion-Gate-Hold-Control-Flat",
+        "label": "Locomotion (gate-hold control)",
+        "description": "Matched gate-hold sweep control with travel-aligned target headings.",
+        "supports_horizon": False,
+    },
+    {
+        "id": "Ascento-Locomotion-Gate-Hold-Turn-12-Flat",
+        "label": "Locomotion (12.5% quarter-turn headings)",
+        "description": "Gate-hold locomotion with signed quarter-turn final headings on 12.5% of regular targets.",
+        "supports_horizon": False,
+    },
+    {
+        "id": "Ascento-Locomotion-Gate-Hold-Turn-25-Flat",
+        "label": "Locomotion (25% quarter-turn headings)",
+        "description": "Gate-hold locomotion with signed quarter-turn final headings on 25% of regular targets.",
+        "supports_horizon": False,
+    },
+    {
         "id": "Ascento-Velocity-Flat",
         "label": "Velocity",
         "description": "Command tracking with adaptive 20→60→120→300 s horizons.",

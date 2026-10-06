@@ -308,3 +308,26 @@ def test_gate_hold_locomotion_task_reuses_base_training_contract():
     assert reset.func.__name__ == "initialize_gate_hold_locomotion_target"
     assert reset.params["gate_like_fraction"] == sequence.params["gate_like_fraction"]
     assert sequence.params["gate_like_initial_hold"] is True
+
+
+
+@pytest.mark.parametrize(
+    ("task_id", "fraction"),
+    [
+        ("Ascento-Locomotion-Gate-Hold-Control-Flat", 0.0),
+        ("Ascento-Locomotion-Gate-Hold-Turn-12-Flat", 0.125),
+        ("Ascento-Locomotion-Gate-Hold-Turn-25-Flat", 0.25),
+    ],
+)
+def test_gate_hold_heading_sweep_tasks_are_registered_with_matching_contract(task_id, fraction):
+    from mjlab.tasks.registry import load_env_cfg
+
+    cfg = load_env_cfg(task_id, play=False)
+    reset = cfg.events["initialize_world_target"]
+    sequence = cfg.events["repeated_random_world_targets"]
+
+    assert cfg.task_id == task_id
+    assert reset.func.__name__ == "initialize_gate_hold_locomotion_target"
+    assert reset.params["quarter_turn_heading_fraction"] == pytest.approx(fraction)
+    assert sequence.params["quarter_turn_heading_fraction"] == pytest.approx(fraction)
+    assert sequence.params["gate_like_initial_hold"] is True

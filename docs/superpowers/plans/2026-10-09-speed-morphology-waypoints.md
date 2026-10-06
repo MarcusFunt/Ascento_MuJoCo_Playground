@@ -54,8 +54,8 @@
 
 **Interfaces:** Viewer clients can select waypoint goals/headings; task and gate `Ascento-Locomotion-Gate-Hold-Flat` is registered; heading sweep is runnable through its versioned suite/script.
 
-- [ ] Cherry-pick `3315b34`, `5b5fc3c`, and `08f10c8` individually and resolve conflicts against current main.
-- [ ] Add/fix focused tests for waypoint control bounds, task registration, suite materialization, and dashboard exposure.
-- [ ] Run focused viewer/evaluation/dashboard tests, frontend typecheck/build, Ruff, and the full available test suite.
+- [x] Cherry-pick `3315b34`, `5b5fc3c`, and `08f10c8` individually and resolve conflicts against current main.
+- [x] Add/fix focused tests for waypoint control bounds, task registration, suite materialization, and dashboard exposure.
+- [x] Run focused viewer/evaluation/dashboard tests, frontend typecheck/build, Ruff, and the full available test suite.
 
-- [ ] Review the combined diff for regressions and commit the finished implementation.
+- [x] Review the combined diff for regressions and commit the finished implementation.

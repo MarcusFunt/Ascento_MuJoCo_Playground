@@ -103,3 +103,36 @@ def ascento_locomotion_gate_hold_env_cfg(play: bool = False, num_envs: int = 512
         sequence_params["gate_like_initial_hold"] = True
     cfg.task_id = "Ascento-Locomotion-Gate-Hold-Flat"
     return cfg
+
+
+def ascento_locomotion_gate_hold_heading_mix_env_cfg(
+    *,
+    quarter_turn_heading_fraction: float,
+    task_id: str,
+    play: bool = False,
+    num_envs: int = 512,
+):
+    """Gate-hold locomotion with a controlled mix of independent goal headings.
+
+    Regular targets retain their sampled 2--3 m positions and travel directions.
+    For the configured fraction, only the requested final heading is shifted by
+    a signed quarter turn. The original gate-hold task and reward structure stay
+    untouched.
+    """
+    if not 0.0 <= quarter_turn_heading_fraction <= 1.0:
+        raise ValueError("quarter_turn_heading_fraction must be in [0, 1]")
+    cfg = ascento_locomotion_env_cfg(play=play, num_envs=num_envs)
+    if not play:
+        target_params = dict(cfg.events["initialize_world_target"].params)
+        sequence_params = cfg.events["repeated_random_world_targets"].params
+        target_params["gate_like_fraction"] = sequence_params["gate_like_fraction"]
+        target_params["quarter_turn_heading_fraction"] = quarter_turn_heading_fraction
+        cfg.events["initialize_world_target"] = EventTermCfg(
+            func=ascento_mdp.events.initialize_gate_hold_locomotion_target,
+            mode="reset",
+            params=target_params,
+        )
+        sequence_params["gate_like_initial_hold"] = True
+        sequence_params["quarter_turn_heading_fraction"] = quarter_turn_heading_fraction
+    cfg.task_id = task_id
+    return cfg

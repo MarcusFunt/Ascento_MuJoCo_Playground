@@ -1200,7 +1200,13 @@ def run_viewer(
     base_env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
     waypoint_controller = (
         WaypointController(base_env)
-        if task in {"Ascento-Locomotion-Flat", "Ascento-Locomotion-Gate-Hold-Flat"}
+        if task in {
+            "Ascento-Locomotion-Flat",
+            "Ascento-Locomotion-Gate-Hold-Flat",
+            "Ascento-Locomotion-Gate-Hold-Control-Flat",
+            "Ascento-Locomotion-Gate-Hold-Turn-12-Flat",
+            "Ascento-Locomotion-Gate-Hold-Turn-25-Flat",
+        }
         else None
     )
     env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)

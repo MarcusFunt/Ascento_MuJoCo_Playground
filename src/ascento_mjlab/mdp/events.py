@@ -1291,6 +1291,7 @@ def initialize_random_world_target(
     max_long_goal_fraction: float = 0.40,
     precision_anchor_fraction: float | None = None,
     recovery_retarget_anchor_fraction: float | None = None,
+    quarter_turn_heading_fraction: float | None = None,
 ) -> None:
     """Assign each selected environment an immediate bounded random XY target.
 
@@ -1341,6 +1342,7 @@ def initialize_random_world_target(
                 long_min_distance_m=long_min_distance_m,
                 long_max_distance_m=long_max_distance_m,
                 record_training_metrics=record_training_metrics,
+                quarter_turn_heading_fraction=quarter_turn_heading_fraction,
             )
         else:
             precision_ids = ids[fixed_cohorts[ids] == GENERALIST_COHORT_PRECISION_ANCHOR]
@@ -1359,6 +1361,7 @@ def initialize_random_world_target(
                     min_distance_m=short_min_distance_m,
                     max_distance_m=short_max_distance_m,
                     arena_half_extent_m=arena_half_extent_m,
+                    quarter_turn_heading_fraction=quarter_turn_heading_fraction,
                 )
                 precision_distances = torch.linalg.vector_norm(
                     target_state["target_xy"][precision_ids]
@@ -1392,6 +1395,7 @@ def initialize_random_world_target(
                     long_min_distance_m=long_min_distance_m,
                     long_max_distance_m=long_max_distance_m,
                     record_training_metrics=record_training_metrics,
+                    quarter_turn_heading_fraction=quarter_turn_heading_fraction,
                 )
     else:
         min_distance_m, max_distance_m = _scheduled_target_distance_range(
@@ -1409,6 +1413,7 @@ def initialize_random_world_target(
             min_distance_m=min_distance_m,
             max_distance_m=max_distance_m,
             arena_half_extent_m=arena_half_extent_m,
+            quarter_turn_heading_fraction=quarter_turn_heading_fraction,
         )
         if record_training_metrics:
             distances = torch.linalg.vector_norm(
@@ -1437,6 +1442,7 @@ def initialize_gate_hold_locomotion_target(
     max_distance_m: float = 3.0,
     arena_half_extent_m: float = 4.0,
     gate_like_fraction: float = 0.25,
+    quarter_turn_heading_fraction: float | None = None,
 ) -> None:
     """Give gate-like episodes a reset-pose hold; keep regular targets unchanged.
 
@@ -1456,6 +1462,7 @@ def initialize_gate_hold_locomotion_target(
         min_distance_m=min_distance_m,
         max_distance_m=max_distance_m,
         arena_half_extent_m=arena_half_extent_m,
+        quarter_turn_heading_fraction=quarter_turn_heading_fraction,
     )
     gate_like = getattr(env, "ascento_locomotion_gate_like", None)
     if gate_like is None:
@@ -1642,6 +1649,7 @@ class RepeatedRandomWorldTargetSequence:
         gate_min_target_distance_m: float = 0.10,
         gate_max_target_distance_m: float = 0.20,
         gate_like_initial_hold: bool = False,
+        quarter_turn_heading_fraction: float | None = None,
         asset_cfg: SceneEntityCfg,
     ) -> None:
         if (precision_anchor_fraction is None) != (recovery_retarget_anchor_fraction is None):
@@ -1702,6 +1710,8 @@ class RepeatedRandomWorldTargetSequence:
             raise ValueError("gate push requires 0 < min_delta_v <= max_delta_v")
         if not 0.0 < gate_min_target_distance_m <= gate_max_target_distance_m:
             raise ValueError("gate target distance requires 0 < min <= max")
+        if quarter_turn_heading_fraction is not None and not 0.0 <= quarter_turn_heading_fraction <= 1.0:
+            raise ValueError("quarter_turn_heading_fraction must be in [0, 1]")
         minimum_attempts = (
             int(minimum_attempts_per_window)
             if minimum_episodes_per_stage is None
@@ -1989,6 +1999,7 @@ class RepeatedRandomWorldTargetSequence:
                     long_min_distance_m=long_min_distance_m,
                     long_max_distance_m=long_max_distance_m,
                     record_training_metrics=track_training_metrics,
+                    quarter_turn_heading_fraction=quarter_turn_heading_fraction,
                 )
             self._settled_at_target_s[regular_ready] = 0.0
             if track_training_metrics:
@@ -2012,6 +2023,7 @@ class RepeatedRandomWorldTargetSequence:
                 long_min_distance_m=long_min_distance_m,
                 long_max_distance_m=long_max_distance_m,
                 record_training_metrics=track_training_metrics,
+                quarter_turn_heading_fraction=quarter_turn_heading_fraction,
             )
         else:
             _set_bounded_random_world_targets(
@@ -2021,6 +2033,7 @@ class RepeatedRandomWorldTargetSequence:
                 min_distance_m=min_target_distance_m,
                 max_distance_m=max_target_distance_m,
                 arena_half_extent_m=arena_half_extent_m,
+                quarter_turn_heading_fraction=quarter_turn_heading_fraction,
             )
             if track_training_metrics:
                 distances = torch.linalg.vector_norm(
@@ -2380,6 +2393,7 @@ def _set_bounded_random_world_targets(
     max_distance_m: float,
     arena_half_extent_m: float,
     target_distances_m: torch.Tensor | None = None,
+    quarter_turn_heading_fraction: float | None = None,
 ) -> None:
     """Sample reachable local targets while keeping each clone in its own arena."""
     if not 0.0 < min_distance_m <= max_distance_m:
@@ -2394,6 +2408,8 @@ def _set_bounded_random_world_targets(
             raise ValueError(
                 "target_distances_m must provide one positive distance per environment"
             )
+    if quarter_turn_heading_fraction is not None and not 0.0 <= quarter_turn_heading_fraction <= 1.0:
+        raise ValueError("quarter_turn_heading_fraction must be in [0, 1]")
 
     current = asset.data.root_link_pos_w[ids, :2]
     origins = env.scene.env_origins[ids, :2]
@@ -2449,7 +2465,24 @@ def _set_bounded_random_world_targets(
     # toward the target rather than preserving the yaw at target assignment.
     # Keeping this bearing fixed for the segment avoids a 180-degree heading
     # discontinuity if the robot slightly overshoots the waypoint.
-    state["target_yaw"][ids] = torch.atan2(displacement[:, 1], displacement[:, 0])
+    target_heading = torch.atan2(displacement[:, 1], displacement[:, 0])
+    if quarter_turn_heading_fraction is not None:
+        # Draw at every sweep level, including the explicit 0% control, so
+        # matched seeds consume the same random stream for all factor values.
+        receives_turn_target = (
+            torch.rand(ids.numel(), device=env.device) < quarter_turn_heading_fraction
+        )
+        turn_sign = torch.where(
+            torch.rand(ids.numel(), device=env.device) < 0.5,
+            -torch.ones(ids.numel(), device=env.device),
+            torch.ones(ids.numel(), device=env.device),
+        )
+        target_heading = target_heading + torch.where(
+            receives_turn_target,
+            turn_sign * (torch.pi / 2.0),
+            torch.zeros(ids.numel(), device=env.device),
+        )
+    state["target_yaw"][ids] = torch.atan2(torch.sin(target_heading), torch.cos(target_heading))
 
 
 def _set_stratified_random_world_targets(
@@ -2467,6 +2500,7 @@ def _set_stratified_random_world_targets(
     long_min_distance_m: float,
     long_max_distance_m: float,
     record_training_metrics: bool = False,
+    quarter_turn_heading_fraction: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     distances, bands = sample_stratified_goal_distances(
         ids.numel(),
@@ -2488,6 +2522,7 @@ def _set_stratified_random_world_targets(
         max_distance_m=long_max_distance_m,
         arena_half_extent_m=arena_half_extent_m,
         target_distances_m=distances,
+        quarter_turn_heading_fraction=quarter_turn_heading_fraction,
     )
     if record_training_metrics:
         state = generalist_episode_metrics_state(env)

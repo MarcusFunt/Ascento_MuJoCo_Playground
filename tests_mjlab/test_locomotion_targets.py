@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from ascento_mjlab.mdp.events import (
@@ -81,6 +82,38 @@ def test_random_world_target_is_immediately_reachable_and_arena_bounded():
     assert torch.allclose(world_target_yaw(env), expected_yaw, atol=1e-6)
 
 
+
+def test_random_world_target_applies_configured_quarter_turn_heading_mix():
+    torch.manual_seed(19)
+    env = _env()
+    initialize_random_world_target(
+        env,
+        min_distance_m=0.15,
+        max_distance_m=0.35,
+        arena_half_extent_m=0.65,
+        quarter_turn_heading_fraction=1.0,
+    )
+
+    current = env.scene["robot"].data.root_link_pos_w[:, :2]
+    displacement = world_target_xy(env) - current
+    travel_heading = torch.atan2(displacement[:, 1], displacement[:, 0])
+    heading_offset = torch.atan2(
+        torch.sin(world_target_yaw(env) - travel_heading),
+        torch.cos(world_target_yaw(env) - travel_heading),
+    )
+    assert torch.allclose(
+        heading_offset.abs(),
+        torch.full_like(heading_offset, torch.pi / 2.0),
+        atol=1e-6,
+    )
+
+
+def test_random_world_target_rejects_invalid_quarter_turn_fraction():
+    import pytest
+
+    with pytest.raises(ValueError, match="quarter_turn_heading_fraction"):
+        initialize_random_world_target(_env(), quarter_turn_heading_fraction=1.01)
+
 def test_repeated_target_sequence_requires_a_settled_hold_before_resampling():
     torch.manual_seed(11)
     env = _env(count=1)
@@ -115,6 +148,7 @@ def test_repeated_target_sequence_requires_a_settled_hold_before_resampling():
         max_target_distance_m=0.35,
         arena_half_extent_m=0.65,
         gate_like_fraction=0.0,
+        quarter_turn_heading_fraction=1.0,
         asset_cfg=cfg,
     )
 
@@ -122,6 +156,13 @@ def test_repeated_target_sequence_requires_a_settled_hold_before_resampling():
         world_target_xy(env) - asset.data.root_link_pos_w[:, :2], dim=1
     )
     assert float(distance[0]) >= 0.15 - 1e-6
+    displacement = world_target_xy(env) - asset.data.root_link_pos_w[:, :2]
+    travel_heading = torch.atan2(displacement[:, 1], displacement[:, 0])
+    heading_offset = torch.atan2(
+        torch.sin(world_target_yaw(env) - travel_heading),
+        torch.cos(world_target_yaw(env) - travel_heading),
+    )
+    assert float(heading_offset.abs()[0]) == pytest.approx(torch.pi / 2.0, abs=1e-6)
 
 
 def test_repeated_target_sequence_has_gate_like_push_retarget_and_hold():
