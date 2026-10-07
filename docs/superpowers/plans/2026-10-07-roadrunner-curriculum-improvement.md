@@ -1,6 +1,6 @@
 **Goal:** Improve the Roadrunner-inspired generalist locomotion fine-tune while preserving the selected transfer policy's target-arrival, heading, and quiet-stop quality.
 
-**Status:** Bounded implementation, training, and evaluation are complete. Frozen-reference BC model 100 meets the practical target but is NOT_PROVEN_BETTER; model 199 passes formal gates but exceeds the 0.05 m practical target. No candidate is selected. Normalizer reporting and reward audit remain follow-up items.
+**Status:** Bounded implementation, training, and evaluation are complete. The frozen-normalizer model_99 arm passes all nine gates and the 0.05 m practical target but is NOT_PROVEN_BETTER against adaptive BC and the actor-only transfer. Keep the transfer selected. Normalizer reporting/ablation is complete; reward audit remains open.
 
 **Architecture:** Keep the existing fixed sequence suite as the promotion gate. Preserve a short-goal/recovery task slice throughout training, report training success by task slice, constrain how far PPO can move the transferred policy, and evaluate saved checkpoints during training. Promote only a checkpoint that passes all hard gates and demonstrates a paired improvement over the transfer baseline.
 
@@ -80,7 +80,7 @@ Trainer metrics reinforce the need for checkpoint selection by task performance.
 **Files:** `src/ascento_mjlab/tasks/generalist_locomotion/rl_cfg.py`, training configuration, and focused PPO/normalizer tests
 
 - [x] Add an optimizer ablation with a lower update rate and tighter KL limit, keeping the task mixture unchanged.
-- [ ] Persist target-error observation-normalizer mean/scale at each checkpoint; separately compare adaptive and preserved transfer statistics before changing normalizer behavior.
+- [x] Persist target-error observation-normalizer mean/scale for each screened checkpoint and compare adaptive versus preserved transfer statistics; frozen model_99 kept them unchanged but was not promoted.
 - [x] If smaller updates still erase gate behavior, test a reference-policy behavior-cloning term against the frozen transfer actor.
 - [x] Keep each stabilization method as a separate run so its contribution is measurable.
 
