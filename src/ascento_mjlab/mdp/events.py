@@ -28,6 +28,231 @@ def linear_curriculum_value(
     return float(start) + (float(end) - float(start)) * progress
 
 
+GENERALIST_SHORT_TARGET_MAX_DISTANCE_M = 0.50
+GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M = 1.50
+GENERALIST_TARGET_ARRIVAL_DISTANCE_M = 0.035
+
+
+def generalist_curriculum_values(
+    control_step: int,
+    *,
+    ramp_control_steps: int = 24_000,
+    start_gate_like_fraction: float = 0.10,
+    final_gate_like_fraction: float = 0.25,
+) -> dict[str, float]:
+    """Resolve the fixed stratified-distance envelope and gate-like schedule."""
+    if ramp_control_steps <= 0:
+        raise ValueError("ramp_control_steps must be positive")
+    if not 0.0 <= start_gate_like_fraction <= final_gate_like_fraction <= 1.0:
+        raise ValueError("gate-like curriculum fractions must satisfy 0 <= start <= final <= 1")
+    progress = min(1.0, max(0.0, float(control_step) / float(ramp_control_steps)))
+    return {
+        "progress": progress,
+        "target_min_distance_m": 0.15,
+        "target_max_distance_m": 3.0,
+        "gate_like_fraction": linear_curriculum_value(
+            control_step,
+            ramp_control_steps,
+            start_gate_like_fraction,
+            final_gate_like_fraction,
+        ),
+    }
+
+
+def generalist_goal_mix_fractions(
+    stage: int,
+    *,
+    medium_goal_fraction: float = 0.25,
+    initial_long_goal_fraction: float = 0.10,
+    max_long_goal_fraction: float = 0.40,
+) -> dict[str, float]:
+    """Return short/medium/long shares while preserving a short-goal floor."""
+    long_goal_fractions = (
+        initial_long_goal_fraction,
+        (initial_long_goal_fraction + max_long_goal_fraction) / 2.0,
+        max_long_goal_fraction,
+    )
+    if stage < 0 or stage >= len(long_goal_fractions):
+        raise ValueError("generalist goal-mix stage must be 0, 1, or 2")
+    long_fraction = long_goal_fractions[stage]
+    short_fraction = 1.0 - medium_goal_fraction - long_fraction
+    if not 0.0 < medium_goal_fraction < 1.0 or short_fraction <= 0.0:
+        raise ValueError("goal-mix fractions must leave positive short, medium, and long shares")
+    return {
+        "short": short_fraction,
+        "medium": medium_goal_fraction,
+        "long": long_fraction,
+    }
+
+
+def sample_stratified_goal_distances(
+    num_samples: int,
+    *,
+    device: torch.device | str,
+    long_goal_fraction: float,
+    medium_goal_fraction: float = 0.25,
+    short_min_distance_m: float = 0.15,
+    short_max_distance_m: float = 0.35,
+    medium_min_distance_m: float = 0.50,
+    medium_max_distance_m: float = 1.50,
+    long_min_distance_m: float = 2.0,
+    long_max_distance_m: float = 3.0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Draw a categorical distance mix and return distances plus 0/1/2 band ids."""
+    if not 0.0 < medium_goal_fraction < 1.0:
+        raise ValueError("medium_goal_fraction must be between zero and one")
+    if not 0.0 <= long_goal_fraction < 1.0 - medium_goal_fraction:
+        raise ValueError("long_goal_fraction must leave positive short and medium shares")
+    if not 0.0 < short_min_distance_m <= short_max_distance_m:
+        raise ValueError("short target distance requires 0 < min <= max")
+    if not 0.0 < medium_min_distance_m <= medium_max_distance_m:
+        raise ValueError("medium target distance requires 0 < min <= max")
+    if not 0.0 < long_min_distance_m <= long_max_distance_m:
+        raise ValueError("long target distance requires 0 < min <= max")
+    short_goal_fraction = 1.0 - medium_goal_fraction - long_goal_fraction
+    unit = torch.rand(num_samples, device=device)
+    bands = torch.where(
+        unit < short_goal_fraction,
+        torch.zeros(num_samples, dtype=torch.long, device=device),
+        torch.where(
+            unit < short_goal_fraction + medium_goal_fraction,
+            torch.ones(num_samples, dtype=torch.long, device=device),
+            torch.full((num_samples,), 2, dtype=torch.long, device=device),
+        ),
+    )
+    minima = torch.tensor(
+        [short_min_distance_m, medium_min_distance_m, long_min_distance_m],
+        dtype=torch.float32,
+        device=device,
+    )
+    maxima = torch.tensor(
+        [short_max_distance_m, medium_max_distance_m, long_max_distance_m],
+        dtype=torch.float32,
+        device=device,
+    )
+    distances = minima[bands] + torch.rand(num_samples, device=device) * (
+        maxima[bands] - minima[bands]
+    )
+    return distances, bands
+
+
+def wilson_lower_bound(successes: int, trials: int, *, z: float = 1.96) -> float:
+    if trials <= 0:
+        return 0.0
+    rate = successes / trials
+    z_sq = z * z
+    denominator = 1.0 + z_sq / trials
+    center = rate + z_sq / (2.0 * trials)
+    margin = z * math.sqrt(rate * (1.0 - rate) / trials + z_sq / (4.0 * trials * trials))
+    return (center - margin) / denominator
+
+
+def advance_generalist_goal_mix_stage(
+    stage: int,
+    *,
+    gate_recovery_successes: int,
+    gate_episodes: int,
+    short_arrival_successes: int,
+    short_episodes: int,
+    long_arrival_successes: int,
+    long_episodes: int,
+    minimum_episodes: int = 64,
+    gate_recovery_lcb_threshold: float = 0.85,
+    target_arrival_lcb_threshold: float = 0.50,
+) -> int:
+    """Advance the long-goal share only after Wilson-bound quality evidence."""
+    if stage >= 2:
+        return stage
+    if minimum_episodes <= 0:
+        raise ValueError("minimum_episodes must be positive")
+    if gate_episodes < minimum_episodes or short_episodes < minimum_episodes:
+        return stage
+    if wilson_lower_bound(gate_recovery_successes, gate_episodes) < gate_recovery_lcb_threshold:
+        return stage
+    if wilson_lower_bound(short_arrival_successes, short_episodes) < target_arrival_lcb_threshold:
+        return stage
+    if stage == 1:
+        if long_episodes < minimum_episodes:
+            return stage
+        if wilson_lower_bound(long_arrival_successes, long_episodes) < target_arrival_lcb_threshold:
+            return stage
+    return stage + 1
+
+
+def generalist_goal_mix_state(
+    env,
+    *,
+    initial_long_goal_fraction: float = 0.10,
+    medium_goal_fraction: float = 0.25,
+    max_long_goal_fraction: float = 0.40,
+) -> dict[str, int | float]:
+    """Shared run-local curriculum state used by reset sampling and the scheduler."""
+    state = getattr(env, "ascento_generalist_goal_mix", None)
+    if state is None:
+        if not 0.0 <= initial_long_goal_fraction < max_long_goal_fraction < 1.0:
+            raise ValueError("long-goal shares must increase within [0, 1)")
+        if not 0.0 < medium_goal_fraction < 1.0 - max_long_goal_fraction:
+            raise ValueError("goal-mix fractions must leave a positive short-goal share")
+        state = {
+            "stage": 0,
+            "long_goal_fraction": float(initial_long_goal_fraction),
+            "medium_goal_fraction": float(medium_goal_fraction),
+            "initial_long_goal_fraction": float(initial_long_goal_fraction),
+            "max_long_goal_fraction": float(max_long_goal_fraction),
+            "gate_episodes": 0,
+            "gate_recovery_successes": 0,
+            "short_episodes": 0,
+            "short_arrival_successes": 0,
+            "long_episodes": 0,
+            "long_arrival_successes": 0,
+        }
+        env.ascento_generalist_goal_mix = state
+    return state
+
+
+def generalist_episode_metrics_state(env) -> dict[str, torch.Tensor]:
+    """Return device-resident episode outcome state used by generalist metrics."""
+    state = getattr(env, "ascento_generalist_episode_metrics", None)
+    if state is None:
+        state = {
+            "initial_target_distance_m": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "gate_like": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "arrived": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "recovery_completed": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "heading_error_at_arrival_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "sampled_target_band_counts": torch.zeros(
+                (env.num_envs, 3), dtype=torch.float32, device=env.device
+            ),
+        }
+        env.ascento_generalist_episode_metrics = state
+    return state
+
+
+def reset_generalist_episode_metrics(
+    env,
+    env_ids: torch.Tensor | slice | None,
+    *,
+    initial_target_distance_m: torch.Tensor | None = None,
+) -> None:
+    """Reset slice outcomes for selected episodes and optionally record their sampled distance."""
+    state = generalist_episode_metrics_state(env)
+    ids = _resolved_env_ids(env, env_ids)
+    state["initial_target_distance_m"][ids] = 0.0
+    state["gate_like"][ids] = False
+    state["arrived"][ids] = False
+    state["recovery_completed"][ids] = False
+    state["heading_error_at_arrival_rad"][ids] = 0.0
+    state["sampled_target_band_counts"][ids] = 0.0
+    if initial_target_distance_m is not None:
+        state["initial_target_distance_m"][ids] = initial_target_distance_m.to(
+            dtype=torch.float32, device=env.device
+        ).reshape(-1)
+
+
 def _scheduled_target_distance_range(
     env,
     *,
@@ -51,12 +276,8 @@ def _scheduled_target_distance_range(
         raise ValueError("target-distance curriculum must expand from near to far")
     control_step = int(getattr(env, "common_step_counter", 0))
     return (
-        linear_curriculum_value(
-            control_step, ramp_control_steps, start_minimum_m, final_minimum_m
-        ),
-        linear_curriculum_value(
-            control_step, ramp_control_steps, start_maximum_m, final_maximum_m
-        ),
+        linear_curriculum_value(control_step, ramp_control_steps, start_minimum_m, final_minimum_m),
+        linear_curriculum_value(control_step, ramp_control_steps, start_maximum_m, final_maximum_m),
     )
 
 
@@ -329,6 +550,17 @@ def initialize_random_world_target(
     curriculum_start_min_target_distance_m: float | None = None,
     curriculum_start_max_target_distance_m: float | None = None,
     curriculum_ramp_control_steps: int | None = None,
+    record_training_metrics: bool = False,
+    stratified_goal_mix: bool = False,
+    short_min_distance_m: float = 0.15,
+    short_max_distance_m: float = 0.35,
+    medium_min_distance_m: float = 0.50,
+    medium_max_distance_m: float = 1.50,
+    long_min_distance_m: float = 2.0,
+    long_max_distance_m: float = 3.0,
+    initial_long_goal_fraction: float = 0.10,
+    medium_goal_fraction: float = 0.25,
+    max_long_goal_fraction: float = 0.40,
 ) -> None:
     """Assign each selected environment an immediate bounded random XY target.
 
@@ -341,22 +573,52 @@ def initialize_random_world_target(
     if ids.numel() == 0:
         return
     asset = env.scene[asset_name]
-    min_distance_m, max_distance_m = _scheduled_target_distance_range(
-        env,
-        final_minimum_m=min_distance_m,
-        final_maximum_m=max_distance_m,
-        start_minimum_m=curriculum_start_min_target_distance_m,
-        start_maximum_m=curriculum_start_max_target_distance_m,
-        ramp_control_steps=curriculum_ramp_control_steps,
-    )
-    _set_bounded_random_world_targets(
-        env,
-        asset,
-        ids,
-        min_distance_m=min_distance_m,
-        max_distance_m=max_distance_m,
-        arena_half_extent_m=arena_half_extent_m,
-    )
+    if stratified_goal_mix:
+        mix = generalist_goal_mix_state(
+            env,
+            initial_long_goal_fraction=initial_long_goal_fraction,
+            medium_goal_fraction=medium_goal_fraction,
+            max_long_goal_fraction=max_long_goal_fraction,
+        )
+        if record_training_metrics:
+            reset_generalist_episode_metrics(env, ids)
+        _set_stratified_random_world_targets(
+            env,
+            asset,
+            ids,
+            arena_half_extent_m=arena_half_extent_m,
+            long_goal_fraction=float(mix["long_goal_fraction"]),
+            medium_goal_fraction=medium_goal_fraction,
+            short_min_distance_m=short_min_distance_m,
+            short_max_distance_m=short_max_distance_m,
+            medium_min_distance_m=medium_min_distance_m,
+            medium_max_distance_m=medium_max_distance_m,
+            long_min_distance_m=long_min_distance_m,
+            long_max_distance_m=long_max_distance_m,
+            record_training_metrics=record_training_metrics,
+        )
+    else:
+        min_distance_m, max_distance_m = _scheduled_target_distance_range(
+            env,
+            final_minimum_m=min_distance_m,
+            final_maximum_m=max_distance_m,
+            start_minimum_m=curriculum_start_min_target_distance_m,
+            start_maximum_m=curriculum_start_max_target_distance_m,
+            ramp_control_steps=curriculum_ramp_control_steps,
+        )
+        _set_bounded_random_world_targets(
+            env,
+            asset,
+            ids,
+            min_distance_m=min_distance_m,
+            max_distance_m=max_distance_m,
+            arena_half_extent_m=arena_half_extent_m,
+        )
+    if record_training_metrics:
+        state = generalist_episode_metrics_state(env)
+        state["initial_target_distance_m"][ids] = torch.linalg.vector_norm(
+            world_target_xy(env)[ids] - asset.data.root_link_pos_w[ids, :2], dim=1
+        )
 
 
 def world_target_xy(env) -> torch.Tensor:
@@ -436,7 +698,16 @@ class RepeatedRandomWorldTargetSequence:
     """
 
     def __init__(self, cfg, env) -> None:
-        del cfg
+        params = getattr(cfg, "params", {}) if cfg is not None else {}
+        self._env = env
+        self._stratified_goal_mix = bool(params.get("stratified_goal_mix", False))
+        self._minimum_episodes_per_stage = int(params.get("minimum_episodes_per_stage", 64))
+        self._goal_mix_state = generalist_goal_mix_state(
+            env,
+            initial_long_goal_fraction=float(params.get("initial_long_goal_fraction", 0.10)),
+            medium_goal_fraction=float(params.get("medium_goal_fraction", 0.25)),
+            max_long_goal_fraction=float(params.get("max_long_goal_fraction", 0.40)),
+        )
         self._settled_at_target_s = torch.zeros(
             env.num_envs, dtype=torch.float32, device=env.device
         )
@@ -445,6 +716,9 @@ class RepeatedRandomWorldTargetSequence:
         self._gate_like = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
         self._gate_pushed = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
         self._gate_retargeted = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        self._gate_recovery_stable_time_s = torch.zeros(
+            env.num_envs, dtype=torch.float32, device=env.device
+        )
         self._push = OneShotPlanarVelocityPush(None, env)
 
     def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
@@ -455,6 +729,7 @@ class RepeatedRandomWorldTargetSequence:
             self._gate_like.zero_()
             self._gate_pushed.zero_()
             self._gate_retargeted.zero_()
+            self._gate_recovery_stable_time_s.zero_()
             self._push.reset()
             return
         ids = _resolved_env_ids_placeholder(
@@ -466,6 +741,7 @@ class RepeatedRandomWorldTargetSequence:
         self._gate_like[ids] = False
         self._gate_pushed[ids] = False
         self._gate_retargeted[ids] = False
+        self._gate_recovery_stable_time_s[ids] = 0.0
         self._push.reset(ids)
 
     def __call__(
@@ -483,6 +759,20 @@ class RepeatedRandomWorldTargetSequence:
         curriculum_ramp_control_steps: int | None = None,
         arena_half_extent_m: float = 0.65,
         gate_like_fraction: float = 0.25,
+        track_training_metrics: bool = False,
+        stratified_goal_mix: bool = False,
+        short_min_distance_m: float = 0.15,
+        short_max_distance_m: float = 0.35,
+        medium_min_distance_m: float = 0.50,
+        medium_max_distance_m: float = 1.50,
+        long_min_distance_m: float = 2.0,
+        long_max_distance_m: float = 3.0,
+        medium_goal_fraction: float = 0.25,
+        initial_long_goal_fraction: float = 0.10,
+        max_long_goal_fraction: float = 0.40,
+        minimum_episodes_per_stage: int = 64,
+        gate_recovery_lcb_threshold: float = 0.85,
+        target_arrival_lcb_threshold: float = 0.50,
         gate_push_time_s: float = 4.0,
         gate_min_delta_v: float = 0.05,
         gate_max_delta_v: float = 0.15,
@@ -497,14 +787,23 @@ class RepeatedRandomWorldTargetSequence:
             raise ValueError("target_hold_s must be positive")
         if not 0.0 <= gate_like_fraction <= 1.0:
             raise ValueError("gate_like_fraction must be in [0, 1]")
-        min_target_distance_m, max_target_distance_m = _scheduled_target_distance_range(
-            env,
-            final_minimum_m=min_target_distance_m,
-            final_maximum_m=max_target_distance_m,
-            start_minimum_m=curriculum_start_min_target_distance_m,
-            start_maximum_m=curriculum_start_max_target_distance_m,
-            ramp_control_steps=curriculum_ramp_control_steps,
-        )
+        if stratified_goal_mix:
+            mix = generalist_goal_mix_state(
+                env,
+                initial_long_goal_fraction=initial_long_goal_fraction,
+                medium_goal_fraction=medium_goal_fraction,
+                max_long_goal_fraction=max_long_goal_fraction,
+            )
+            long_goal_fraction = float(mix["long_goal_fraction"])
+        else:
+            min_target_distance_m, max_target_distance_m = _scheduled_target_distance_range(
+                env,
+                final_minimum_m=min_target_distance_m,
+                final_maximum_m=max_target_distance_m,
+                start_minimum_m=curriculum_start_min_target_distance_m,
+                start_maximum_m=curriculum_start_max_target_distance_m,
+                ramp_control_steps=curriculum_ramp_control_steps,
+            )
         current_gate_like_fraction = gate_like_fraction
         if curriculum_start_gate_like_fraction is not None:
             if not 0.0 <= curriculum_start_gate_like_fraction <= gate_like_fraction:
@@ -532,10 +831,14 @@ class RepeatedRandomWorldTargetSequence:
         asset = env.scene[asset_cfg.name]
         new_ids = ids[~self._episode_initialized[ids]]
         if new_ids.numel() > 0:
-            self._gate_like[new_ids] = torch.rand(
-                new_ids.numel(), device=env.device
-            ) < current_gate_like_fraction
+            self._gate_like[new_ids] = (
+                torch.rand(new_ids.numel(), device=env.device) < current_gate_like_fraction
+            )
             self._episode_initialized[new_ids] = True
+            if track_training_metrics:
+                generalist_episode_metrics_state(env)["gate_like"][new_ids] = self._gate_like[
+                    new_ids
+                ]
         self._episode_elapsed_s[ids] += float(env.step_dt)
 
         gate_ids = ids[self._gate_like[ids]]
@@ -575,6 +878,53 @@ class RepeatedRandomWorldTargetSequence:
                 asset.data.root_link_quat_w[retarget_ids]
             )
             self._gate_retargeted[retarget_ids] = True
+            if track_training_metrics:
+                state = generalist_episode_metrics_state(env)
+                state["arrived"][retarget_ids] = False
+                state["recovery_completed"][retarget_ids] = False
+                state["heading_error_at_arrival_rad"][retarget_ids] = 0.0
+                state["sampled_target_band_counts"][retarget_ids, 0] += 1.0
+                self._gate_recovery_stable_time_s[retarget_ids] = 0.0
+
+        if track_training_metrics:
+            state = generalist_episode_metrics_state(env)
+            recovering_ids = gate_ids[
+                self._gate_pushed[gate_ids] & ~self._gate_retargeted[gate_ids]
+            ]
+            if recovering_ids.numel() > 0:
+                settled = generalist_gate_recovery_stable(env, asset, recovering_ids)
+                self._gate_recovery_stable_time_s[recovering_ids] = torch.where(
+                    settled,
+                    self._gate_recovery_stable_time_s[recovering_ids] + float(env.step_dt),
+                    torch.zeros_like(self._gate_recovery_stable_time_s[recovering_ids]),
+                )
+                recovered = recovering_ids[
+                    self._gate_recovery_stable_time_s[recovering_ids] >= 0.50
+                ]
+                state["recovery_completed"][recovered] = True
+
+            target_distance = torch.linalg.vector_norm(
+                asset.data.root_link_pos_w[ids, :2] - world_target_xy(env)[ids], dim=1
+            )
+            newly_arrived = (target_distance <= GENERALIST_TARGET_ARRIVAL_DISTANCE_M) & ~state[
+                "arrived"
+            ][ids]
+            arrived_ids = ids[newly_arrived]
+            if arrived_ids.numel() > 0:
+                current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[arrived_ids])
+                heading_error = wrapped_angle_difference(
+                    world_target_yaw(env)[arrived_ids], current_yaw
+                ).abs()
+                state["heading_error_at_arrival_rad"][arrived_ids] = heading_error
+            state["arrived"][ids] |= target_distance <= GENERALIST_TARGET_ARRIVAL_DISTANCE_M
+
+        if self._stratified_goal_mix and stratified_goal_mix:
+            self._record_goal_mix_outcomes(
+                env,
+                minimum_episodes=minimum_episodes_per_stage,
+                gate_recovery_lcb_threshold=gate_recovery_lcb_threshold,
+                target_arrival_lcb_threshold=target_arrival_lcb_threshold,
+            )
 
         regular_ids = ids[~self._gate_like[ids]]
         if regular_ids.numel() == 0:
@@ -593,15 +943,96 @@ class RepeatedRandomWorldTargetSequence:
         if ready.numel() == 0:
             return
 
-        _set_bounded_random_world_targets(
-            env,
-            asset,
-            ready,
-            min_distance_m=min_target_distance_m,
-            max_distance_m=max_target_distance_m,
-            arena_half_extent_m=arena_half_extent_m,
-        )
+        if stratified_goal_mix:
+            _set_stratified_random_world_targets(
+                env,
+                asset,
+                ready,
+                arena_half_extent_m=arena_half_extent_m,
+                long_goal_fraction=long_goal_fraction,
+                medium_goal_fraction=medium_goal_fraction,
+                short_min_distance_m=short_min_distance_m,
+                short_max_distance_m=short_max_distance_m,
+                medium_min_distance_m=medium_min_distance_m,
+                medium_max_distance_m=medium_max_distance_m,
+                long_min_distance_m=long_min_distance_m,
+                long_max_distance_m=long_max_distance_m,
+                record_training_metrics=track_training_metrics,
+            )
+        else:
+            _set_bounded_random_world_targets(
+                env,
+                asset,
+                ready,
+                min_distance_m=min_target_distance_m,
+                max_distance_m=max_target_distance_m,
+                arena_half_extent_m=arena_half_extent_m,
+            )
         self._settled_at_target_s[ready] = 0.0
+
+    def _record_goal_mix_outcomes(
+        self,
+        env,
+        *,
+        minimum_episodes: int,
+        gate_recovery_lcb_threshold: float,
+        target_arrival_lcb_threshold: float,
+    ) -> None:
+        done_ids = env.termination_manager.dones.nonzero(as_tuple=False).flatten()
+        if done_ids.numel() == 0:
+            return
+        metrics_state = generalist_episode_metrics_state(env)
+        gate = self._gate_like[done_ids]
+        regular = ~gate
+        distance = metrics_state["initial_target_distance_m"][done_ids]
+        arrived = metrics_state["arrived"][done_ids]
+        recovered = metrics_state["recovery_completed"][done_ids]
+
+        gate_count = int(gate.sum().item())
+        gate_recovery_count = int((gate & recovered).sum().item())
+        short = regular & (distance <= GENERALIST_SHORT_TARGET_MAX_DISTANCE_M)
+        long = regular & (distance > GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M)
+        self._goal_mix_state["gate_episodes"] = (
+            int(self._goal_mix_state["gate_episodes"]) + gate_count
+        )
+        self._goal_mix_state["gate_recovery_successes"] = (
+            int(self._goal_mix_state["gate_recovery_successes"]) + gate_recovery_count
+        )
+        self._goal_mix_state["short_episodes"] = int(self._goal_mix_state["short_episodes"]) + int(
+            short.sum().item()
+        )
+        self._goal_mix_state["short_arrival_successes"] = int(
+            self._goal_mix_state["short_arrival_successes"]
+        ) + int((short & arrived).sum().item())
+        self._goal_mix_state["long_episodes"] = int(self._goal_mix_state["long_episodes"]) + int(
+            long.sum().item()
+        )
+        self._goal_mix_state["long_arrival_successes"] = int(
+            self._goal_mix_state["long_arrival_successes"]
+        ) + int((long & arrived).sum().item())
+        next_stage = advance_generalist_goal_mix_stage(
+            int(self._goal_mix_state["stage"]),
+            gate_recovery_successes=int(self._goal_mix_state["gate_recovery_successes"]),
+            gate_episodes=int(self._goal_mix_state["gate_episodes"]),
+            short_arrival_successes=int(self._goal_mix_state["short_arrival_successes"]),
+            short_episodes=int(self._goal_mix_state["short_episodes"]),
+            long_arrival_successes=int(self._goal_mix_state["long_arrival_successes"]),
+            long_episodes=int(self._goal_mix_state["long_episodes"]),
+            minimum_episodes=minimum_episodes,
+            gate_recovery_lcb_threshold=gate_recovery_lcb_threshold,
+            target_arrival_lcb_threshold=target_arrival_lcb_threshold,
+        )
+        if next_stage != int(self._goal_mix_state["stage"]):
+            self._goal_mix_state["stage"] = next_stage
+            fractions = generalist_goal_mix_fractions(
+                next_stage,
+                medium_goal_fraction=float(self._goal_mix_state["medium_goal_fraction"]),
+                initial_long_goal_fraction=float(
+                    self._goal_mix_state["initial_long_goal_fraction"]
+                ),
+                max_long_goal_fraction=float(self._goal_mix_state["max_long_goal_fraction"]),
+            )
+            self._goal_mix_state["long_goal_fraction"] = fractions["long"]
 
 
 class SettleTriggeredLocomotionSequence:
@@ -742,6 +1173,30 @@ def _is_settled_for_locomotion(env, asset, ids: torch.Tensor) -> torch.Tensor:
     )
 
 
+def generalist_gate_recovery_stable(env, asset, ids: torch.Tensor) -> torch.Tensor:
+    """Match the sequence evaluator's 0.5 s post-disturbance recovery envelope."""
+    tilt = torch.acos((-asset.data.projected_gravity_b[ids, 2]).clamp(-1.0, 1.0))
+    planar_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_b[ids, :2], dim=1)
+    angular_xy = torch.linalg.vector_norm(asset.data.root_link_ang_vel_b[ids, :2], dim=1)
+    yaw_rate = asset.data.root_link_ang_vel_b[ids, 2].abs()
+    heading_error = wrapped_angle_difference(
+        world_target_yaw(env)[ids], yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[ids])
+    ).abs()
+    height_error = (asset.data.root_link_pos_w[ids, 2] - 0.75).abs()
+    left = env.scene["left_wheel_contact"].data.found[ids].flatten(start_dim=1).any(dim=1)
+    right = env.scene["right_wheel_contact"].data.found[ids].flatten(start_dim=1).any(dim=1)
+    return (
+        (tilt <= 0.08)
+        & (planar_speed <= 0.10)
+        & (height_error <= 0.05)
+        & (angular_xy <= 0.25)
+        & (yaw_rate <= 0.25)
+        & (heading_error <= 0.15)
+        & left
+        & right
+    )
+
+
 def _apply_cardinal_planar_push(
     env,
     asset,
@@ -780,12 +1235,21 @@ def _set_bounded_random_world_targets(
     min_distance_m: float,
     max_distance_m: float,
     arena_half_extent_m: float,
+    target_distances_m: torch.Tensor | None = None,
 ) -> None:
     """Sample reachable local targets while keeping each clone in its own arena."""
     if not 0.0 < min_distance_m <= max_distance_m:
         raise ValueError("target distance requires 0 < min <= max")
     if arena_half_extent_m <= 0.0:
         raise ValueError("arena_half_extent_m must be positive")
+    if target_distances_m is not None:
+        target_distances_m = target_distances_m.to(device=env.device, dtype=torch.float32).reshape(
+            -1
+        )
+        if target_distances_m.numel() != ids.numel() or torch.any(target_distances_m <= 0.0):
+            raise ValueError(
+                "target_distances_m must provide one positive distance per environment"
+            )
 
     current = asset.data.root_link_pos_w[ids, :2]
     origins = env.scene.env_origins[ids, :2]
@@ -799,8 +1263,10 @@ def _set_bounded_random_world_targets(
         if pending.numel() == 0:
             break
         angles = torch.empty(pending.numel(), device=env.device).uniform_(-torch.pi, torch.pi)
-        distances = torch.empty(pending.numel(), device=env.device).uniform_(
-            min_distance_m, max_distance_m
+        distances = (
+            torch.empty(pending.numel(), device=env.device).uniform_(min_distance_m, max_distance_m)
+            if target_distances_m is None
+            else target_distances_m[pending]
         )
         offsets = distances.unsqueeze(1) * torch.stack(
             (torch.cos(angles), torch.sin(angles)), dim=1
@@ -825,8 +1291,12 @@ def _set_bounded_random_world_targets(
             to_origin / norm.clamp_min(1.0e-6),
             default_direction,
         )
-        distance = 0.5 * (min_distance_m + max_distance_m)
-        targets[pending] = current[pending] + direction * distance
+        fallback_distance = (
+            0.5 * (min_distance_m + max_distance_m)
+            if target_distances_m is None
+            else target_distances_m[pending].unsqueeze(1)
+        )
+        targets[pending] = current[pending] + direction * fallback_distance
 
     state = _world_target_state(env)
     state["target_xy"][ids] = targets
@@ -836,6 +1306,50 @@ def _set_bounded_random_world_targets(
     # Keeping this bearing fixed for the segment avoids a 180-degree heading
     # discontinuity if the robot slightly overshoots the waypoint.
     state["target_yaw"][ids] = torch.atan2(displacement[:, 1], displacement[:, 0])
+
+
+def _set_stratified_random_world_targets(
+    env,
+    asset,
+    ids: torch.Tensor,
+    *,
+    arena_half_extent_m: float,
+    long_goal_fraction: float,
+    medium_goal_fraction: float,
+    short_min_distance_m: float,
+    short_max_distance_m: float,
+    medium_min_distance_m: float,
+    medium_max_distance_m: float,
+    long_min_distance_m: float,
+    long_max_distance_m: float,
+    record_training_metrics: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    distances, bands = sample_stratified_goal_distances(
+        ids.numel(),
+        device=env.device,
+        long_goal_fraction=long_goal_fraction,
+        medium_goal_fraction=medium_goal_fraction,
+        short_min_distance_m=short_min_distance_m,
+        short_max_distance_m=short_max_distance_m,
+        medium_min_distance_m=medium_min_distance_m,
+        medium_max_distance_m=medium_max_distance_m,
+        long_min_distance_m=long_min_distance_m,
+        long_max_distance_m=long_max_distance_m,
+    )
+    _set_bounded_random_world_targets(
+        env,
+        asset,
+        ids,
+        min_distance_m=short_min_distance_m,
+        max_distance_m=long_max_distance_m,
+        arena_half_extent_m=arena_half_extent_m,
+        target_distances_m=distances,
+    )
+    if record_training_metrics:
+        state = generalist_episode_metrics_state(env)
+        for band in range(3):
+            state["sampled_target_band_counts"][ids, band] += (bands == band).float()
+    return distances, bands
 
 
 def _set_nearby_world_targets(
@@ -853,6 +1367,14 @@ __all__ = [
     "DEFAULT_WHEEL_HALF_WIDTH_M",
     "DEFAULT_WHEEL_RADIUS_M",
     "flat_ground_wheel_bottom_heights",
+    "generalist_curriculum_values",
+    "generalist_goal_mix_fractions",
+    "sample_stratified_goal_distances",
+    "advance_generalist_goal_mix_stage",
+    "generalist_goal_mix_state",
+    "generalist_episode_metrics_state",
+    "reset_generalist_episode_metrics",
+    "generalist_gate_recovery_stable",
     "initialize_random_world_target",
     "initialize_world_target",
     "mixed_balance_recovery_reset",

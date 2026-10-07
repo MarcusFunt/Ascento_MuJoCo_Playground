@@ -151,9 +151,9 @@ RAI Institute's public [Roadrunner overview](https://rai-inst.com/resources/vide
 
 `Ascento-Generalist-Locomotion-Flat` keeps the existing 41-value actor observation and six-action interface. It samples one policy across world-target travel, heading changes, settled stops, and mild push recovery:
 
-1. Start with 0.15-0.35 m target distances and 10% gate-like recovery episodes.
-2. Over 24,000 control steps, linearly expand random waypoint distances to 2-3 m and increase gate-like episodes to 25%.
-3. Regular episodes chain another target after a 0.35 s settled stop. Gate-like episodes apply a 0.05-0.15 m/s planar push at 4 s, retarget 0.10-0.20 m forward at 9 s, and then hold the target.
+1. Sample short (0.15-0.35 m), medium (0.5-1.5 m), and long (2-3 m) target bands from the first rollout. Long-goal share starts at 10%, with 25% medium and 65% short goals.
+2. Keep all three bands and gate-like episodes present at every stage. Increase long-goal share to 25% and then 40% only after the gate-recovery and target-arrival Wilson lower-bound thresholds pass with at least 64 samples in each required slice.
+3. Gate-like exposure starts at 10% and ramps to a configurable 25% endpoint over 24,000 control steps. Regular episodes chain another stratified target after a 0.35 s settled stop. Gate-like episodes apply a 0.05-0.15 m/s planar push at 4 s, retarget 0.10-0.20 m forward at 9 s, and then hold the target.
 
 The separate task leaves `Ascento-Locomotion-Flat` and its task contract unchanged. Initialize only compatible actor weights and observation normalization from the existing gate-selected checkpoint; use a new critic, optimizer, and iteration count. Compare the transfer baseline and every candidate on `roadrunner_generalist_sequence_gate_v1`, which has the same 256 fixed settle/push/short-goal/stop scenarios and gates for both policies:
 
@@ -170,12 +170,12 @@ ascento evaluate run \
 ascento run start --task Ascento-Generalist-Locomotion-Flat \
   --display-name "Roadrunner-inspired generalist locomotion pilot" \
   --purpose experiment --tag roadrunner-inspired --tag shared-policy \
-  --allow-dirty-provenance --parent-run-id 762230a3d4b4 \
-  --envs 512 --iterations 1200 --seed 20261007 \
+  --parent-run-id 762230a3d4b4 \
+  --envs 512 --iterations 500 --seed 20261007 \
   --parent-checkpoint transfers/ascento_generalist_locomotion_flat/roadrunner_generalist/model_000000.pt \
   --foreground --interval 60 --json -- \
   --agent.resume True --agent.load-run _resume_parent \
-  --agent.load-checkpoint model_000000.pt
+  --agent.load-checkpoint model_000000.pt --agent.save-interval 100
 
 ascento evaluate run --run-id <candidate-run-id> \
   --suite roadrunner_generalist_sequence_gate_v1 --batch-size 256 --device cuda:0
@@ -197,6 +197,50 @@ confirms an indexed reset clears only the selected wheel PI state. The neutral
 result is an open-loop baseline—not a policy gate for this dynamically balanced
 robot. Treat a failed direction or PI-reset check as a plant/controller issue,
 not a PPO tuning result.
+
+
+### Generalist curriculum and drift-control pilots
+
+The generalist locomotion task now samples a stratified target-distance mixture
+throughout training: 15-35 cm short goals, 0.5-1.5 m medium goals, and 2-3 m
+long goals. Long-goal exposure starts at 10%; the short/medium/long shares are
+65/25/10 at stage 0, 50/25/25 at stage 1, and 35/25/40 at stage 2. The mix
+advances only after at least 64 completed episodes in each required slice and
+the 95% Wilson lower bounds clear the task thresholds: gate recovery >= 0.85
+and short-goal arrival >= 0.50 before stage 1; long-goal arrival >= 0.50 before
+stage 2. Gate-like episodes remain in the mix throughout. Their fraction starts
+at 10% and ramps to 25% by default. Set ASCENTO_GENERALIST_GATE_LIKE_FRACTION
+to compare a different endpoint, for example 0.40, while keeping the target
+mixture and PPO settings fixed.
+
+Managed training metrics record curriculum step/progress, current mixture
+stage and shares, sampled target-band counts, gate exposure, and episode
+arrival, recovery, heading, fall, and timeout numerators by gate/short/medium/
+long slice. Divide each outcome numerator by that slice's episode count to
+read a rate; divide heading-error sum by heading-error sample count for its
+conditional mean. Reward weights remain unchanged until those measures and the
+reward breakdown show a specific shaping gap.
+
+ASCENTO_GENERALIST_OPTIMIZER_PROFILE=default keeps the inherited 1e-4
+learning rate and 0.01 desired KL. The conservative profile uses a 3e-5 shared
+PPO learning rate and 0.003 desired KL. RSL-RL exposes one optimizer rate for
+the actor and critic, so this ablation lowers both. Keep the task mixture and
+normalizer behavior fixed during the optimizer comparison.
+
+The actor observation normalizer remains adaptive. After each run, compare its
+world-target-error mean and scale with the frozen transfer values and across
+checkpoints:
+
+~~~bash
+uv run --frozen --extra cu128 --extra dashboard \
+  python scripts/report_generalist_normalizer_drift.py \
+  --reference transfers/ascento_generalist_locomotion_flat/roadrunner_generalist/model_000000.pt \
+  --output logs/rsl_rl/<run>/normalizer_drift.json \
+  logs/rsl_rl/<run>/ascento_generalist_locomotion_flat/<timestamp>/model_*.pt
+~~~
+
+Do not interpret a normalizer shift as a policy-quality improvement. Use the
+fixed sequence suite and paired transfer comparison for checkpoint selection.
 
 ## Starting a managed run
 

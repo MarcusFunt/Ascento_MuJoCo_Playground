@@ -17,6 +17,10 @@ from ascento_mjlab.mdp.rewards import (
     track_motion_forward_velocity,
     track_motion_yaw_rate,
     track_yaw_rate,
+    world_target_heading,
+    world_target_progress_velocity,
+    world_target_proximity,
+    world_target_speed_penalty,
 )
 
 
@@ -138,3 +142,36 @@ def test_recovery_progress_requires_support_and_accounts_for_angular_speed():
 
     assert supported.item() > 0.0
     assert unsupported.item() == pytest.approx(0.0)
+
+
+def test_world_target_rewards_distinguish_arrival_from_near_target_departure():
+    env = _env()
+    robot = env.scene["robot"]
+    robot.data.root_link_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    robot.data.root_link_pos_w[0, :2] = torch.tensor([0.0, 0.0])
+    env.ascento_world_target_state = {
+        "target_xy": torch.tensor([[0.03, 0.0]]),
+        "target_yaw": torch.tensor([0.0]),
+    }
+    robot.data.root_link_lin_vel_w.zero_()
+    robot.data.root_link_lin_vel_b.zero_()
+
+    arrived_progress = world_target_progress_velocity(env).item()
+    arrived_proximity = world_target_proximity(env).item()
+    arrived_speed_cost = world_target_speed_penalty(env).item()
+
+    robot.data.root_link_lin_vel_w[0, 0] = -0.25
+    robot.data.root_link_lin_vel_b[0, 0] = -0.25
+    away_progress = world_target_progress_velocity(env).item()
+    away_proximity = world_target_proximity(env).item()
+    away_speed_cost = world_target_speed_penalty(env).item()
+
+    assert arrived_progress == pytest.approx(0.0)
+    assert arrived_proximity > 0.99
+    assert arrived_speed_cost == pytest.approx(0.0)
+    assert away_progress < 0.0
+    assert away_proximity == pytest.approx(arrived_proximity)
+    assert away_speed_cost > 0.0
+
+    env.ascento_world_target_state["target_yaw"][0] = 0.5
+    assert world_target_heading(env).item() < 1.0
