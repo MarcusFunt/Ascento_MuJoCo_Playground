@@ -76,3 +76,28 @@ def test_generalist_reference_regularizer_requires_checkpoint(monkeypatch):
 
     with pytest.raises(ValueError, match="ASCENTO_GENERALIST_REFERENCE_CHECKPOINT"):
         ascento_generalist_locomotion_env_cfg()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_reference_actor_action_mse_supports_cuda(tmp_path):
+    checkpoint = tmp_path / "teacher-cuda.pt"
+    _teacher_checkpoint(checkpoint)
+    device = torch.device("cuda:0")
+    env = SimpleNamespace(
+        device=device,
+        obs_buf={"actor": torch.zeros((2, 41), device=device)},
+        observation_manager=SimpleNamespace(
+            compute_group=lambda group: torch.full((2, 41), 5.0, device=device)
+        ),
+        action_manager=SimpleNamespace(
+            action=torch.tensor(
+                [[1.0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]], device=device
+            )
+        ),
+    )
+
+    penalty = rewards.reference_actor_action_mse(
+        env, checkpoint_path=str(checkpoint), action_clip=1.0
+    )
+
+    assert penalty.cpu().tolist() == pytest.approx([0.0, 1.0 / 6.0])

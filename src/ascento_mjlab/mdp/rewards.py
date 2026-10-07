@@ -807,4 +807,8 @@ def reference_actor_action_mse(
             f"current action shape {tuple(current_action.shape)} does not match "
             f"reference shape {tuple(target_action.shape)}"
         )
-    return torch.mean(torch.square(current_action - target_action), dim=-1)
+    penalty = torch.mean(torch.square(current_action - target_action), dim=-1)
+    if penalty.is_cuda:
+        # Complete the auxiliary inference before MuJoCo-Warp schedules the next step.
+        torch.cuda.synchronize(penalty.device)
+    return penalty
