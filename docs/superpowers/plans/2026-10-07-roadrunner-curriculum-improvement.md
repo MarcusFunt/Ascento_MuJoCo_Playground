@@ -1,6 +1,6 @@
 **Goal:** Improve the Roadrunner-inspired generalist locomotion fine-tune while preserving the selected transfer policy's target-arrival, heading, and quiet-stop quality.
 
-**Status:** Bounded implementation, training, and evaluation are complete. The frozen-normalizer model_99 arm passes all nine gates and the 0.05 m practical target but is NOT_PROVEN_BETTER against adaptive BC and the actor-only transfer. Keep the transfer selected. Normalizer reporting/ablation is complete; reward audit remains open.
+**Status:** Bounded implementation, training, and evaluation are complete. Frozen-normalizer model_99 passes all nine gates and the 0.05 m practical target but is NOT_PROVEN_BETTER against adaptive BC and the actor-only transfer. Keep the transfer selected. The normalizer ablation is complete. Training recovery and task-slice telemetry still need lifecycle/cohort fixes before further curriculum or reward conclusions are trusted; the fixed-share and short-target reward ablations remain open.
 
 **Architecture:** Keep the existing fixed sequence suite as the promotion gate. Preserve a short-goal/recovery task slice throughout training, report training success by task slice, constrain how far PPO can move the transferred policy, and evaluate saved checkpoints during training. Promote only a checkpoint that passes all hard gates and demonstrates a paired improvement over the transfer baseline.
 
@@ -39,6 +39,12 @@ Trainer metrics reinforce the need for checkpoint selection by task performance.
 
 3. **PPO and observation-normalizer drift may amplify forgetting.** The run used adaptive PPO with a 1e-4 initial learning rate and continued for 1,200 updates from the passing transfer. The target-error distribution also widened during the curriculum. The evidence does not isolate policy updates from normalizer movement, so the next experiment should measure both and change one at a time.
 
+## Training telemetry validity caveat
+
+The fixed-suite evaluation results and paired policy comparisons are valid, but two training telemetry paths are not yet suitable for learning claims. In src/ascento_mjlab/mdp/events.py, retarget clears recovery_completed, then the recovery detector excludes already-retargeted environments. A successful pre-retarget recovery is therefore lost before episode completion, making the training gate-recovery LCB unreliable and unsafe as a stage-advancement signal. Separately, short/medium/long masks include gate-like episodes, and the metrics do not distinguish receiving a push, recovery, retarget, the second arrival, and a settled stop. Correct and test those paths before using training recovery LCB or overlapping slice outcomes to claim behavior was learned.
+
+For frozen run 0d0d2f9dbb55, model_99 reached progress 0.0996 and scheduled gate-like share 0.1149 (25% is the configured endpoint). Its goal-mix stage remained 0; only 42 gate-like episodes had completed, and short-arrival LCB was 0.161. The recovery LCB was 0 but is uninterpretable for the lifecycle reason above.
+
 ## Global constraints
 
 - Keep the actor-only transfer checkpoint as the quality floor and rollback policy.
@@ -62,8 +68,9 @@ Trainer metrics reinforce the need for checkpoint selection by task performance.
 **Files:** `src/ascento_mjlab/mdp/events.py`, `src/ascento_mjlab/tasks/generalist_locomotion/env_cfg.py`, `tests_mjlab/test_locomotion_curriculum.py`
 
 - [x] Record curriculum step/fraction, sampled target-distance bands, and gate-like episode counts in managed training metrics.
-- [x] Add per-slice measures for arrival within 0.035 m, recovery completion, heading error after arrival, and fall/timeout rate.
+- [x] Add initial per-slice measures for arrival within 0.035 m, recovery, heading at arrival, and fall/timeout rate.
 - [x] Add tests for metric/reset behavior and for the configured distribution at curriculum start, midpoint, and endpoint.
+- [ ] Make the reported goal slices disjoint from gate-like episodes; track push received, successful recovery through retarget, second-target arrival, settled stop, and post-arrival heading separately. Add a lifecycle test showing successful recovery remains recorded through retarget until episode reset.
 - [x] Verify that run telemetry exposes these metrics at the saved checkpoint cadence.
 
 ### Task 2: Preserve precision tasks while expanding travel
@@ -97,7 +104,7 @@ Trainer metrics reinforce the need for checkpoint selection by task performance.
 
 - [ ] A selected checkpoint passes all nine hard gates, including target-arrival Wilson lower bound >= 0.50, final-target-error p95 <= 0.05 m as the practical target (formal gate <= 0.10 m), post-target heading p95 <= 0.15 rad, stationary tilt p95 <= 0.04 rad, and body-rocking p95 <= 0.03. BC model 100 meets this absolute screen but lacks an acceptable paired quality tradeoff; model 199 exceeds the practical target.
 - [ ] Paired evaluation against the transfer policy uses 256 matching resolved scenarios. Require all hard gates, no statistically credible regression on guarded quality metrics, and a prespecified paired improvement whose confidence interval excludes zero; a PASS alone does not establish an upgrade.
-- [ ] The short-goal, long-goal, and gate-like training metrics show that each intended behavior was actually sampled and learned.
+- [ ] Disjoint short-goal, long-goal, push/recovery, retarget, second-arrival, and settled-stop metrics show that each intended behavior was sampled and learned; recovery success remains recorded through retarget until episode reset.
 - [ ] A candidate's performance is repeatable across the second seed before the task documentation calls it an improvement.
 
 ## Verification plan

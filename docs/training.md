@@ -209,17 +209,24 @@ advances only after at least 64 completed episodes in each required slice and
 the 95% Wilson lower bounds clear the task thresholds: gate recovery >= 0.85
 and short-goal arrival >= 0.50 before stage 1; long-goal arrival >= 0.50 before
 stage 2. Gate-like episodes remain in the mix throughout. Their fraction starts
-at 10% and ramps to 25% by default. Set ASCENTO_GENERALIST_GATE_LIKE_FRACTION
-to compare a different endpoint, for example 0.40, while keeping the target
-mixture and PPO settings fixed.
+at 10% and ramps to 25% by default. The frozen-normalizer 100-update pilot
+ended at about 11.5%; 25% is the configured endpoint. Set
+ASCENTO_GENERALIST_GATE_LIKE_FRACTION to compare a different endpoint, for
+example 0.40, while keeping the target mixture and PPO settings fixed. The
+long-goal stage and training recovery telemetry are provisional until the
+recovery lifecycle and slice-cohort issues below are corrected.
 
-Managed training metrics record curriculum step/progress, current mixture
-stage and shares, sampled target-band counts, gate exposure, and episode
-arrival, recovery, heading, fall, and timeout numerators by gate/short/medium/
-long slice. Divide each outcome numerator by that slice's episode count to
-read a rate; divide heading-error sum by heading-error sample count for its
-conditional mean. Reward weights remain unchanged until those measures and the
-reward breakdown show a specific shaping gap.
+Managed training metrics expose curriculum step/progress, mixture stage and
+shares, sampled target-band counts, gate exposure, and provisional episode
+outcomes. Do not interpret the gate-recovery count as a valid success rate yet:
+retarget clears the recovery flag, then recovery tracking skips retargeted
+environments. Also, short/medium/long masks include gate-like episodes, so
+those outcome slices overlap; current telemetry does not separately measure
+push received, retarget, second-target arrival, settled stop, and post-arrival
+heading. These training measures need a lifecycle/cohort fix before they can
+show that each behavior was learned. The fixed-suite evaluator measures
+recovery independently. Reward weights remain unchanged until trustworthy
+outcome measures and the reward breakdown show a specific shaping gap.
 
 ASCENTO_GENERALIST_OPTIMIZER_PROFILE=default keeps the inherited 1e-4
 learning rate and 0.01 desired KL. The conservative profile uses a 3e-5 shared

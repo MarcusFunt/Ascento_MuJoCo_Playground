@@ -6,7 +6,7 @@
 
 ## Executive summary
 
-The earlier fine-tuning pilots show that higher training reward and a larger gate-like share do not reliably preserve the transfer policy's target-and-stop behavior. A lower-learning-rate/tighter-KL arm also regressed, so optimizer size alone does not explain the loss. The implemented task-slice telemetry confirms that the success-gated long-goal mix remained at stage 0: by the BC continuation's last complete telemetry, gate recovery's Wilson lower bound was 0 and short-arrival's was about 0.20, below the stage thresholds of 0.85 and 0.50.
+The earlier fine-tuning pilots show that higher training reward and a larger gate-like share do not reliably preserve the transfer policy's target-and-stop behavior. A lower-learning-rate/tighter-KL arm also regressed, so optimizer size alone does not explain the loss. The success-gated long-goal mix remained at stage 0. In the BC continuation, the short-arrival Wilson lower bound was about 0.20, below its 0.50 threshold. The training gate-recovery lower bound was 0, but that signal is not interpretable: the existing retarget callback clears `recovery_completed`, then excludes retargeted environments from further recovery tracking. So the telemetry does not establish that the policy failed to learn recovery; the recovery counter needs a separate lifecycle fix before it can govern or diagnose curriculum advancement.
 
 A frozen-reference behavior-cloning (BC) term was added as a separate, opt-in stabilization arm. Its checkpoint at iteration 100 passed all nine suite gates, arrived at the target in 256/256 scenarios, and had final-target-error p95 **0.01818 m**, comfortably within the requested 0.05 m tolerance. Paired evaluation showed a statistically clear target-error regression against the transfer baseline (IQM +0.01196 m, 95% CI +0.01177 to +0.01217 m), offset by better heading and stationary tilt, with small in-gate regressions in action smoothness and rocking. It was **PASS / NOT_PROVEN_BETTER**.
 
@@ -33,7 +33,7 @@ The continuation's first attempt stopped at iteration 158 with CUDA 999 surfaced
   20261007T120309Z_roadrunner_generalist_sequence_gate_v1_model_99.
 - All three evaluations used the same 256 resolved scenarios with SHA-256
   a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1.
-- Training configuration: 512 environments, seed 20261007, PPO defaults, 25% final gate-like fraction, frozen teacher copied from the same actor-only transfer, BC weight 2.0. Training and evaluation used the same signed task contract and BC environment settings.
+- Training configuration: 512 environments, seed 20261007, PPO defaults, a 25% scheduled gate-like endpoint, frozen teacher copied from the same actor-only transfer, BC weight 2.0. By model_99 the 100-update screen was only 9.96% through the schedule, at a scheduled gate-like share of 11.49%; it did not train at the 25% endpoint. Training and evaluation used the same signed task contract and BC environment settings.
 
 ## Checkpoint comparisons
 
@@ -77,11 +77,23 @@ These are meaningful tradeoffs, not a general improvement. A second seed was not
 ## Frozen-normalizer ablation
 
 The managed run 0d0d2f9dbb55 used the same transfer checkpoint, BC teacher and
-weight, 25% gate-like endpoint, seed 20261007, 512 environments, and default
-PPO settings as the adaptive BC arm. It completed 100 PPO iterations without
-invalid updates; RSL-RL names the terminal checkpoint model_99.pt because its
-checkpoint indices are zero-based. The normalizer summary and paired comparisons are saved as normalizer_drift.json,
+weight, 25% scheduled gate-like endpoint, seed 20261007, 512 environments, and
+default PPO settings as the adaptive BC arm. It completed 100 PPO iterations
+without invalid updates; RSL-RL names the terminal checkpoint model_99.pt
+because its checkpoint indices are zero-based. The accepted 100-update screen
+is one optimizer update shorter than adaptive BC model_100: checkpoint normalizer
+counts show 100 updates for the frozen arm and 101 for adaptive BC. Treat their
+paired deltas as a close but not exactly update-matched comparison. The
+normalizer summary and paired comparisons are saved as normalizer_drift.json,
 paired_comparison.json, and paired_vs_transfer.json under logs/rsl_rl/20261007_135539_roadrunner-frozen-actor-normalizer-bc-w2_0d0d2f9d.
+
+At model_99, curriculum progress was 0.0996 and the scheduled gate-like share
+was 0.1149. The success-gated long-goal stage remained at 0 with short/medium/
+long shares 0.65/0.25/0.10; only 42 gate-like episodes had completed (below the
+64-episode minimum), and short-arrival LCB was 0.161 (below 0.50). Training
+gate-recovery LCB was 0, but the recovery telemetry lifecycle described above
+makes that value inconclusive. The paired evaluation independently measured
+recovery and passed its recovery gate in 256/256 scenarios.
 
 The frozen actor's target-error mean, scale, and count remained exactly equal
 to transfer statistics through model_99. In adaptive BC model_100, the two
@@ -89,7 +101,7 @@ target-error scale ratios were 1.219 and 1.402, with mean deltas +0.00080 m and
 +0.00264 m. This confirms the normalization change occurred; it does not prove
 that it caused the quality changes.
 
-| Checkpoint | Target-error p95 | Post-target heading p95 | Stationary tilt p95 | Action second-difference p95 | Body-rocking p95 |
+| Checkpoint | Target-error p95 | Post-target heading p95 | Stationary tilt p95 | Action-second-difference gate p95 | Body-rocking p95 |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Adaptive BC model_100 | 0.01818 m | 0.01642 rad | 0.00422 rad | 0.02242 | 0.01640 |
 | Frozen-normalizer model_99 | 0.01523 m | 0.02138 rad | 0.00590 rad | 0.02091 | 0.01534 |
@@ -97,20 +109,24 @@ that it caused the quality changes.
 Against adaptive BC, frozen normalization reduced target-error IQM by
 0.00268 m (95% CI -0.00276 to -0.00260), but increased post-target heading
 IQM by 0.00498 rad, stationary-tilt IQM by 0.00156 rad, post-target speed IQM
-by 0.00168 m/s, and action-rate RMS IQM by 0.00372. Action second-difference
-and body rocking improved modestly. All absolute hard gates still passed.
+by 0.00168 m/s, and action-rate RMS IQM by 0.00372. Stationary action
+second-difference IQM improved by 0.00234 (paired delta -0.00234) and stationary
+body-rocking IQM by 0.00073, while whole-episode action-second-difference IQM
+worsened by 0.00605.
+All absolute hard gates still passed.
 
 Against the actor-only transfer, frozen-normalizer model_99 increased
 target-error IQM by 0.00932 m (95% CI +0.00917 to +0.00947), while improving
-heading and stationary tilt. It also increased action second-difference IQM by
-0.00259, body-rocking IQM by 0.00050, post-target speed IQM by 0.00182 m/s,
+heading and stationary tilt. It also increased whole-episode and stationary
+action second-difference IQM by 0.00388 and 0.00259, respectively, stationary
+body-rocking IQM by 0.00050, post-target speed IQM by 0.00182 m/s,
 and effort RMS IQM by 1.099. Target-error p95 remains within the practical
 0.05 m limit, but the mixed paired outcomes do not justify promotion. Both
 paired comparison artifacts report NOT_PROVEN_BETTER.
 
 ## Root-cause findings and limits
 
-1. **Curriculum advancement did not follow demonstrated recovery quality.** Training now reports task slices, goal bands, curriculum progress, and Wilson bounds. In the BC continuation, progress was about 0.15, gate-like fraction about 0.1225, gate-recovery LCB 0, and short-arrival LCB about 0.20. The success-gated goal-mix stage remained 0; the sampled short/medium/long fractions were approximately 0.65/0.25/0.10. The intended curriculum signal exists, but the policy was not meeting its advancement thresholds.
+1. **Curriculum telemetry is not yet sufficient for recovery conclusions.** In the BC continuation, progress was about 0.15, scheduled gate-like share about 0.1225, gate-recovery LCB 0, and short-arrival LCB about 0.20. The goal-mix stage remained 0 with approximately 0.65/0.25/0.10 short/medium/long shares. The low short-arrival LCB is evidence that this training slice had not met its advancement threshold. The zero gate-recovery LCB is not evidence of failed recovery because retarget clears the training recovery flag before episode completion. Also, current short/medium/long masks overlap gate-like episodes, and the metrics do not separately count push, retarget, post-retarget arrival, and settled stop. Fix these training measures before using them to decide whether those behaviors were learned. The fixed-suite recovery measurements remain valid because the evaluator computes them separately.
 2. **More gate-like episodes were insufficient.** Both 25% and 40% arms first failed formal gates at checkpoint 200; target-error p95 was worse in the 40% arm (0.0697 m vs. 0.0529 m). Episode frequency alone does not teach the exact post-push retarget, arrival, and quiet-stop sequence.
 3. **Reducing PPO step size was insufficient.** The conservative arm still failed by checkpoint 200, so optimizer drift is not the only likely cause.
 4. **The BC term is not yet calibrated as a reliable trust region.** It yielded an iteration-100 checkpoint inside the 5 cm target, but target-error IQM was already worse than baseline. During the first continuation attempt the per-step BC reward reached about −0.0105, and on the successful retry it reached about −0.0751 near iteration 199. The iteration-199 policy's target p95 and other paired metrics were substantially worse. This indicates increasing divergence from teacher actions; it does not isolate whether weight, student-normalizer drift, or states outside the teacher's distribution caused it.
@@ -124,11 +140,12 @@ The experiments support curriculum/reward mismatch and observation-normalizer dr
 1. Keep the signed actor-only transfer as the deployed/default policy and fixed-suite baseline.
 2. Preserve the 5 cm practical final-target-error threshold and 10 cm formal suite gate. Screen every checkpoint on the same 256 scenarios; report both paired deltas and absolute target p95.
 3. The normalizer report and adaptive-versus-frozen ablation are complete. Keep frozen statistics as an experimental control; neither profile is a selected-policy upgrade.
-4. Make gate-like precision tasks present at their intended final fraction from the start in one ablation, while leaving the long-goal curriculum's success-based stage rules and PPO settings fixed. Compare against the current time-ramped gate fraction.
-5. Add a short-task reward ablation only after checking per-term returns for episodes that arrive within 0.035 m and settle with the requested heading. If those outcomes are under-rewarded, add an explicit arrival/settle term and test it alone.
-6. Recalibrate reference regularization in a separate sweep (for example, a lower BC weight and a slow schedule tied to gate-like episodes). First demonstrate that it preserves target p95 within 0.05 m and does not worsen guarded rocking/action metrics; do not infer success from return.
-7. For each arm, save/screen at 50–100 iteration intervals initially, stop on the first sustained gate failure, and do not start a second seed until a candidate passes all gates and shows an acceptable paired tradeoff.
-8. Run only one CUDA workload at a time. Keep `--extra cu128` active, verify the resolved PyTorch CUDA device before launch, record the first CUDA exception separately from cleanup errors, and use `CUDA_LAUNCH_BLOCKING=1` only for bounded diagnosis because it cut throughput to roughly one quarter.
+4. Fix the training recovery lifecycle and split the short/long and gate-like outcome cohorts. Preserve a successful recovery flag through retarget until episode reset; count push received, stable recovery, retarget, post-retarget arrival, settled stop, and post-arrival heading separately. Add lifecycle tests and verify the counters against fixed logged trajectories before using them for curriculum decisions.
+5. After those metrics are trustworthy, test a fixed 25% gate-like share from the start against the current 10%-to-25% schedule, holding the long-goal mix and PPO settings constant.
+6. Audit short-task reward contributions by term for episodes that arrive within 0.035 m and settle with the requested heading. If those outcomes are under-rewarded, add an explicit arrival/settle term and test it alone.
+7. Recalibrate reference regularization in a separate sweep (for example, a lower BC weight and a slow schedule tied to gate-like episodes). First demonstrate that it preserves target p95 within 0.05 m and does not worsen guarded rocking/action metrics; do not infer success from return.
+8. For each arm, save/screen at 50–100 iteration intervals initially, stop on the first sustained gate failure, and do not start a second seed until a candidate passes all gates and shows an acceptable paired tradeoff.
+9. Run only one CUDA workload at a time. Keep `--extra cu128` active, verify the resolved PyTorch CUDA device before launch, record the first CUDA exception separately from cleanup errors, and use `CUDA_LAUNCH_BLOCKING=1` only for bounded diagnosis because it cut throughput to roughly one quarter.
 
 ## Verification
 
