@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import os
 
 from mjlab.managers.metrics_manager import MetricsTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
 
 from ascento_mjlab import mdp as ascento_mdp
 from ascento_mjlab.tasks.locomotion.env_cfg import ascento_locomotion_env_cfg
@@ -18,6 +20,20 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
     gate_like_fraction = float(os.environ.get("ASCENTO_GENERALIST_GATE_LIKE_FRACTION", "0.25"))
     if not 0.10 <= gate_like_fraction <= 1.0:
         raise ValueError("ASCENTO_GENERALIST_GATE_LIKE_FRACTION must be in [0.10, 1.0]")
+    reference_bc_weight = float(os.environ.get("ASCENTO_GENERALIST_REFERENCE_BC_WEIGHT", "0.0"))
+    if not math.isfinite(reference_bc_weight) or reference_bc_weight < 0.0:
+        raise ValueError("ASCENTO_GENERALIST_REFERENCE_BC_WEIGHT must be finite and nonnegative")
+    reference_checkpoint = os.environ.get("ASCENTO_GENERALIST_REFERENCE_CHECKPOINT", "").strip()
+    if not play and reference_bc_weight > 0.0:
+        if not reference_checkpoint:
+            raise ValueError(
+                "ASCENTO_GENERALIST_REFERENCE_CHECKPOINT is required when the reference BC weight is positive"
+            )
+        cfg.rewards["reference_actor_action_mse"] = RewardTermCfg(
+            func=ascento_mdp.rewards.reference_actor_action_mse,
+            weight=-reference_bc_weight,
+            params={"checkpoint_path": reference_checkpoint, "action_clip": 1.0},
+        )
     goal_band_params = {
         "stratified_goal_mix": not play,
         "short_min_distance_m": 0.15,

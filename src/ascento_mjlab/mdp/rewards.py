@@ -729,3 +729,82 @@ def airborne_height_progress(
     target_height = command[:, 4].clamp(min=0.05)
     progress = torch.clamp(height_gain / target_height, min=0.0, max=1.0)
     return progress * state["airborne"].float()
+
+
+def _frozen_reference_actor_state(
+    env: ManagerBasedRlEnv, checkpoint_path: str
+) -> dict[str, torch.Tensor]:
+    """Load and cache the signed actor tensors used by the training-only BC term."""
+    cache = getattr(env, "_ascento_reference_actor_cache", None)
+    if cache is None:
+        cache = {}
+        env._ascento_reference_actor_cache = cache
+    device = torch.device(env.device)
+    key = (str(checkpoint_path), str(device))
+    if key in cache:
+        return cache[key]
+
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    actor_state = checkpoint.get("actor_state_dict") if isinstance(checkpoint, dict) else None
+    required = (
+        "obs_normalizer._mean",
+        "obs_normalizer._std",
+        "mlp.0.weight",
+        "mlp.0.bias",
+        "mlp.2.weight",
+        "mlp.2.bias",
+        "mlp.4.weight",
+        "mlp.4.bias",
+        "mlp.6.weight",
+        "mlp.6.bias",
+    )
+    if not isinstance(actor_state, dict) or any(name not in actor_state for name in required):
+        raise ValueError(f"checkpoint {checkpoint_path!r} does not contain a supported actor")
+    loaded = {name: actor_state[name].to(device=device) for name in required}
+    cache[key] = loaded
+    return loaded
+
+
+def reference_actor_action_mse(
+    env: ManagerBasedRlEnv,
+    checkpoint_path: str,
+    action_clip: float = 1.0,
+) -> torch.Tensor:
+    """Measure squared action drift from a frozen transfer actor on current observations."""
+    if action_clip <= 0.0:
+        raise ValueError("action_clip must be positive")
+    reference = _frozen_reference_actor_state(env, checkpoint_path)
+    observation_buffer = getattr(env, "obs_buf", None)
+    observation = observation_buffer.get("actor") if isinstance(observation_buffer, dict) else None
+    if not isinstance(observation, torch.Tensor):
+        observation = env.observation_manager.compute_group("actor")
+    if not isinstance(observation, torch.Tensor):
+        raise TypeError("reference actor regularization requires concatenated actor observations")
+    mean = reference["obs_normalizer._mean"]
+    std = reference["obs_normalizer._std"]
+    if observation.shape[-1] != mean.shape[-1]:
+        raise ValueError(
+            f"actor observation width {observation.shape[-1]} does not match "
+            f"reference width {mean.shape[-1]}"
+        )
+
+    normalized = (observation - mean) / (std + 1.0e-2)
+    with torch.no_grad():
+        for layer in (0, 2, 4):
+            normalized = torch.nn.functional.elu(
+                torch.nn.functional.linear(
+                    normalized,
+                    reference[f"mlp.{layer}.weight"],
+                    reference[f"mlp.{layer}.bias"],
+                )
+            )
+        target_action = torch.nn.functional.linear(
+            normalized, reference["mlp.6.weight"], reference["mlp.6.bias"]
+        ).clamp(min=-action_clip, max=action_clip)
+    current_action = env.action_manager.action.clamp(min=-action_clip, max=action_clip)
+    if current_action.shape != target_action.shape:
+        raise ValueError(
+            f"current action shape {tuple(current_action.shape)} does not match "
+            f"reference shape {tuple(target_action.shape)}"
+        )
+    return torch.mean(torch.square(current_action - target_action), dim=-1)

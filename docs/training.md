@@ -227,6 +227,21 @@ PPO learning rate and 0.003 desired KL. RSL-RL exposes one optimizer rate for
 the actor and critic, so this ablation lowers both. Keep the task mixture and
 normalizer behavior fixed during the optimizer comparison.
 
+A frozen-reference behavior-cloning ablation can be enabled for a separate
+run with `ASCENTO_GENERALIST_REFERENCE_BC_WEIGHT=2.0` and
+`ASCENTO_GENERALIST_REFERENCE_CHECKPOINT=<signed-transfer-checkpoint>`. It
+adds a negative action-MSE reward against the deterministic, clipped mean from
+the reference actor, using that actor's saved observation normalization. The
+teacher is evaluated on the same actor observation buffer that produced the
+current action. The setting changes the signed task contract, so use the same
+weight and exact checkpoint path when creating the run's compatible transfer,
+training, and evaluating its checkpoints. Omit both settings for the default
+curriculum.
+
+For this pilot, treat final target-error p95 at or below 0.05 m as the practical
+precision target requested by the project owner. The immutable suite's formal
+hard limit remains 0.10 m; all other hard gates still apply.
+
 The actor observation normalizer remains adaptive. After each run, compare its
 world-target-error mean and scale with the frozen transfer values and across
 checkpoints:
