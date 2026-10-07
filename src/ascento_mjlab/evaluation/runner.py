@@ -1221,6 +1221,14 @@ def _run_batch(
                 ),
                 stationary_nan,
             ),
+            # Keep the ratio components visible in episode reports so reward
+            # diagnostics can distinguish numerator changes from denominator changes.
+            "stationary_action_power": torch.where(
+                stationary_present, stationary_action_power, stationary_nan
+            ),
+            "stationary_high_frequency_action_power": torch.where(
+                stationary_present, stationary_high_frequency_power, stationary_nan
+            ),
             "stationary_high_frequency_action_power_ratio": torch.where(
                 stationary_present, stationary_high_frequency_power_ratio, stationary_nan
             ),

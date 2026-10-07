@@ -23,8 +23,17 @@ def ascento_balance_quiet_env_cfg(play: bool = False, num_envs: int = 512):
     cfg.events.pop("balance_push", None)
     cfg.rewards["settled_action_second_difference"] = RewardTermCfg(
         func=ascento_mdp.rewards.settled_action_second_difference_penalty,
-        weight=-0.50,
+        weight=-10.0,
         params={"asset_cfg": ROBOT_CFG},
+    )
+    cfg.rewards["settled_high_frequency_action_power"] = RewardTermCfg(
+        func=ascento_mdp.rewards.SettledHighFrequencyActionPowerPenalty,
+        weight=-0.025,
+        params={
+            "cutoff_hz": 10.0,
+            "reference_action_power": 0.0002619041791405152,
+            "asset_cfg": ROBOT_CFG,
+        },
     )
     cfg.rewards["settled_body_rocking"] = RewardTermCfg(
         func=ascento_mdp.rewards.settled_body_rocking_penalty,

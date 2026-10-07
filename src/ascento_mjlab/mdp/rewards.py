@@ -342,6 +342,106 @@ def settled_action_second_difference_penalty(
     )
 
 
+
+class SettledHighFrequencyActionPowerPenalty:
+    """Penalize 10-Hz high-pass action power against a fixed baseline scale.
+
+    The fixed action-power reference comes from the model_1500 quiet-suite mean,
+    so the policy cannot lower this penalty by increasing its own action power.
+    The causal filter and stationary mask match the quiet evaluator.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedRlEnv):
+        del cfg
+        actions = env.action_manager.action
+        self._low_pass = torch.zeros_like(actions)
+        self._high_frequency_power_sum = torch.zeros(
+            env.num_envs, dtype=actions.dtype, device=env.device
+        )
+        self._stationary_count = torch.zeros(
+            env.num_envs, dtype=actions.dtype, device=env.device
+        )
+
+    def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+        if env_ids is None:
+            env_ids = slice(None)
+        self._low_pass[env_ids] = 0.0
+        self._high_frequency_power_sum[env_ids] = 0.0
+        self._stationary_count[env_ids] = 0.0
+
+    def __call__(
+        self,
+        env: ManagerBasedRlEnv,
+        cutoff_hz: float = 10.0,
+        target_height: float = 0.75,
+        reference_action_power: float = 0.0002619041791405152,
+        asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    ) -> torch.Tensor:
+        if cutoff_hz <= 0.0 or env.step_dt <= 0.0 or reference_action_power <= 0.0:
+            raise ValueError("cutoff, time step, and reference action power must be positive")
+
+        asset: Entity = env.scene[asset_cfg.name]
+        tilt = projected_gravity_tilt(asset.data.projected_gravity_b)
+        planar_speed = torch.linalg.vector_norm(
+            asset.data.root_link_lin_vel_w[:, :2], dim=1
+        )
+        height_error = torch.abs(
+            asset.data.root_link_pos_w[:, 2] - float(target_height)
+        )
+        angular_xy = torch.linalg.vector_norm(
+            asset.data.root_link_ang_vel_b[:, :2], dim=1
+        )
+        yaw_rate = torch.abs(asset.data.root_link_ang_vel_b[:, 2])
+        current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
+        heading_error = torch.abs(
+            wrapped_angle_difference(world_target_yaw(env), current_yaw)
+        )
+
+        left = env.scene["left_wheel_contact"].data.found
+        right = env.scene["right_wheel_contact"].data.found
+        assert left is not None and right is not None
+        supported = left.flatten(start_dim=1).any(dim=1) & right.flatten(
+            start_dim=1
+        ).any(dim=1)
+        stationary = (
+            (tilt <= 0.08)
+            & (planar_speed <= 0.10)
+            & (height_error <= 0.05)
+            & (angular_xy <= 0.25)
+            & (yaw_rate <= 0.25)
+            & (heading_error <= 0.15)
+            & supported
+        )
+
+        actions = env.action_manager.action
+        alpha = float(
+            env.step_dt
+            / (env.step_dt + 1.0 / (2.0 * math.pi * float(cutoff_hz)))
+        )
+        candidate_low_pass = self._low_pass + alpha * (actions - self._low_pass)
+        self._low_pass.copy_(
+            torch.where(stationary[:, None], candidate_low_pass, self._low_pass)
+        )
+        high_pass = actions - self._low_pass
+
+        stationary_weight = stationary.to(dtype=actions.dtype)
+        self._high_frequency_power_sum.add_(
+            high_pass.square().mean(dim=1) * stationary_weight
+        )
+        self._stationary_count.add_(stationary_weight)
+
+        count = self._stationary_count.clamp_min(1.0)
+        reference_normalized_power = (
+            self._high_frequency_power_sum
+            / count
+            / float(reference_action_power)
+        )
+        ready = stationary & (self._stationary_count >= 20.0)
+        return torch.where(
+            ready, reference_normalized_power, torch.zeros_like(reference_normalized_power)
+        )
+
+
 def settled_body_rocking_penalty(
     env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
