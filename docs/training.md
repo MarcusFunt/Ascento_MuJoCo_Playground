@@ -161,10 +161,10 @@ The separate task leaves `Ascento-Locomotion-Flat` and its task contract unchang
 ascento tools initialize-transfer -- \
   --source checkpoints/locomotion_best_gate_20260922/model_01000.pt \
   --task Ascento-Generalist-Locomotion-Flat \
-  --output transfers/ascento_generalist_locomotion_flat/roadrunner_generalist/model_000000.pt
+  --output transfers/ascento_generalist_locomotion_flat/roadrunner_generalist_signed/model_000000.pt
 
 ascento evaluate run \
-  --checkpoint transfers/ascento_generalist_locomotion_flat/roadrunner_generalist/model_000000.pt \
+  --checkpoint transfers/ascento_generalist_locomotion_flat/roadrunner_generalist_signed/model_000000.pt \
   --suite roadrunner_generalist_sequence_gate_v1 --batch-size 256 --device cuda:0
 
 ascento run start --task Ascento-Generalist-Locomotion-Flat \
@@ -172,7 +172,7 @@ ascento run start --task Ascento-Generalist-Locomotion-Flat \
   --purpose experiment --tag roadrunner-inspired --tag shared-policy \
   --parent-run-id 762230a3d4b4 \
   --envs 512 --iterations 500 --seed 20261007 \
-  --parent-checkpoint transfers/ascento_generalist_locomotion_flat/roadrunner_generalist/model_000000.pt \
+  --parent-checkpoint transfers/ascento_generalist_locomotion_flat/roadrunner_generalist_signed/model_000000.pt \
   --foreground --interval 60 --json -- \
   --agent.resume True --agent.load-run _resume_parent \
   --agent.load-checkpoint model_000000.pt --agent.save-interval 100
@@ -234,7 +234,7 @@ checkpoints:
 ~~~bash
 uv run --frozen --extra cu128 --extra dashboard \
   python scripts/report_generalist_normalizer_drift.py \
-  --reference transfers/ascento_generalist_locomotion_flat/roadrunner_generalist/model_000000.pt \
+  --reference transfers/ascento_generalist_locomotion_flat/roadrunner_generalist_signed/model_000000.pt \
   --output logs/rsl_rl/<run>/normalizer_drift.json \
   logs/rsl_rl/<run>/ascento_generalist_locomotion_flat/<timestamp>/model_*.pt
 ~~~
