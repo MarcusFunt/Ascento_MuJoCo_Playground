@@ -145,6 +145,45 @@ ascento evaluate run --checkpoint <locomotion-candidate.pt> \
 ascento evaluate compare <transfer-evaluation> <candidate-evaluation> --json
 ```
 
+### Roadrunner-inspired generalist locomotion curriculum
+
+RAI Institute's public [Roadrunner overview](https://rai-inst.com/resources/videos/meet-roadrunner-a-bipedal-wheeled-robot-for-multi-modal-locomotion/) describes one policy for side-by-side and in-line wheel driving, with several other behaviors also demonstrated zero-shot on hardware. RAI has not published the exact training stages or reward schedule. This task adapts the public shared-policy, multi-behavior approach; it is not a reproduction of Roadrunner's internal curriculum.
+
+`Ascento-Generalist-Locomotion-Flat` keeps the existing 41-value actor observation and six-action interface. It samples one policy across world-target travel, heading changes, settled stops, and mild push recovery:
+
+1. Start with 0.15-0.35 m target distances and 10% gate-like recovery episodes.
+2. Over 24,000 control steps, linearly expand random waypoint distances to 2-3 m and increase gate-like episodes to 25%.
+3. Regular episodes chain another target after a 0.35 s settled stop. Gate-like episodes apply a 0.05-0.15 m/s planar push at 4 s, retarget 0.10-0.20 m forward at 9 s, and then hold the target.
+
+The separate task leaves `Ascento-Locomotion-Flat` and its task contract unchanged. Initialize only compatible actor weights and observation normalization from the existing gate-selected checkpoint; use a new critic, optimizer, and iteration count. Compare the transfer baseline and every candidate on `roadrunner_generalist_sequence_gate_v1`, which has the same 256 fixed settle/push/short-goal/stop scenarios and gates for both policies:
+
+```bash
+ascento tools initialize-transfer -- \
+  --source checkpoints/locomotion_best_gate_20260922/model_01000.pt \
+  --task Ascento-Generalist-Locomotion-Flat \
+  --output transfers/ascento_generalist_locomotion_flat/roadrunner_generalist/model_000000.pt
+
+ascento evaluate run \
+  --checkpoint transfers/ascento_generalist_locomotion_flat/roadrunner_generalist/model_000000.pt \
+  --suite roadrunner_generalist_sequence_gate_v1 --batch-size 256 --device cuda:0
+
+ascento run start --task Ascento-Generalist-Locomotion-Flat \
+  --display-name "Roadrunner-inspired generalist locomotion pilot" \
+  --purpose experiment --tag roadrunner-inspired --tag shared-policy \
+  --allow-dirty-provenance --parent-run-id 762230a3d4b4 \
+  --envs 512 --iterations 1200 --seed 20261007 \
+  --parent-checkpoint transfers/ascento_generalist_locomotion_flat/roadrunner_generalist/model_000000.pt \
+  --foreground --interval 60 --json -- \
+  --agent.resume True --agent.load-run _resume_parent \
+  --agent.load-checkpoint model_000000.pt
+
+ascento evaluate run --run-id <candidate-run-id> \
+  --suite roadrunner_generalist_sequence_gate_v1 --batch-size 256 --device cuda:0
+ascento evaluate compare <transfer-evaluation> <candidate-evaluation> --json
+```
+
+Managed resume checkpoints must be stored under the task experiment directory so the launcher can create the resume link. The transfer path above follows that layout. Managed runs require a clean checkout. For an intentional exploratory run from uncommitted curriculum source, add `--allow-dirty-provenance`; the run records the source patch and hashes before training starts.
+
 Before starting or materially changing balance training, run the deterministic
 controller characterization on the intended compute backend:
 

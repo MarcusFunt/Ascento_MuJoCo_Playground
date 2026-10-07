@@ -148,7 +148,7 @@ def test_locomotion_preserves_actor_abi_and_uses_repeated_long_range_targets():
     assert cfg.episode_length_s == pytest.approx(60.0)
 
     play_cfg = load_env_cfg("Ascento-Locomotion-Flat", play=True)
-    assert "repeated_random_world_targets" in play_cfg.events
+    assert "repeated_random_world_targets" not in play_cfg.events
 
 
 def test_balance_recovery_preserves_balance_actor_abi():

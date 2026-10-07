@@ -30,6 +30,12 @@ _TASKS: tuple[dict[str, Any], ...] = (
         "supports_horizon": False,
     },
     {
+        "id": "Ascento-Generalist-Locomotion-Flat",
+        "label": "Generalist locomotion",
+        "description": "Progressive shared-policy training for waypoint travel, stops, turns, and push recovery.",
+        "supports_horizon": False,
+    },
+    {
         "id": "Ascento-Velocity-Flat",
         "label": "Velocity",
         "description": "Command tracking with adaptive 20→60→120→300 s horizons.",

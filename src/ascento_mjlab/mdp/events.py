@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 from mjlab.envs.mdp.events import reset_root_state_uniform
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -9,6 +11,53 @@ from mjlab.utils.lab_api.math import quat_apply
 
 DEFAULT_WHEEL_RADIUS_M = 0.25
 DEFAULT_WHEEL_HALF_WIDTH_M = 0.0025
+
+
+def linear_curriculum_value(
+    control_step: int,
+    ramp_control_steps: int,
+    start: float,
+    end: float,
+) -> float:
+    # Clamp step progress so resumed or extended runs stay at the final stage.
+    if ramp_control_steps <= 0:
+        raise ValueError("ramp_control_steps must be positive")
+    if not math.isfinite(float(start)) or not math.isfinite(float(end)):
+        raise ValueError("curriculum values must be finite")
+    progress = min(1.0, max(0.0, float(control_step) / float(ramp_control_steps)))
+    return float(start) + (float(end) - float(start)) * progress
+
+
+def _scheduled_target_distance_range(
+    env,
+    *,
+    final_minimum_m: float,
+    final_maximum_m: float,
+    start_minimum_m: float | None,
+    start_maximum_m: float | None,
+    ramp_control_steps: int | None,
+) -> tuple[float, float]:
+    if start_minimum_m is None and start_maximum_m is None:
+        return final_minimum_m, final_maximum_m
+    if start_minimum_m is None or start_maximum_m is None:
+        raise ValueError("both curriculum target distance endpoints must be provided")
+    if ramp_control_steps is None or ramp_control_steps <= 0:
+        raise ValueError("curriculum_ramp_control_steps must be positive")
+    if not 0.0 < start_minimum_m <= start_maximum_m:
+        raise ValueError("curriculum start target distance requires 0 < min <= max")
+    if not 0.0 < final_minimum_m <= final_maximum_m:
+        raise ValueError("curriculum final target distance requires 0 < min <= max")
+    if start_minimum_m > final_minimum_m or start_maximum_m > final_maximum_m:
+        raise ValueError("target-distance curriculum must expand from near to far")
+    control_step = int(getattr(env, "common_step_counter", 0))
+    return (
+        linear_curriculum_value(
+            control_step, ramp_control_steps, start_minimum_m, final_minimum_m
+        ),
+        linear_curriculum_value(
+            control_step, ramp_control_steps, start_maximum_m, final_maximum_m
+        ),
+    )
 
 
 def _resolved_env_ids(env, env_ids: torch.Tensor | slice | None) -> torch.Tensor:
@@ -277,6 +326,9 @@ def initialize_random_world_target(
     min_distance_m: float = 0.15,
     max_distance_m: float = 0.35,
     arena_half_extent_m: float = 0.65,
+    curriculum_start_min_target_distance_m: float | None = None,
+    curriculum_start_max_target_distance_m: float | None = None,
+    curriculum_ramp_control_steps: int | None = None,
 ) -> None:
     """Assign each selected environment an immediate bounded random XY target.
 
@@ -289,6 +341,14 @@ def initialize_random_world_target(
     if ids.numel() == 0:
         return
     asset = env.scene[asset_name]
+    min_distance_m, max_distance_m = _scheduled_target_distance_range(
+        env,
+        final_minimum_m=min_distance_m,
+        final_maximum_m=max_distance_m,
+        start_minimum_m=curriculum_start_min_target_distance_m,
+        start_maximum_m=curriculum_start_max_target_distance_m,
+        ramp_control_steps=curriculum_ramp_control_steps,
+    )
     _set_bounded_random_world_targets(
         env,
         asset,
@@ -417,6 +477,10 @@ class RepeatedRandomWorldTargetSequence:
         target_hold_s: float = 0.35,
         min_target_distance_m: float = 0.15,
         max_target_distance_m: float = 0.35,
+        curriculum_start_min_target_distance_m: float | None = None,
+        curriculum_start_max_target_distance_m: float | None = None,
+        curriculum_start_gate_like_fraction: float | None = None,
+        curriculum_ramp_control_steps: int | None = None,
         arena_half_extent_m: float = 0.65,
         gate_like_fraction: float = 0.25,
         gate_push_time_s: float = 4.0,
@@ -433,6 +497,28 @@ class RepeatedRandomWorldTargetSequence:
             raise ValueError("target_hold_s must be positive")
         if not 0.0 <= gate_like_fraction <= 1.0:
             raise ValueError("gate_like_fraction must be in [0, 1]")
+        min_target_distance_m, max_target_distance_m = _scheduled_target_distance_range(
+            env,
+            final_minimum_m=min_target_distance_m,
+            final_maximum_m=max_target_distance_m,
+            start_minimum_m=curriculum_start_min_target_distance_m,
+            start_maximum_m=curriculum_start_max_target_distance_m,
+            ramp_control_steps=curriculum_ramp_control_steps,
+        )
+        current_gate_like_fraction = gate_like_fraction
+        if curriculum_start_gate_like_fraction is not None:
+            if not 0.0 <= curriculum_start_gate_like_fraction <= gate_like_fraction:
+                raise ValueError(
+                    "curriculum start gate-like fraction must be between zero and final fraction"
+                )
+            if curriculum_ramp_control_steps is None or curriculum_ramp_control_steps <= 0:
+                raise ValueError("curriculum_ramp_control_steps must be positive")
+            current_gate_like_fraction = linear_curriculum_value(
+                int(getattr(env, "common_step_counter", 0)),
+                curriculum_ramp_control_steps,
+                curriculum_start_gate_like_fraction,
+                gate_like_fraction,
+            )
         if gate_push_time_s < 0.0 or gate_retarget_time_s < gate_push_time_s:
             raise ValueError("gate retarget time must be no earlier than the push time")
         if not 0.0 < gate_min_delta_v <= gate_max_delta_v:
@@ -446,9 +532,9 @@ class RepeatedRandomWorldTargetSequence:
         asset = env.scene[asset_cfg.name]
         new_ids = ids[~self._episode_initialized[ids]]
         if new_ids.numel() > 0:
-            self._gate_like[new_ids] = (
-                torch.rand(new_ids.numel(), device=env.device) < gate_like_fraction
-            )
+            self._gate_like[new_ids] = torch.rand(
+                new_ids.numel(), device=env.device
+            ) < current_gate_like_fraction
             self._episode_initialized[new_ids] = True
         self._episode_elapsed_s[ids] += float(env.step_dt)
 

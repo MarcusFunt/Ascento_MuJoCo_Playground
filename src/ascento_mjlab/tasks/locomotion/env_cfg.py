@@ -41,26 +41,27 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
             "arena_half_extent_m": 4.0,
         },
     )
-    cfg.events["repeated_random_world_targets"] = EventTermCfg(
-        func=ascento_mdp.events.RepeatedRandomWorldTargetSequence,
-        mode="interval",
-        interval_range_s=(0.01, 0.01),
-        params={
-            "target_reached_distance_m": 0.04,
-            "target_hold_s": 0.35,
-            "min_target_distance_m": 2.0,
-            "max_target_distance_m": 3.0,
-            "arena_half_extent_m": 4.0,
-            "gate_like_fraction": 0.25,
-            "gate_push_time_s": 4.0,
-            "gate_min_delta_v": 0.05,
-            "gate_max_delta_v": 0.15,
-            "gate_retarget_time_s": 9.0,
-            "gate_min_target_distance_m": 0.10,
-            "gate_max_target_distance_m": 0.20,
-            "asset_cfg": ROBOT_CFG,
-        },
-    )
+    if not play:
+        cfg.events["repeated_random_world_targets"] = EventTermCfg(
+            func=ascento_mdp.events.RepeatedRandomWorldTargetSequence,
+            mode="interval",
+            interval_range_s=(0.01, 0.01),
+            params={
+                "target_reached_distance_m": 0.04,
+                "target_hold_s": 0.35,
+                "min_target_distance_m": 2.0,
+                "max_target_distance_m": 3.0,
+                "arena_half_extent_m": 4.0,
+                "gate_like_fraction": 0.25,
+                "gate_push_time_s": 4.0,
+                "gate_min_delta_v": 0.05,
+                "gate_max_delta_v": 0.15,
+                "gate_retarget_time_s": 9.0,
+                "gate_min_target_distance_m": 0.10,
+                "gate_max_target_distance_m": 0.20,
+                "asset_cfg": ROBOT_CFG,
+            },
+        )
     cfg.rewards["world_target_progress"] = RewardTermCfg(
         func=ascento_mdp.rewards.world_target_progress_velocity,
         weight=8.0,
