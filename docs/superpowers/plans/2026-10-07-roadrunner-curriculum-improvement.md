@@ -41,7 +41,7 @@ Trainer metrics reinforce the need for checkpoint selection by task performance.
 
 ## Training telemetry validity caveat
 
-The fixed-suite evaluation results and paired policy comparisons are valid, but two training telemetry paths are not yet suitable for learning claims. In src/ascento_mjlab/mdp/events.py, retarget clears recovery_completed, then the recovery detector excludes already-retargeted environments. A successful pre-retarget recovery is therefore lost before episode completion, making the training gate-recovery LCB unreliable and unsafe as a stage-advancement signal. Separately, short/medium/long masks include gate-like episodes, and the metrics do not distinguish receiving a push, recovery, retarget, the second arrival, and a settled stop. Correct and test those paths before using training recovery LCB or overlapping slice outcomes to claim behavior was learned.
+The fixed-suite evaluation results and paired policy comparisons are valid. Training telemetry from the earlier pilots is not suitable for learning claims: retarget cleared `recovery_completed`, short/medium/long masks included gate-like episodes, and the metrics did not distinguish push, retarget, second arrival, settled stop, and post-arrival heading. This follow-up corrects those lifecycle and cohort paths and adds regression tests before using the repaired signals for new decisions. Historical run records retain their original invalid measurements.
 
 For frozen run 0d0d2f9dbb55, model_99 reached progress 0.0996 and scheduled gate-like share 0.1149 (25% is the configured endpoint). Its goal-mix stage remained 0; only 42 gate-like episodes had completed, and short-arrival LCB was 0.161. The recovery LCB was 0 but is uninterpretable for the lifecycle reason above.
 
@@ -70,7 +70,7 @@ For frozen run 0d0d2f9dbb55, model_99 reached progress 0.0996 and scheduled gate
 - [x] Record curriculum step/fraction, sampled target-distance bands, and gate-like episode counts in managed training metrics.
 - [x] Add initial per-slice measures for arrival within 0.035 m, recovery, heading at arrival, and fall/timeout rate.
 - [x] Add tests for metric/reset behavior and for the configured distribution at curriculum start, midpoint, and endpoint.
-- [ ] Make the reported goal slices disjoint from gate-like episodes; track push received, successful recovery through retarget, second-target arrival, settled stop, and post-arrival heading separately. Add a lifecycle test showing successful recovery remains recorded through retarget until episode reset.
+- [x] Make short/medium/long slices disjoint from gate-like episodes; track push, recovery through retarget, second-target arrival, settled stop, and arrival/settled heading separately. Regression tests verify lifecycle preservation through retarget and clearing at episode reset.
 - [x] Verify that run telemetry exposes these metrics at the saved checkpoint cadence.
 
 ### Task 2: Preserve precision tasks while expanding travel
@@ -112,4 +112,4 @@ For frozen run 0d0d2f9dbb55, model_99 reached progress 0.0996 and scheduled gate
 - Run focused tests for the modified curriculum, reward contracts, and fixed-suite evaluator.
 - Run bounded 300–500 iteration pilots, inspect managed telemetry, and screen every complete saved checkpoint. Record any CUDA/runtime interruption separately from policy-quality outcomes.
 - Use `ascento evaluate compare` against the transfer checkpoint for selected complete evaluations and run the 256-scenario authoritative suite before promotion.
-- Run the full project suite before integrating the implementation. The current full-suite baseline has one unrelated existing mismatch: `tests_mjlab/test_task_config.py::test_quiet_balance_is_versioned_and_uses_horizon_curriculum` expects `-0.50`, while the unchanged quiet-balance config on `origin/main` sets `-10.0`.
+- Run the full project suite before integrating the implementation. The latest full suite has one unrelated existing mismatch: `tests_mjlab/test_task_config.py::test_quiet_balance_is_versioned_and_uses_horizon_curriculum` expects `-0.50`, while the unchanged quiet-balance config on `origin/main` sets `-10.0`. Latest result: 407 passed, 4 skipped, 1 failed.

@@ -220,8 +220,48 @@ def generalist_episode_metrics_state(env) -> dict[str, torch.Tensor]:
             ),
             "gate_like": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
             "arrived": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "current_target_arrived": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "push_received": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "retargeted": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
             "recovery_completed": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "target_arrival_count": torch.zeros(env.num_envs, dtype=torch.float32, device=env.device),
+            "second_target_arrived": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "settled_stop_count": torch.zeros(env.num_envs, dtype=torch.float32, device=env.device),
+            "settled_stop_recorded_for_target": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
             "heading_error_at_arrival_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "arrival_heading_error_sum_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "arrival_heading_error_samples": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "post_retarget_heading_error_sum_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "post_retarget_heading_error_samples": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "settled_heading_error_sum_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "settled_heading_error_samples": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "post_retarget_settled_stop": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "post_retarget_settled_heading_error_sum_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "post_retarget_settled_heading_error_samples": torch.zeros(
                 env.num_envs, dtype=torch.float32, device=env.device
             ),
             "sampled_target_band_counts": torch.zeros(
@@ -244,8 +284,24 @@ def reset_generalist_episode_metrics(
     state["initial_target_distance_m"][ids] = 0.0
     state["gate_like"][ids] = False
     state["arrived"][ids] = False
+    state["current_target_arrived"][ids] = False
+    state["push_received"][ids] = False
+    state["retargeted"][ids] = False
     state["recovery_completed"][ids] = False
+    state["target_arrival_count"][ids] = 0.0
+    state["second_target_arrived"][ids] = False
+    state["settled_stop_count"][ids] = 0.0
+    state["settled_stop_recorded_for_target"][ids] = False
     state["heading_error_at_arrival_rad"][ids] = 0.0
+    state["arrival_heading_error_sum_rad"][ids] = 0.0
+    state["arrival_heading_error_samples"][ids] = 0.0
+    state["post_retarget_heading_error_sum_rad"][ids] = 0.0
+    state["post_retarget_heading_error_samples"][ids] = 0.0
+    state["settled_heading_error_sum_rad"][ids] = 0.0
+    state["settled_heading_error_samples"][ids] = 0.0
+    state["post_retarget_settled_stop"][ids] = False
+    state["post_retarget_settled_heading_error_sum_rad"][ids] = 0.0
+    state["post_retarget_settled_heading_error_samples"][ids] = 0.0
     state["sampled_target_band_counts"][ids] = 0.0
     if initial_target_distance_m is not None:
         state["initial_target_distance_m"][ids] = initial_target_distance_m.to(
@@ -854,6 +910,8 @@ class RepeatedRandomWorldTargetSequence:
                 asset_cfg=asset_cfg,
             )
             self._gate_pushed[push_ids] = True
+            if track_training_metrics:
+                generalist_episode_metrics_state(env)["push_received"][push_ids] = True
 
         retarget_ids = gate_ids[
             (self._episode_elapsed_s[gate_ids] >= gate_retarget_time_s)
@@ -880,10 +938,13 @@ class RepeatedRandomWorldTargetSequence:
             self._gate_retargeted[retarget_ids] = True
             if track_training_metrics:
                 state = generalist_episode_metrics_state(env)
+                state["retargeted"][retarget_ids] = True
                 state["arrived"][retarget_ids] = False
-                state["recovery_completed"][retarget_ids] = False
+                state["current_target_arrived"][retarget_ids] = False
                 state["heading_error_at_arrival_rad"][retarget_ids] = 0.0
+                state["settled_stop_recorded_for_target"][retarget_ids] = False
                 state["sampled_target_band_counts"][retarget_ids, 0] += 1.0
+                self._settled_at_target_s[retarget_ids] = 0.0
                 self._gate_recovery_stable_time_s[retarget_ids] = 0.0
 
         if track_training_metrics:
@@ -906,9 +967,8 @@ class RepeatedRandomWorldTargetSequence:
             target_distance = torch.linalg.vector_norm(
                 asset.data.root_link_pos_w[ids, :2] - world_target_xy(env)[ids], dim=1
             )
-            newly_arrived = (target_distance <= GENERALIST_TARGET_ARRIVAL_DISTANCE_M) & ~state[
-                "arrived"
-            ][ids]
+            within_arrival = target_distance <= GENERALIST_TARGET_ARRIVAL_DISTANCE_M
+            newly_arrived = within_arrival & ~state["current_target_arrived"][ids]
             arrived_ids = ids[newly_arrived]
             if arrived_ids.numel() > 0:
                 current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[arrived_ids])
@@ -916,7 +976,22 @@ class RepeatedRandomWorldTargetSequence:
                     world_target_yaw(env)[arrived_ids], current_yaw
                 ).abs()
                 state["heading_error_at_arrival_rad"][arrived_ids] = heading_error
-            state["arrived"][ids] |= target_distance <= GENERALIST_TARGET_ARRIVAL_DISTANCE_M
+                state["target_arrival_count"][arrived_ids] += 1.0
+                state["arrival_heading_error_sum_rad"][arrived_ids] += heading_error
+                state["arrival_heading_error_samples"][arrived_ids] += 1.0
+                second_target_ids = arrived_ids[
+                    self._gate_like[arrived_ids] & self._gate_retargeted[arrived_ids]
+                ]
+                if second_target_ids.numel() > 0:
+                    state["second_target_arrived"][second_target_ids] = True
+                    state["post_retarget_heading_error_sum_rad"][second_target_ids] += (
+                        heading_error[
+                            self._gate_like[arrived_ids] & self._gate_retargeted[arrived_ids]
+                        ]
+                    )
+                    state["post_retarget_heading_error_samples"][second_target_ids] += 1.0
+            state["current_target_arrived"][ids] |= within_arrival
+            state["arrived"][ids] |= within_arrival
 
         if self._stratified_goal_mix and stratified_goal_mix:
             self._record_goal_mix_outcomes(
@@ -927,27 +1002,58 @@ class RepeatedRandomWorldTargetSequence:
             )
 
         regular_ids = ids[~self._gate_like[ids]]
-        if regular_ids.numel() == 0:
+        measurement_ids = ids if track_training_metrics else regular_ids
+        if measurement_ids.numel() == 0:
             return
         distance = torch.linalg.vector_norm(
-            asset.data.root_link_pos_w[regular_ids, :2] - world_target_xy(env)[regular_ids], dim=1
+            asset.data.root_link_pos_w[measurement_ids, :2]
+            - world_target_xy(env)[measurement_ids],
+            dim=1,
         )
-        settled = _is_settled_for_locomotion(env, asset, regular_ids)
+        settled = _is_settled_for_locomotion(env, asset, measurement_ids)
         at_target = (distance <= target_reached_distance_m) & settled
-        self._settled_at_target_s[regular_ids] = torch.where(
+        self._settled_at_target_s[measurement_ids] = torch.where(
             at_target,
-            self._settled_at_target_s[regular_ids] + float(env.step_dt),
-            torch.zeros_like(self._settled_at_target_s[regular_ids]),
+            self._settled_at_target_s[measurement_ids] + float(env.step_dt),
+            torch.zeros_like(self._settled_at_target_s[measurement_ids]),
         )
-        ready = regular_ids[self._settled_at_target_s[regular_ids] >= target_hold_s]
+        ready = measurement_ids[self._settled_at_target_s[measurement_ids] >= target_hold_s]
         if ready.numel() == 0:
+            return
+
+        if track_training_metrics:
+            state = generalist_episode_metrics_state(env)
+            new_stops = ready[~state["settled_stop_recorded_for_target"][ready]]
+            if new_stops.numel() > 0:
+                current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[new_stops])
+                heading_error = wrapped_angle_difference(
+                    world_target_yaw(env)[new_stops], current_yaw
+                ).abs()
+                state["settled_stop_recorded_for_target"][new_stops] = True
+                state["settled_stop_count"][new_stops] += 1.0
+                state["settled_heading_error_sum_rad"][new_stops] += heading_error
+                state["settled_heading_error_samples"][new_stops] += 1.0
+                post_retarget_ids = new_stops[
+                    self._gate_like[new_stops] & self._gate_retargeted[new_stops]
+                ]
+                if post_retarget_ids.numel() > 0:
+                    state["post_retarget_settled_stop"][post_retarget_ids] = True
+                    state["post_retarget_settled_heading_error_sum_rad"][post_retarget_ids] += (
+                        heading_error[
+                            self._gate_like[new_stops] & self._gate_retargeted[new_stops]
+                        ]
+                    )
+                    state["post_retarget_settled_heading_error_samples"][post_retarget_ids] += 1.0
+
+        regular_ready = ready[~self._gate_like[ready]]
+        if regular_ready.numel() == 0:
             return
 
         if stratified_goal_mix:
             _set_stratified_random_world_targets(
                 env,
                 asset,
-                ready,
+                regular_ready,
                 arena_half_extent_m=arena_half_extent_m,
                 long_goal_fraction=long_goal_fraction,
                 medium_goal_fraction=medium_goal_fraction,
@@ -963,12 +1069,16 @@ class RepeatedRandomWorldTargetSequence:
             _set_bounded_random_world_targets(
                 env,
                 asset,
-                ready,
+                regular_ready,
                 min_distance_m=min_target_distance_m,
                 max_distance_m=max_target_distance_m,
                 arena_half_extent_m=arena_half_extent_m,
             )
-        self._settled_at_target_s[ready] = 0.0
+        self._settled_at_target_s[regular_ready] = 0.0
+        if track_training_metrics:
+            state = generalist_episode_metrics_state(env)
+            state["current_target_arrived"][regular_ready] = False
+            state["settled_stop_recorded_for_target"][regular_ready] = False
 
     def _record_goal_mix_outcomes(
         self,

@@ -20,6 +20,14 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
     gate_like_fraction = float(os.environ.get("ASCENTO_GENERALIST_GATE_LIKE_FRACTION", "0.25"))
     if not 0.10 <= gate_like_fraction <= 1.0:
         raise ValueError("ASCENTO_GENERALIST_GATE_LIKE_FRACTION must be in [0.10, 1.0]")
+    gate_like_start_fraction = float(
+        os.environ.get("ASCENTO_GENERALIST_GATE_LIKE_START_FRACTION", "0.10")
+    )
+    if not 0.0 <= gate_like_start_fraction <= gate_like_fraction:
+        raise ValueError(
+            "ASCENTO_GENERALIST_GATE_LIKE_START_FRACTION must be between zero and "
+            "ASCENTO_GENERALIST_GATE_LIKE_FRACTION"
+        )
     reference_bc_weight = float(os.environ.get("ASCENTO_GENERALIST_REFERENCE_BC_WEIGHT", "0.0"))
     if not math.isfinite(reference_bc_weight) or reference_bc_weight < 0.0:
         raise ValueError("ASCENTO_GENERALIST_REFERENCE_BC_WEIGHT must be finite and nonnegative")
@@ -56,7 +64,7 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
                 "minimum_episodes_per_stage": 64,
                 "gate_recovery_lcb_threshold": 0.85,
                 "target_arrival_lcb_threshold": 0.50,
-                "curriculum_start_gate_like_fraction": 0.10,
+                "curriculum_start_gate_like_fraction": gate_like_start_fraction,
                 "curriculum_ramp_control_steps": CURRICULUM_RAMP_CONTROL_STEPS,
                 "gate_like_fraction": gate_like_fraction,
                 "track_training_metrics": True,
@@ -64,7 +72,7 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
         )
     metric_params = {
         "curriculum_ramp_control_steps": CURRICULUM_RAMP_CONTROL_STEPS,
-        "curriculum_start_gate_like_fraction": 0.10,
+        "curriculum_start_gate_like_fraction": gate_like_start_fraction,
         "curriculum_final_gate_like_fraction": gate_like_fraction,
     }
     for metric_name in (
@@ -99,8 +107,20 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
             "episode_count",
             "arrival_count",
             "recovery_count",
+            "push_received_count",
+            "retarget_count",
+            "target_arrival_count",
+            "second_target_arrival_count",
+            "settled_stop_count",
+            "post_retarget_settled_stop_count",
             "heading_error_sum_rad",
             "heading_error_samples",
+            "post_retarget_heading_error_sum_rad",
+            "post_retarget_heading_error_samples",
+            "post_arrival_heading_error_sum_rad",
+            "post_arrival_heading_error_samples",
+            "post_retarget_settled_heading_error_sum_rad",
+            "post_retarget_settled_heading_error_samples",
             "fall_count",
             "timeout_count",
         ):

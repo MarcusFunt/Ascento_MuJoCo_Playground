@@ -103,13 +103,18 @@ def generalist_training_metric(
     elif slice_name == "gate_like":
         selected = state["gate_like"]
     elif slice_name == "short":
-        selected = distances <= ascento_events.GENERALIST_SHORT_TARGET_MAX_DISTANCE_M
+        selected = (~state["gate_like"]) & (
+            distances <= ascento_events.GENERALIST_SHORT_TARGET_MAX_DISTANCE_M
+        )
     elif slice_name == "medium":
-        selected = (distances > ascento_events.GENERALIST_SHORT_TARGET_MAX_DISTANCE_M) & (
-            distances <= ascento_events.GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M
+        selected = (~state["gate_like"]) & (
+            (distances > ascento_events.GENERALIST_SHORT_TARGET_MAX_DISTANCE_M)
+            & (distances <= ascento_events.GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M)
         )
     elif slice_name == "long":
-        selected = distances > ascento_events.GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M
+        selected = (~state["gate_like"]) & (
+            distances > ascento_events.GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M
+        )
     else:
         raise ValueError(f"unknown generalist training slice: {slice_name}")
 
@@ -121,10 +126,34 @@ def generalist_training_metric(
         return selected_float * arrived
     if metric_name == "recovery_count":
         return selected_float * state["recovery_completed"].float()
+    if metric_name == "push_received_count":
+        return selected_float * state["push_received"].float()
+    if metric_name == "retarget_count":
+        return selected_float * state["retargeted"].float()
+    if metric_name == "second_target_arrival_count":
+        return selected_float * state["second_target_arrived"].float()
+    if metric_name == "target_arrival_count":
+        return selected_float * state["target_arrival_count"]
+    if metric_name == "settled_stop_count":
+        return selected_float * state["settled_stop_count"]
+    if metric_name == "post_retarget_settled_stop_count":
+        return selected_float * state["post_retarget_settled_stop"].float()
     if metric_name == "heading_error_sum_rad":
-        return selected_float * arrived * state["heading_error_at_arrival_rad"]
+        return selected_float * state["arrival_heading_error_sum_rad"]
     if metric_name == "heading_error_samples":
-        return selected_float * arrived
+        return selected_float * state["arrival_heading_error_samples"]
+    if metric_name == "post_retarget_heading_error_sum_rad":
+        return selected_float * state["post_retarget_heading_error_sum_rad"]
+    if metric_name == "post_retarget_heading_error_samples":
+        return selected_float * state["post_retarget_heading_error_samples"]
+    if metric_name == "post_arrival_heading_error_sum_rad":
+        return selected_float * state["settled_heading_error_sum_rad"]
+    if metric_name == "post_arrival_heading_error_samples":
+        return selected_float * state["settled_heading_error_samples"]
+    if metric_name == "post_retarget_settled_heading_error_sum_rad":
+        return selected_float * state["post_retarget_settled_heading_error_sum_rad"]
+    if metric_name == "post_retarget_settled_heading_error_samples":
+        return selected_float * state["post_retarget_settled_heading_error_samples"]
     if metric_name == "initial_target_distance_sum_m":
         return selected_float * distances
     if metric_name == "initial_target_distance_samples":
