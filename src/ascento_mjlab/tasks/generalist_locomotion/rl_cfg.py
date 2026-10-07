@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 from copy import deepcopy
 
+from rsl_rl.models.mlp_model import MLPModel
+from tensordict import TensorDict
+
 from ascento_mjlab.tasks.locomotion.rl_cfg import AscentoLocomotionRlCfg
 
 
@@ -26,9 +29,37 @@ def configure_generalist_optimizer_profile(cfg, profile: str):
     return cfg
 
 
+class FrozenActorMLPModel(MLPModel):
+    """Keep the transferred actor's empirical observation statistics fixed."""
+
+    def update_normalization(self, obs: TensorDict) -> None:
+        """Preserve loaded actor statistics while PPO adapts the policy weights."""
+        del obs
+
+
+def configure_generalist_normalizer_profile(cfg, profile: str):
+    """Choose adaptive normalization or preserve the transferred actor statistics."""
+    if profile == "adaptive":
+        cfg.actor.class_name = "MLPModel"
+        return cfg
+    if profile == "frozen_transfer":
+        if not cfg.actor.obs_normalization:
+            raise ValueError("frozen-transfer normalizer profile requires actor normalization")
+        cfg.actor.class_name = f"{__name__}:FrozenActorMLPModel"
+        return cfg
+    raise ValueError(
+        f"unknown generalist normalizer profile {profile!r}; "
+        "expected 'adaptive' or 'frozen_transfer'"
+    )
+
+
 AscentoGeneralistLocomotionRlCfg = deepcopy(AscentoLocomotionRlCfg)
 AscentoGeneralistLocomotionRlCfg.experiment_name = "ascento_generalist_locomotion_flat"
 AscentoGeneralistLocomotionRlCfg = configure_generalist_optimizer_profile(
     AscentoGeneralistLocomotionRlCfg,
     os.environ.get("ASCENTO_GENERALIST_OPTIMIZER_PROFILE", "default").strip().lower(),
+)
+AscentoGeneralistLocomotionRlCfg = configure_generalist_normalizer_profile(
+    AscentoGeneralistLocomotionRlCfg,
+    os.environ.get("ASCENTO_GENERALIST_NORMALIZER_PROFILE", "adaptive").strip().lower(),
 )

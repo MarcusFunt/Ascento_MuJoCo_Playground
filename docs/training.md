@@ -242,9 +242,32 @@ For this pilot, treat final target-error p95 at or below 0.05 m as the practical
 precision target requested by the project owner. The immutable suite's formal
 hard limit remains 0.10 m; all other hard gates still apply.
 
-The actor observation normalizer remains adaptive. After each run, compare its
-world-target-error mean and scale with the frozen transfer values and across
-checkpoints:
+The actor observation normalizer is adaptive by default. Set
+**ASCENTO_GENERALIST_NORMALIZER_PROFILE=frozen_transfer** for a separate
+normalizer ablation. That profile keeps actor normalization enabled and loads
+the transferred actor's mean, scale, and count, but skips subsequent actor
+normalizer updates; the critic normalizer remains adaptive. It uses the same
+model parameters and state-dictionary keys as the standard MLP, so strict
+actor-only transfer remains compatible. Use the profile when creating the
+ablation transfer and for training, alongside the same gate fraction,
+reference-BC weight/checkpoint, seed, and PPO settings as the adaptive control.
+
+Create the profile-matched signed transfer from the actor-only reference. Use
+the same task-mixture and BC settings intended for the matched run:
+
+~~~bash
+ASCENTO_GENERALIST_GATE_LIKE_FRACTION=0.25 \
+ASCENTO_GENERALIST_REFERENCE_BC_WEIGHT=2.0 \
+ASCENTO_GENERALIST_REFERENCE_CHECKPOINT=/absolute/path/to/signed-transfer/model_000000.pt \
+ASCENTO_GENERALIST_NORMALIZER_PROFILE=frozen_transfer \
+uv run --frozen --extra cu128 --extra dashboard ascento tools initialize-transfer -- \
+  --source transfers/ascento_generalist_locomotion_flat/roadrunner_generalist_signed/model_000000.pt \
+  --task Ascento-Generalist-Locomotion-Flat \
+  --output transfers/ascento_generalist_locomotion_flat/roadrunner_frozen_normalizer/model_000000.pt
+~~~
+
+After a run, compare the transfer's world-target-error mean and scale against
+every saved checkpoint:
 
 ~~~bash
 uv run --frozen --extra cu128 --extra dashboard \
