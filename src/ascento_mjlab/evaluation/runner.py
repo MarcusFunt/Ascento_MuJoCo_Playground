@@ -16,7 +16,10 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul
 
 import ascento_mjlab.tasks  # noqa: F401
-from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
+from ascento_mjlab.checkpoint_contract import (
+    apply_checkpoint_curriculum_contract,
+    require_current_checkpoint_contracts,
+)
 from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.mdp.events import (
     flat_ground_wheel_bottom_heights,
@@ -434,17 +437,19 @@ def _create_runtime(
     bridge during long gates. A suite needs only one task, policy, and maximum
     horizon, so all chunks safely share this native world.
     """
-    # Validate against the canonical training task.  The evaluator deliberately
-    # runs a play config, so suite-owned resets and interventions are the only
-    # sources of stochasticity during a fixed-seed rollout.
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    infos = payload.get("infos") if isinstance(payload, dict) else None
+    # Align the cached configs with the checkpoint's curriculum fractions. The
+    # evaluator deliberately runs a play config, so suite-owned resets and
+    # interventions remain the only rollout stochasticity.
     contract_cfg = load_env_cfg(task, play=False)
     cfg = _evaluation_env_cfg(task, capacity=capacity, max_horizon=max_horizon)
+    apply_checkpoint_curriculum_contract(contract_cfg, infos, task)
+    apply_checkpoint_curriculum_contract(cfg, infos, task)
 
     base_env = ManagerBasedRlEnv(cfg, device=device, render_mode=None)
     try:
         agent_cfg = load_rl_cfg(task)
-        payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
-        infos = payload.get("infos") if isinstance(payload, dict) else None
         normalizer_contract = infos.get("normalizer_contract") if isinstance(infos, dict) else None
         configure_rl_cfg_for_normalizer_contract(agent_cfg, normalizer_contract)
         env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)

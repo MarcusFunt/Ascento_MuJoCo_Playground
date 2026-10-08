@@ -15,11 +15,15 @@ from typing import Any
 import torch
 from mjlab.tasks.registry import load_env_cfg
 
-from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
+from ascento_mjlab.checkpoint_contract import (
+    apply_checkpoint_curriculum_contract,
+    require_current_checkpoint_contracts,
+)
 from ascento_mjlab.control_contract import action_contracts_compatible, current_action_contract
 from ascento_mjlab.plant_contract import current_plant_contract, plant_contracts_compatible
 from ascento_mjlab.task_contract import (
     classify_task_contract_compatibility,
+    current_task_contract,
     current_task_contract_for_task,
 )
 
@@ -127,6 +131,7 @@ def _manifest(
     batch_size: int,
     step_dt: float,
     repo_root: Path,
+    task_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     dirty = _git(["status", "--porcelain"], repo_root)
     repository_commit = _git(["rev-parse", "HEAD"], repo_root)
@@ -167,7 +172,7 @@ def _manifest(
         "decimation": decimation,
         "plant_contract": current_plant_contract(),
         "action_contract": current_action_contract(),
-        "task_contract": current_task_contract_for_task(suite.task),
+        "task_contract": task_contract or current_task_contract_for_task(suite.task),
         "packages": _package_versions(),
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "argv": sys.argv,
@@ -190,8 +195,9 @@ def _checkpoint_contract_preflight(checkpoint: Path, task: str) -> dict[str, Any
         import ascento_mjlab.tasks  # noqa: F401
 
         cfg = load_env_cfg(task, play=False)
+        apply_checkpoint_curriculum_contract(cfg, infos, task)
         compatibility = classify_task_contract_compatibility(
-            checkpoint_task_contract, current_task_contract_for_task(task)
+            checkpoint_task_contract, current_task_contract(cfg)
         )
         require_current_checkpoint_contracts(infos, cfg)
     except (OSError, RuntimeError, ValueError) as error:
@@ -259,11 +265,49 @@ def evaluate(
     clip_steps: int = 600,
     obstacle_mode: int | None = None,
 ) -> tuple[EvaluationStatus, Path]:
+    suite = load_suite(suite_path)
+    try:
+        payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    except (EOFError, OSError, pickle.UnpicklingError, RuntimeError, ValueError):
+        payload = None
+    infos = payload.get("infos") if isinstance(payload, dict) else None
+    return _evaluate(
+        checkpoint=checkpoint,
+        suite_path=suite_path,
+        output_base=output_base,
+        batch_size=batch_size,
+        device=device,
+        render_clips=render_clips,
+        clip_takes=clip_takes,
+        clip_steps=clip_steps,
+        obstacle_mode=obstacle_mode,
+        suite=suite,
+        checkpoint_infos=infos,
+    )
+
+
+def _evaluate(
+    *,
+    checkpoint: Path,
+    suite_path: Path,
+    output_base: Path,
+    batch_size: int,
+    device: str,
+    render_clips: bool = False,
+    clip_takes: int = 3,
+    clip_steps: int = 600,
+    obstacle_mode: int | None = None,
+    suite: Any | None = None,
+    checkpoint_infos: dict[str, Any] | None = None,
+) -> tuple[EvaluationStatus, Path]:
     if obstacle_mode is not None:
         if obstacle_mode not in (0, 1):
             raise ValueError("obstacle_mode must be 0 or 1")
         os.environ["ASCENTO_GENERALIST_OBSTACLE_MODE"] = str(obstacle_mode)
-    suite = load_suite(suite_path)
+    suite = suite or load_suite(suite_path)
+    task_cfg = load_env_cfg(suite.task, play=False)
+    apply_checkpoint_curriculum_contract(task_cfg, checkpoint_infos, suite.task)
+    evaluation_task_contract = current_task_contract(task_cfg)
     capabilities = task_capabilities(suite.task)
     missing = sorted(set(suite.required_capabilities) - capabilities)
     step_dt = task_step_dt(suite.task)
@@ -279,6 +323,7 @@ def evaluate(
         batch_size=batch_size,
         step_dt=step_dt,
         repo_root=repo_root,
+        task_contract=evaluation_task_contract,
     )
     write_suite_snapshot(output_dir / "suite.json", suite)
     write_resolved_scenarios(output_dir / "resolved_scenarios.jsonl", scenarios)
