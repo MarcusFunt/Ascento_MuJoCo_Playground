@@ -22,7 +22,7 @@ services:
       # Preserve workstation-local access while the Dashboard shares this
       # container's network namespace. Tailnet peers connect to port 8000 on
       # the Tailscale address / MagicDNS name instead.
-      - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
+      - "${ASCENTO_DASHBOARD_BIND_ADDRESS:-127.0.0.1}:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
       # Viser runs as a managed dashboard child process in the same network
       # namespace. Tailnet peers use the same MagicDNS host on this port.
       - "127.0.0.1:${ASCENTO_VIEWER_PORT:-8081}:${ASCENTO_VIEWER_PORT:-8081}"

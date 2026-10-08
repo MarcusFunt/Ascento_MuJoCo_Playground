@@ -1,0 +1,81 @@
+schema_version = 1
+suite_id = "guard_generalist_morphology_baseline_v1"
+task = "Ascento-Generalist-Locomotion-Flat"
+root_seed = 2026100702
+policy_mode = "deterministic"
+required_capabilities = ["locomotion", "exact_reset", "force_disturbance", "deterministic_policy"]
+
+# Diagnostic-only morphology characterization. This suite reports distributions
+# and intentionally defines no pass/fail thresholds.
+[[families]]
+id = "flat_precision"
+kind = "command_timeline"
+count = 64
+horizon_s = 15.0
+commands = [{ time_s = 0.0, name = "world_target_offset", values = [0.15, 0.0, 0.0] }]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "push_recovery_retarget"
+kind = "disturbance"
+count = 64
+horizon_s = 20.0
+commands = [{ time_s = 9.0, name = "world_target_offset", values = [0.15, 0.0, 0.0] }]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+[families.disturbance]
+start_s = 4.0
+duration_s = 0.10
+directions = ["+x", "-x", "+y", "-y"]
+equivalent_delta_v = [0.05, 0.10, 0.15]
+
+[[families]]
+id = "medium_target"
+kind = "command_timeline"
+count = 64
+horizon_s = 20.0
+commands = [{ time_s = 0.0, name = "world_target_offset", values = [0.75, 0.0, 0.0] }]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "long_target"
+kind = "command_timeline"
+count = 64
+horizon_s = 30.0
+commands = [{ time_s = 0.0, name = "world_target_offset", values = [2.5, 0.0, 0.0] }]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]

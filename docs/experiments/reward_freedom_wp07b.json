@@ -1,0 +1,218 @@
+{
+  "audited_terms": {
+    "height": "fixed_height_tracking",
+    "leg_pose_hold": "leg_pose_hold_penalty",
+    "leg_pose_symmetry": "leg_pose_symmetry_penalty",
+    "settled_balance_fixed_height_component": "fixed_0.75m_factor_inside_settled_balance"
+  },
+  "candidate_mode_conditioned_profile": {
+    "mode_one_height_objective": "no fixed-height penalty within a +/-0.10m band; penalize only range violations",
+    "mode_one_leg_pose_hold_weight": 0.0,
+    "mode_one_leg_pose_symmetry_weight": 0.0,
+    "mode_one_settled_balance_height_objective": "remove the fixed-height factor within the same +/-0.10m band; keep tilt, speed, heading, and support factors",
+    "mode_zero": "leave all existing reward weights and terms unchanged",
+    "other_rewards": "unchanged"
+  },
+  "cases": [
+    {
+      "candidate_mode_conditioned_return_rate_per_s": 2.0,
+      "candidate_mode_conditioned_weighted_return_rate_per_s": {
+        "height": 1.0,
+        "leg_pose_hold": -0.0,
+        "leg_pose_symmetry": -0.0,
+        "settled_balance": 1.0
+      },
+      "case_id": "nominal_flat_settle",
+      "current_return_rate_per_s": 2.0,
+      "fixed_height_reward_deficit_per_s": 0.0,
+      "height_error_m": 0.0,
+      "height_m": 0.75,
+      "joint_positions_rad": [
+        -3.1415927410125732,
+        -3.1415927410125732,
+        0.0,
+        -3.1415927410125732,
+        -3.1415927410125732,
+        0.0
+      ],
+      "obstacle_mode": 0,
+      "pitch_rad": 0.0,
+      "roll_rad": 0.0,
+      "settled_balance_fixed_height_component_delta_per_s": 0.0,
+      "weighted_return_rate_by_term_per_s": {
+        "height": 1.0,
+        "leg_pose_hold": -0.0,
+        "leg_pose_symmetry": -0.0,
+        "settled_balance": 1.0
+      }
+    },
+    {
+      "candidate_mode_conditioned_return_rate_per_s": 0.22792684100568295,
+      "candidate_mode_conditioned_weighted_return_rate_per_s": {
+        "height": 0.20961123704910278,
+        "leg_pose_hold": -0.0,
+        "leg_pose_symmetry": -0.0,
+        "settled_balance": 0.018315603956580162
+      },
+      "case_id": "symmetric_height_change_with_good_balance",
+      "current_return_rate_per_s": 0.22792684100568295,
+      "fixed_height_reward_deficit_per_s": -0.7903887629508972,
+      "height_error_m": 0.09999999999999998,
+      "height_m": 0.85,
+      "joint_positions_rad": [
+        -3.1415927410125732,
+        -3.1415927410125732,
+        0.0,
+        -3.1415927410125732,
+        -3.1415927410125732,
+        0.0
+      ],
+      "obstacle_mode": 0,
+      "pitch_rad": 0.0,
+      "roll_rad": 0.0,
+      "settled_balance_fixed_height_component_delta_per_s": -0.981682488812431,
+      "weighted_return_rate_by_term_per_s": {
+        "height": 0.20961123704910278,
+        "leg_pose_hold": -0.0,
+        "leg_pose_symmetry": -0.0,
+        "settled_balance": 0.018315603956580162
+      }
+    },
+    {
+      "candidate_mode_conditioned_return_rate_per_s": 2.0,
+      "candidate_mode_conditioned_weighted_return_rate_per_s": {
+        "height": 1.0,
+        "leg_pose_hold": -0.0,
+        "leg_pose_symmetry": -0.0,
+        "settled_balance": 1.0
+      },
+      "case_id": "asymmetric_split_wheel_height_pose_with_good_balance",
+      "current_return_rate_per_s": -2.2208794593811034,
+      "fixed_height_reward_deficit_per_s": -0.32336628437042236,
+      "height_error_m": 0.050000000000000044,
+      "height_m": 0.8,
+      "joint_positions_rad": [
+        -2.4,
+        -2.5,
+        0.0,
+        -3.7,
+        -4.0,
+        0.0
+      ],
+      "obstacle_mode": 1,
+      "pitch_rad": 0.0,
+      "roll_rad": 0.0,
+      "settled_balance_fixed_height_component_delta_per_s": -0.6321202672976834,
+      "weighted_return_rate_by_term_per_s": {
+        "height": 0.6766337156295776,
+        "leg_pose_hold": -0.6153925895690918,
+        "leg_pose_symmetry": -2.6499998569488525,
+        "settled_balance": 0.3678792715072632
+      }
+    },
+    {
+      "candidate_mode_conditioned_return_rate_per_s": 0.5977298185229302,
+      "candidate_mode_conditioned_weighted_return_rate_per_s": {
+        "height": 0.6766337156295776,
+        "leg_pose_hold": -0.19083044528961182,
+        "leg_pose_symmetry": -0.0,
+        "settled_balance": 0.11192654818296432
+      },
+      "case_id": "mild_slope_posture_adaptation",
+      "current_return_rate_per_s": 0.5977298185229302,
+      "fixed_height_reward_deficit_per_s": -0.32336628437042236,
+      "height_error_m": 0.050000000000000044,
+      "height_m": 0.8,
+      "joint_positions_rad": [
+        -2.7,
+        -2.8,
+        0.0,
+        -2.7,
+        -2.8,
+        0.0
+      ],
+      "obstacle_mode": 0,
+      "pitch_rad": 0.08726646259971647,
+      "roll_rad": 0.0,
+      "settled_balance_fixed_height_component_delta_per_s": -0.19232135386493387,
+      "weighted_return_rate_by_term_per_s": {
+        "height": 0.6766337156295776,
+        "leg_pose_hold": -0.19083044528961182,
+        "leg_pose_symmetry": -0.0,
+        "settled_balance": 0.11192654818296432
+      }
+    },
+    {
+      "candidate_mode_conditioned_return_rate_per_s": 2.0,
+      "candidate_mode_conditioned_weighted_return_rate_per_s": {
+        "height": 1.0,
+        "leg_pose_hold": -0.0,
+        "leg_pose_symmetry": -0.0,
+        "settled_balance": 1.0
+      },
+      "case_id": "scripted_low_obstacle_leg_excursion",
+      "current_return_rate_per_s": -2.4920220717787744,
+      "fixed_height_reward_deficit_per_s": -0.6321204304695129,
+      "height_error_m": 0.07999999999999996,
+      "height_m": 0.83,
+      "joint_positions_rad": [
+        -1.9,
+        -2.1,
+        0.0,
+        -3.141592653589793,
+        -3.141592653589793,
+        0.0
+      ],
+      "obstacle_mode": 1,
+      "pitch_rad": 0.0,
+      "roll_rad": 0.0,
+      "settled_balance_fixed_height_component_delta_per_s": -0.9226961821100237,
+      "weighted_return_rate_by_term_per_s": {
+        "height": 0.36787956953048706,
+        "leg_pose_hold": -0.8040208339691162,
+        "leg_pose_symmetry": -2.133185625076294,
+        "settled_balance": 0.07730481773614883
+      }
+    },
+    {
+      "candidate_mode_conditioned_return_rate_per_s": -1.2521178483963014,
+      "candidate_mode_conditioned_weighted_return_rate_per_s": {
+        "height": 1.0,
+        "leg_pose_hold": -0.6021182298660278,
+        "leg_pose_symmetry": -2.6499996185302734,
+        "settled_balance": 1.0
+      },
+      "case_id": "flat_mode_unnecessary_pseudo_step",
+      "current_return_rate_per_s": -1.2521178483963014,
+      "fixed_height_reward_deficit_per_s": 0.0,
+      "height_error_m": 0.0,
+      "height_m": 0.75,
+      "joint_positions_rad": [
+        -2.4,
+        -2.4,
+        0.0,
+        -3.8,
+        -3.8,
+        0.0
+      ],
+      "obstacle_mode": 0,
+      "pitch_rad": 0.0,
+      "roll_rad": 0.0,
+      "settled_balance_fixed_height_component_delta_per_s": 0.0,
+      "weighted_return_rate_by_term_per_s": {
+        "height": 1.0,
+        "leg_pose_hold": -0.6021182298660278,
+        "leg_pose_symmetry": -2.6499996185302734,
+        "settled_balance": 1.0
+      }
+    }
+  ],
+  "flat_mode_unnecessary_pseudo_step_penalty_rate_per_s": -3.2521178483963014,
+  "interpretation_limit": "The mode-conditioned profile is implemented, but this is only static reward arithmetic. These probes do not establish safe or dynamically feasible postures. A separate mode-1 terrain ablation is still required before promotion.",
+  "probe_type": "scripted_static_reward_arithmetic_not_physics_or_policy_rollouts",
+  "reward_schema": "v4",
+  "schema_version": 1,
+  "scripted_obstacle_mode_posture_prior_removed": true,
+  "task": "Ascento-Generalist-Locomotion-Flat",
+  "work_package": "WP-07B"
+}

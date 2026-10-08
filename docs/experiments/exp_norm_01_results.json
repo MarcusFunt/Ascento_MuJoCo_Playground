@@ -1,0 +1,212 @@
+{
+  "experiment_id": "EXP-NORM-01",
+  "status": "complete_control_tradeoff_improved_not_promoted",
+  "training": {
+    "managed_run_id": "c27772ee729b",
+    "run_directory": "/root/.codex/worktrees/guard-locomotion-roadmap-wsl/logs/rsl_rl/20261007_223912_exp-norm-01-semantic-command-normalization_c27772ee",
+    "configuration_change": "semantic_command_normalization_only",
+    "seed": 20261007,
+    "num_envs": 512,
+    "planned_updates": 300,
+    "completed_updates": 300,
+    "last_checkpoint_index": 299,
+    "state": "finished",
+    "errors": [],
+    "replay_weight": 0,
+    "reward_bc_weight": 0,
+    "parent_checkpoint_sha256": "c5fad548175eef3f41cda89cf6423d6fcf9c8d35a7c03ee34a007fff1c8e8794"
+  },
+  "normalizer": {
+    "contract": "ascento_semantic_normalization/v1",
+    "actor_observation_dim": 41,
+    "critic_observation_dim": 50,
+    "fixed_target_xy_scale_m": [
+      1,
+      1
+    ],
+    "fixed_target_heading_scale_rad": 3.141592653589793,
+    "command_scale_state_verified_in_all_checkpoints": true
+  },
+  "evaluation": {
+    "suite": "roadrunner_generalist_sequence_gate_v1",
+    "suite_definition_sha256": "7e38369b336b1283d2d2c1051083d1668247e9d4b8489a0dd91c4811b06d10da",
+    "suite_artifact_sha256": "218e14e6972bfa2b0dd37ae73fbd544fb29c1e7b3f2d88d09bbd8e12d3d8b388",
+    "resolved_scenarios_sha256": "a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1",
+    "scenario_count": 256,
+    "held_out_promotion_suite_used": false,
+    "comparison_baseline_evaluation_id": "20261007T203017Z_roadrunner_generalist_sequence_gate_v1_model_000000"
+  },
+  "checkpoints": [
+    {
+      "index": 0,
+      "evaluation_id": "20261007T205412Z_roadrunner_generalist_sequence_gate_v1_model_0",
+      "checkpoint_sha256": "1f31466f29b64ef6b7ffdbea5a1916d79475880fa4be12af993e43c3ab923904",
+      "gate_status": "PASS",
+      "failed_hard_gates": [],
+      "target_error_p95_m": 0.008810172555968165,
+      "target_error_iqm_m": 0.006360410508932546,
+      "paired_target_error_iqm_delta_vs_transfer_m": 0.0029887031259931973,
+      "paired_target_error_iqm_ci95_vs_transfer_m": [
+        0.0028334870137541658,
+        0.003126576176373419
+      ]
+    },
+    {
+      "index": 50,
+      "evaluation_id": "20261007T210244Z_roadrunner_generalist_sequence_gate_v1_model_50",
+      "checkpoint_sha256": "e0e6dc59409b0c48f96538381171c18cb73ab9fcee0f5199319932b26eaef1f2",
+      "gate_status": "PASS",
+      "failed_hard_gates": [],
+      "target_error_p95_m": 0.010032671736553311,
+      "target_error_iqm_m": 0.00783247135768761,
+      "paired_target_error_iqm_delta_vs_transfer_m": 0.004435002578247804,
+      "paired_target_error_iqm_ci95_vs_transfer_m": [
+        0.004276578425219668,
+        0.00458084297597452
+      ]
+    },
+    {
+      "index": 100,
+      "evaluation_id": "20261007T205726Z_roadrunner_generalist_sequence_gate_v1_model_100",
+      "checkpoint_sha256": "8ebe4d7791aa64b36a0682aef5712b0c12c7e94cd74ffb95ac65cffbae0d1eb1",
+      "gate_status": "PASS",
+      "failed_hard_gates": [],
+      "target_error_p95_m": 0.021416000556200743,
+      "target_error_iqm_m": 0.019412290334003046,
+      "paired_target_error_iqm_delta_vs_transfer_m": 0.016009589729947038,
+      "paired_target_error_iqm_ci95_vs_transfer_m": [
+        0.015843577230407392,
+        0.016160481164843078
+      ]
+    },
+    {
+      "index": 150,
+      "evaluation_id": "20261007T210244Z_roadrunner_generalist_sequence_gate_v1_model_150",
+      "checkpoint_sha256": "c31c9c081a8f546f2a18bee38662b6588fd989021dad4ef89cc0d79e809c6452",
+      "gate_status": "PASS",
+      "failed_hard_gates": [],
+      "target_error_p95_m": 0.043071987107396126,
+      "target_error_iqm_m": 0.04063711388153024,
+      "paired_target_error_iqm_delta_vs_transfer_m": 0.03720192522996513,
+      "paired_target_error_iqm_ci95_vs_transfer_m": [
+        0.03701976229906449,
+        0.03738787974191382
+      ]
+    },
+    {
+      "index": 200,
+      "evaluation_id": "20261007T210244Z_roadrunner_generalist_sequence_gate_v1_model_200",
+      "checkpoint_sha256": "c73c5775f0886096e3aaac7d170c7786e565b55067e7a6d460e0a05d6f6c2785",
+      "gate_status": "PASS",
+      "failed_hard_gates": [],
+      "target_error_p95_m": 0.07901926711201668,
+      "target_error_iqm_m": 0.07632933551212773,
+      "paired_target_error_iqm_delta_vs_transfer_m": 0.07288100476216641,
+      "paired_target_error_iqm_ci95_vs_transfer_m": [
+        0.07271242163337774,
+        0.07304413215404111
+      ]
+    },
+    {
+      "index": 250,
+      "evaluation_id": "20261007T210244Z_roadrunner_generalist_sequence_gate_v1_model_250",
+      "checkpoint_sha256": "b3d608e881cf84273691dcb1b2c4cc926caca955ee8e2a30be7a6f4a1f7c7161",
+      "gate_status": "PASS",
+      "failed_hard_gates": [],
+      "target_error_p95_m": 0.08993530385196209,
+      "target_error_iqm_m": 0.08757463207498925,
+      "paired_target_error_iqm_delta_vs_transfer_m": null,
+      "paired_target_error_iqm_ci95_vs_transfer_m": null,
+      "paired_metric_note": "Comparator omits final_target_error if it is missing for any scenario; this checkpoint has 244 finite target-error rows out of 256. Suite p95 is computed from measurable rows."
+    },
+    {
+      "index": 299,
+      "evaluation_id": "20261007T210244Z_roadrunner_generalist_sequence_gate_v1_model_299",
+      "checkpoint_sha256": "d90ac964e85aaa0474fa0f82dbce254fab4d3994a36ea7c0cee632d6d59994d1",
+      "gate_status": "FAIL",
+      "failed_hard_gates": [
+        "sequence_survival_lcb",
+        "sequence_recovery_lcb",
+        "sequence_final_target_error",
+        "sequence_stationary_body_rocking"
+      ],
+      "target_error_p95_m": 0.11386302448809146,
+      "target_error_iqm_m": 0.11022710893303156,
+      "paired_target_error_iqm_delta_vs_transfer_m": null,
+      "paired_target_error_iqm_ci95_vs_transfer_m": null,
+      "paired_metric_note": "Comparator omits final_target_error if it is missing for any scenario; hard-gate results and fully paired metrics remain recorded."
+    }
+  ],
+  "matched_control_tradeoff": [
+    {
+      "index": 150,
+      "semantic_gate_status": "PASS",
+      "semantic_target_error_p95_m": 0.043071987107396126,
+      "paired_scenarios": 256,
+      "controls": [
+        {
+          "experiment_id": "EXP-RETENTION-01",
+          "evaluation_id": "20261007T185924Z_roadrunner_generalist_sequence_gate_v1_model_150",
+          "gate_status": "FAIL",
+          "target_error_p95_m": 0.049331532791256905,
+          "semantic_minus_control_target_error_iqm_delta_m": -0.005295653798384592,
+          "ci95_m": [
+            -0.005622009863873245,
+            -0.004976942510256777
+          ]
+        },
+        {
+          "experiment_id": "EXP-RETENTION-02",
+          "evaluation_id": "20261007T195948Z_roadrunner_generalist_sequence_gate_v1_model_150",
+          "gate_status": "PASS",
+          "target_error_p95_m": 0.055900417268276215,
+          "semantic_minus_control_target_error_iqm_delta_m": -0.01244881161255762,
+          "ci95_m": [
+            -0.012599401141778798,
+            -0.012303016349324025
+          ]
+        }
+      ]
+    },
+    {
+      "index": 200,
+      "semantic_gate_status": "PASS",
+      "semantic_target_error_p95_m": 0.07901926711201668,
+      "paired_scenarios": 256,
+      "controls": [
+        {
+          "experiment_id": "EXP-RETENTION-01",
+          "evaluation_id": "20261007T190319Z_roadrunner_generalist_sequence_gate_v1_model_200",
+          "gate_status": "FAIL",
+          "target_error_p95_m": 0.1016430351883173,
+          "semantic_minus_control_target_error_iqm_delta_m": -0.021022877364885062,
+          "ci95_m": [
+            -0.021400353009812533,
+            -0.020635936952021438
+          ]
+        },
+        {
+          "experiment_id": "EXP-RETENTION-02",
+          "evaluation_id": "20261007T200303Z_roadrunner_generalist_sequence_gate_v1_model_200",
+          "gate_status": "FAIL",
+          "target_error_p95_m": 0.11969252489507198,
+          "semantic_minus_control_target_error_iqm_delta_m": -0.03940412664087489,
+          "ci95_m": [
+            -0.03963392387377098,
+            -0.039188606875541154
+          ]
+        }
+      ]
+    }
+  ],
+  "decision": {
+    "last_checkpoint_with_all_formal_gates_and_practical_0_05m_p95": 150,
+    "first_checkpoint_above_practical_0_05m_p95": 200,
+    "first_checkpoint_failing_formal_gates": 299,
+    "selected_transfer_remains_quality_floor": true,
+    "promoted": false,
+    "reason": "Semantic normalization improves the matched-control tradeoff at updates 150 and 200, and update 150 is the last checkpoint that keeps all formal gates plus the 0.05 m practical p95. However, paired target-error IQM still regresses versus the selected transfer by 37.2 mm at update 150 (95% CI [37.0, 37.4] mm), and later checkpoints exceed the practical bound; update 299 fails four formal gates."
+  },
+  "comparison_artifacts": "evaluations/comparisons/exp_norm_01/",
+  "held_out_promotion_suite_used": false
+}

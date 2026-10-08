@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "experiment_id": "EXP-REWARD-FREEDOM-01",
+  "status": "implementation_probe_and_mode0_control_complete_mode1_training_deferred",
+  "work_package": "WP-07B",
+  "planned_updates": [
+    150,
+    250
+  ],
+  "completed_updates": 0,
+  "reward_schema": "v4",
+  "task_contract_topology_sha256": "f27347eee8a2fcb7bae2af15a1996d13e1d0afcb815c11d48293fc5d3159e16c",
+  "change_summary": {
+    "mode_zero_rewards_unchanged": true,
+    "mode_one_leg_pose_symmetry_weight": 0.0,
+    "mode_one_leg_pose_hold_weight": 0.0,
+    "mode_one_height_tolerance_m": 0.1,
+    "other_rewards_unchanged": true
+  },
+  "source_checkpoint": {
+    "path": "transfers/ascento_generalist_locomotion_flat/exp_norm_00_semantic/model_000000.pt",
+    "sha256": "c5fad548175eef3f41cda89cf6423d6fcf9c8d35a7c03ee34a007fff1c8e8794"
+  },
+  "migrated_checkpoint": {
+    "path": "transfers/ascento_generalist_locomotion_flat/exp_reward_freedom_01/model_000000.pt",
+    "sha256": "76dc52340c6f317f19fe384f02ec8d067577e7b30efd41e79b32d03b203e1f9a",
+    "optimizer_state": "fresh",
+    "ppo_updates": 0
+  },
+  "static_reward_probe": {
+    "artifact": "docs/experiments/reward_freedom_wp07b.json",
+    "probe_type": "scripted_static_reward_arithmetic_not_physics_or_policy_rollouts",
+    "cases": 6,
+    "asymmetric_split_wheel_pose_baseline_rate_per_s": -2.2208794593811034,
+    "asymmetric_split_wheel_pose_mode1_rate_per_s": 2.0,
+    "low_obstacle_excursion_baseline_rate_per_s": -2.4920220717787744,
+    "low_obstacle_excursion_mode1_rate_per_s": 2.0,
+    "flat_mode_unnecessary_pseudo_step_penalty_rate_per_s": -3.2521178483963014,
+    "interpretation_limit": "Static arithmetic confirms the selected terms no longer directly oppose the scripted mode-1 postures and that mode 0 retains pseudo-step penalties; it does not demonstrate safe, feasible, or learned behavior."
+  },
+  "mode_zero_regression": {
+    "evaluation_id": "20261007T214555Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "evaluation_path": "evaluations/exp_reward_freedom_01/20261007T214555Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "obstacle_mode": 0,
+    "device": "cuda:0",
+    "scenarios": 256,
+    "suite_sha256": "218e14e6972bfa2b0dd37ae73fbd544fb29c1e7b3f2d88d09bbd8e12d3d8b388",
+    "resolved_scenarios_sha256": "a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1",
+    "gate_status": "PASS",
+    "arrivals": "256/256",
+    "final_target_error_p95_m": 0.005568685824982822,
+    "target_error_iqm_m": 0.0034772727012750693,
+    "paired_control_evaluation_id": "20261007T213431Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "comparison_artifact": "evaluations/comparisons/exp_reward_freedom_01_mode0.json",
+    "paired_scenarios": 256,
+    "max_absolute_paired_iqm_metric_delta": 4.192814230918884E-06,
+    "target_error_iqm_delta_m": 1.17672243504785E-07,
+    "target_error_iqm_delta_ci95_m": [
+      -4.6995182856335305E-07,
+      7.116934057194154E-07
+    ]
+  },
+  "training_deferral": {
+    "reason": "Mode-1 terrain/obstacle training lacks a task curriculum, and the WP-11A inventory classifies base height, wheel contacts, and contact-force norms as simulator-only or deployment-unverified actor channels. WP-08 requires terrain training not to rely on those channels.",
+    "next_actions": [
+      "define deployment-feasible actor observation contract for height/contact/force or move/replace those signals",
+      "then execute WP-08 and the 150-250 update mode-conditioned reward ablation"
+    ],
+    "no_promotion_claim": true
+  },
+  "artifacts": {
+    "probe": "docs/experiments/reward_freedom_wp07b.json",
+    "evaluation": "evaluations/exp_reward_freedom_01/20261007T214555Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "comparison": "evaluations/comparisons/exp_reward_freedom_01_mode0.json"
+  },
+  "verification": {
+    "full_tests": {
+      "command": "pytest tests_mjlab -q",
+      "passed": 315,
+      "failed": 1,
+      "warnings": 35,
+      "failed_test": "tests_mjlab/test_task_config.py::test_quiet_balance_is_versioned_and_uses_horizon_curriculum",
+      "failure": "untouched quiet-balance reward weight is -10.0 while the test expects -0.50",
+      "previously_recorded_baseline_mismatch": true
+    },
+    "focused_regression_suite": {
+      "tests": "test_locomotion_curriculum.py, test_plant_contract.py, test_viewer_worker.py",
+      "passed": 31,
+      "failed": 0
+    },
+    "ruff_check": "passed",
+    "changed_python_file_format_check": "passed",
+    "git_diff_check": "passed",
+    "experiment_json_parse": "10 JSON files validated"
+  }
+}

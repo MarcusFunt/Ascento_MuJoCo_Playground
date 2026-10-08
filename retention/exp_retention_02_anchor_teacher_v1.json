@@ -1,0 +1,32 @@
+{
+  "action_dim": 6,
+  "actor_observation_contract_sha256": "7a79264c09b260f1869dbbd620298b3b9fc6b688322811ecee242c45d0a9e85a",
+  "cohort_semantics": {
+    "0": "precision_anchor_before_first_disturbance",
+    "1": "recovery_retarget_anchor_from_first_disturbance_onward"
+  },
+  "collection_stride_steps": 10,
+  "dataset_sha256": "f8bb908e8f301024067cb81609d363745583555a14b846141dfd8b2860b5e760",
+  "evaluation_checkpoint_sha256": "0a0ba381c9866a6d9f058c5c4b187681a35c86707a3d60d81fdca8343eaf4287",
+  "evaluation_consistency_passed": true,
+  "evaluation_scenario_count": 256,
+  "evaluation_status": "PASS",
+  "evaluation_target_arrivals": 256,
+  "metadata_sha256": "204f9a37c99b189e8bddbca8884f794a36084b55df3092c31325828eb31e885e",
+  "observation_dim": 41,
+  "resolved_scenario_sha256": "a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1",
+  "sample_count": 51200,
+  "samples_by_cohort": {
+    "precision_anchor": 10240,
+    "recovery_retarget_anchor": 40960
+  },
+  "schema_version": 1,
+  "source_action_contract_sha256": "e1cd511326dd89ab4e15c0590c8726143480836a58e6286b262e6485fa6b08cb",
+  "source_actor_normalizer_sha256": "898cbcb372343b896b7f2961872c3a6bb08e910cea5e8aa43c148bd03fb81a95",
+  "source_checkpoint_sha256": "0a0ba381c9866a6d9f058c5c4b187681a35c86707a3d60d81fdca8343eaf4287",
+  "source_plant_contract_sha256": "7f329e76651aec696a888e0c2e852e574f6d3d92ea14cf17ae9b1454d08352ff",
+  "source_task_contract_sha256": "0ba3783fabf4751ad4c49bde5fb296c0276525988723bb05bde160d19af875f7",
+  "suite_definition_sha256": "7e38369b336b1283d2d2c1051083d1668247e9d4b8489a0dd91c4811b06d10da",
+  "suite_id": "roadrunner_generalist_sequence_gate_v1",
+  "teacher_action_semantics": "deterministic_gaussian_mean_raw_action"
+}

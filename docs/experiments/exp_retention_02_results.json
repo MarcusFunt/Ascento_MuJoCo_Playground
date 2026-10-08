@@ -1,0 +1,304 @@
+{
+  "checkpoints": [
+    {
+      "checkpoint_sha256": "ce0ac5e9ec68c0c7d7ff8e923bccf5a193650d6850adfd65fb53b232f2fd15be",
+      "comparison_artifacts": {
+        "vs_historical_reward_bc": "evaluations/comparisons/exp_retention_02_update_0_vs_historical_reward_bc.json",
+        "vs_retention_01": "evaluations/comparisons/exp_retention_02_update_0_vs_retention_01.json",
+        "vs_transfer": "evaluations/comparisons/exp_retention_02_update_0_vs_transfer.json"
+      },
+      "evaluation_id": "20261007T195315Z_roadrunner_generalist_sequence_gate_v1_model_0",
+      "gate_status": "PASS",
+      "index": 0,
+      "paired_target_error_iqm_delta_ci95_vs_transfer_m": [
+        0.00015440276272329356,
+        0.0002280362822148163
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_ci95_m": [
+        -0.009261512940133798,
+        -0.009011170355302056
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_m": -0.009143809073975717,
+      "paired_vs_retention_01_target_error_iqm_delta_ci95_m": [
+        1.3613866485684412e-05,
+        2.0546652831399114e-05
+      ],
+      "paired_vs_retention_01_target_error_iqm_delta_m": 1.709414482320426e-05,
+      "policy_std_parameter_delta_rms": 0.0,
+      "reference_actor_gradient_norm": 0.00034289361792616546,
+      "reference_aux_loss": 3.538555972681934e-07,
+      "replay_action_rms": 0.0018811050103977323,
+      "target_arrivals": 256,
+      "target_error_iqm_delta_vs_transfer_m": 0.000192683762179513,
+      "target_error_p95_m": 0.005981749156489968
+    },
+    {
+      "checkpoint_sha256": "b75c57be0f31fe26ef9245dbf59736b87d929a82be486b778140b8f594117364",
+      "comparison_artifacts": {
+        "vs_historical_reward_bc": "evaluations/comparisons/exp_retention_02_update_50_vs_historical_reward_bc.json",
+        "vs_retention_01": "evaluations/comparisons/exp_retention_02_update_50_vs_retention_01.json",
+        "vs_transfer": "evaluations/comparisons/exp_retention_02_update_50_vs_transfer.json"
+      },
+      "evaluation_id": "20261007T201240Z_roadrunner_generalist_sequence_gate_v1_model_50",
+      "gate_status": "PASS",
+      "index": 50,
+      "paired_target_error_iqm_delta_ci95_vs_transfer_m": [
+        0.001156910962731672,
+        0.0013366463330612532
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_ci95_m": [
+        -0.008208980124254594,
+        -0.00796837789921483
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_m": -0.00809421706617286,
+      "paired_vs_retention_01_target_error_iqm_delta_ci95_m": [
+        6.643008105129411e-05,
+        0.0002823492804509442
+      ],
+      "paired_vs_retention_01_target_error_iqm_delta_m": 0.00017128464423876721,
+      "policy_std_parameter_delta_rms": 0.0,
+      "reference_actor_gradient_norm": 0.0072115822695195675,
+      "reference_aux_loss": 5.8143468777416274e-05,
+      "replay_action_rms": 0.02411295659840107,
+      "target_arrivals": 256,
+      "target_error_iqm_delta_vs_transfer_m": 0.0012476675656216685,
+      "target_error_p95_m": 0.007399461115710437
+    },
+    {
+      "checkpoint_sha256": "821e362daa3da68af3bc5b3dc1fbdad6f2b2537da34bd735fa46afbd9d082455",
+      "comparison_artifacts": {
+        "vs_historical_reward_bc": "evaluations/comparisons/exp_retention_02_update_100_vs_historical_reward_bc.json",
+        "vs_retention_01": "evaluations/comparisons/exp_retention_02_update_100_vs_retention_01.json",
+        "vs_transfer": "evaluations/comparisons/exp_retention_02_update_100_vs_transfer.json"
+      },
+      "evaluation_id": "20261007T195631Z_roadrunner_generalist_sequence_gate_v1_model_100",
+      "gate_status": "PASS",
+      "index": 100,
+      "paired_target_error_iqm_delta_ci95_vs_transfer_m": [
+        0.009776555576604552,
+        0.010053328141748353
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_ci95_m": [
+        0.0005232295827227063,
+        0.0006979988684179261
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_m": 0.0006053424513083883,
+      "paired_vs_retention_01_target_error_iqm_delta_ci95_m": [
+        0.0010740606381659744,
+        0.0014086216971918475
+      ],
+      "paired_vs_retention_01_target_error_iqm_delta_m": 0.0012447930639609694,
+      "policy_std_parameter_delta_rms": 0.0,
+      "reference_actor_gradient_norm": 0.02498430199921131,
+      "reference_aux_loss": 0.0005113165243528783,
+      "replay_action_rms": 0.07150639593601227,
+      "target_arrivals": 256,
+      "target_error_iqm_delta_vs_transfer_m": 0.009914510179442004,
+      "target_error_p95_m": 0.01594580104574561
+    },
+    {
+      "checkpoint_sha256": "b778cb3b1c3a07ae951901f2a20016eaf4ac88ee6935957239c9d7c0d5af2780",
+      "comparison_artifacts": {
+        "vs_historical_reward_bc": "evaluations/comparisons/exp_retention_02_update_150_vs_historical_reward_bc.json",
+        "vs_retention_01": "evaluations/comparisons/exp_retention_02_update_150_vs_retention_01.json",
+        "vs_transfer": "evaluations/comparisons/exp_retention_02_update_150_vs_transfer.json"
+      },
+      "evaluation_id": "20261007T195948Z_roadrunner_generalist_sequence_gate_v1_model_150",
+      "gate_status": "PASS",
+      "index": 150,
+      "paired_target_error_iqm_delta_ci95_vs_transfer_m": [
+        0.04945506425924577,
+        0.049823869869828744
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_ci95_m": [
+        0.04026137350629142,
+        0.04049910388202989
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_m": 0.040383704043051694,
+      "paired_vs_retention_01_target_error_iqm_delta_ci95_m": [
+        0.006955777681287145,
+        0.00732401248315
+      ],
+      "paired_vs_retention_01_target_error_iqm_delta_m": 0.007130853278795257,
+      "policy_std_parameter_delta_rms": 0.0,
+      "reference_actor_gradient_norm": 0.049885913729667664,
+      "reference_aux_loss": 0.0018343165284022689,
+      "replay_action_rms": 0.13543693721294403,
+      "target_arrivals": 256,
+      "target_error_iqm_delta_vs_transfer_m": 0.04964500335063349,
+      "target_error_p95_m": 0.055900417268276215
+    },
+    {
+      "checkpoint_sha256": "cca6344cd7336b13a75b29219d042c4b22edf3172d73700c96c00bbbe7a37772",
+      "comparison_artifacts": {
+        "vs_historical_reward_bc": "evaluations/comparisons/exp_retention_02_update_200_vs_historical_reward_bc.json",
+        "vs_retention_01": "evaluations/comparisons/exp_retention_02_update_200_vs_retention_01.json",
+        "vs_transfer": "evaluations/comparisons/exp_retention_02_update_200_vs_transfer.json"
+      },
+      "evaluation_id": "20261007T200303Z_roadrunner_generalist_sequence_gate_v1_model_200",
+      "gate_status": "FAIL",
+      "index": 200,
+      "paired_target_error_iqm_delta_ci95_vs_transfer_m": [
+        0.11193389667525935,
+        0.1124846688487878
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_ci95_m": [
+        0.1027922575474804,
+        0.10324945938355086
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_m": 0.10303203794319415,
+      "paired_vs_retention_01_target_error_iqm_delta_ci95_m": [
+        0.01835946301871445,
+        0.018700335839821492
+      ],
+      "paired_vs_retention_01_target_error_iqm_delta_m": 0.01852052885806188,
+      "policy_std_parameter_delta_rms": 0.0,
+      "reference_actor_gradient_norm": 0.07101546227931976,
+      "reference_aux_loss": 0.0035931661259382963,
+      "replay_action_rms": 0.18955647945404053,
+      "target_arrivals": 256,
+      "target_error_iqm_delta_vs_transfer_m": 0.1122151746030795,
+      "target_error_p95_m": 0.11969252489507198
+    },
+    {
+      "checkpoint_sha256": "91d2f680294c8def222145bbe616d81501c7a4dea8226c2480282fe28efa753e",
+      "comparison_artifacts": {
+        "vs_historical_reward_bc": "evaluations/comparisons/exp_retention_02_update_250_vs_historical_reward_bc.json",
+        "vs_retention_01": "evaluations/comparisons/exp_retention_02_update_250_vs_retention_01.json",
+        "vs_transfer": "evaluations/comparisons/exp_retention_02_update_250_vs_transfer.json"
+      },
+      "evaluation_id": "20261007T200616Z_roadrunner_generalist_sequence_gate_v1_model_250",
+      "gate_status": "FAIL",
+      "index": 250,
+      "paired_target_error_iqm_delta_ci95_vs_transfer_m": [
+        0.14781581077313605,
+        0.14847847493938388
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_ci95_m": [
+        0.13870230899574382,
+        0.1393088838813128
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_m": 0.13901366994105047,
+      "paired_vs_retention_01_target_error_iqm_delta_ci95_m": [
+        0.029030899256758856,
+        0.029347171552944928
+      ],
+      "paired_vs_retention_01_target_error_iqm_delta_m": 0.029189034015871584,
+      "policy_std_parameter_delta_rms": 0.0,
+      "reference_actor_gradient_norm": 0.06797674298286438,
+      "reference_aux_loss": 0.003716505831107497,
+      "replay_action_rms": 0.19278240203857422,
+      "target_arrivals": 256,
+      "target_error_iqm_delta_vs_transfer_m": 0.14814549154561973,
+      "target_error_p95_m": 0.15642990916967392
+    },
+    {
+      "checkpoint_sha256": "db8e8d651fe4fa96c04b109032eedb24eebb771b14df5a810747bbb25c94885e",
+      "comparison_artifacts": {
+        "vs_historical_reward_bc": "evaluations/comparisons/exp_retention_02_update_299_vs_historical_reward_bc.json",
+        "vs_retention_01": "evaluations/comparisons/exp_retention_02_update_299_vs_retention_01.json",
+        "vs_transfer": "evaluations/comparisons/exp_retention_02_update_299_vs_transfer.json"
+      },
+      "evaluation_id": "20261007T200929Z_roadrunner_generalist_sequence_gate_v1_model_299",
+      "gate_status": "FAIL",
+      "index": 299,
+      "paired_target_error_iqm_delta_ci95_vs_transfer_m": [
+        0.15394768633898365,
+        0.1545484606151149
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_ci95_m": [
+        0.1449015536760271,
+        0.1454447455747868
+      ],
+      "paired_vs_historical_bc_target_error_iqm_delta_m": 0.14517681831785012,
+      "paired_vs_retention_01_target_error_iqm_delta_ci95_m": [
+        0.02824808892037254,
+        0.028582547932455783
+      ],
+      "paired_vs_retention_01_target_error_iqm_delta_m": 0.028412885672878474,
+      "policy_std_parameter_delta_rms": 0.0,
+      "reference_actor_gradient_norm": 0.06328251957893372,
+      "reference_aux_loss": 0.00351545843295753,
+      "replay_action_rms": 0.18749555945396423,
+      "target_arrivals": 256,
+      "target_error_iqm_delta_vs_transfer_m": 0.15423480077970453,
+      "target_error_p95_m": 0.16235901787877083
+    }
+  ],
+  "conclusion": "Fixed frozen replay MSE at coefficient 0.1 delayed the first formal hard-gate failure from update 150 to update 200, but it did not outperform the permanent-anchor-only arm on paired final-target-error IQM at any matched checkpoint. The final checkpoint failed hard gates and its paired target-error IQM was worse than EXP-RETENTION-01 by 28.4 mm (95% CI approximately [28.25, 28.58] mm). The fixed replay-set action RMS also grew from 0.0078 at update 10 to approximately 0.1875 at update 299, so the frozen corpus was not retained well enough to justify live rollout masking under EXP-RETENTION-03 trigger conditions. The selected transfer remains the rollback floor.",
+  "development_suite": {
+    "definition_sha256": "7e38369b336b1283d2d2c1051083d1668247e9d4b8489a0dd91c4811b06d10da",
+    "held_out_suite_used": false,
+    "resolved_scenario_sha256": "a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1",
+    "scenario_count": 256,
+    "suite_id": "roadrunner_generalist_sequence_gate_v1"
+  },
+  "experiment_id": "EXP-RETENTION-02",
+  "historical_reward_bc": {
+    "checkpoint_sha256": "38be3531f3607cbd514f933648499c5103eee90a47f11571989dcde06d2132de",
+    "evaluation_id": "20261007T120309Z_roadrunner_generalist_sequence_gate_v1_model_99",
+    "normalizer_profile": "frozen_transfer",
+    "reference_bc_weight": 2.0,
+    "status": "PASS",
+    "target_arrivals": 256,
+    "target_error_p95_m": 0.01523080887272954
+  },
+  "matched_transfer_baseline": {
+    "checkpoint_sha256": "0a0ba381c9866a6d9f058c5c4b187681a35c86707a3d60d81fdca8343eaf4287",
+    "evaluation_id": "20261007T181943Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "status": "PASS",
+    "target_arrivals": 256,
+    "target_error_p95_m": 0.005583078018389642
+  },
+  "protocol": {
+    "anchor_fractions": {
+      "generalist_navigation": 0.6,
+      "precision_anchor": 0.2,
+      "recovery_retarget_anchor": 0.2
+    },
+    "checkpoint_indices": [
+      0,
+      50,
+      100,
+      150,
+      200,
+      250,
+      299
+    ],
+    "environment_count": 512,
+    "normalizer_profile": "adaptive",
+    "reference_replay_batch_size": 256,
+    "reference_replay_weight": 0.1,
+    "reference_update": "balanced precision/recovery deterministic-mean actor MSE after each PPO update",
+    "run_directory": "/root/.codex/worktrees/guard-locomotion-roadmap-wsl/logs/rsl_rl/20261007_213849_exp-retention-02-frozen-replay-actor-mse-lambda-_cb21b3eb",
+    "seed": 20261007,
+    "target_achievement_reward_weight": 5.0,
+    "total_optimizer_updates": 300,
+    "training_run_id": "cb21b3ebbc21"
+  },
+  "replay_corpus": {
+    "action_dim": 6,
+    "actor_observation_contract_sha256": "7a79264c09b260f1869dbbd620298b3b9fc6b688322811ecee242c45d0a9e85a",
+    "collection_consistency_passed": true,
+    "collection_gate_status": "PASS",
+    "dataset_sha256": "f8bb908e8f301024067cb81609d363745583555a14b846141dfd8b2860b5e760",
+    "npz_file_sha256": "1f9775ee7988fd0acb9bff44a0803df875ed540b9ee22bac83299b9a849f63c9",
+    "observation_dim": 41,
+    "path": "retention/exp_retention_02_anchor_teacher_v1.npz",
+    "resolved_scenario_sha256": "a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1",
+    "sample_count": 51200,
+    "samples_by_cohort": {
+      "precision_anchor": 10240,
+      "recovery_retarget_anchor": 40960
+    },
+    "sidecar": "retention/exp_retention_02_anchor_teacher_v1.json",
+    "source_action_contract_sha256": "e1cd511326dd89ab4e15c0590c8726143480836a58e6286b262e6485fa6b08cb",
+    "source_actor_normalizer_sha256": "898cbcb372343b896b7f2961872c3a6bb08e910cea5e8aa43c148bd03fb81a95",
+    "source_checkpoint_sha256": "0a0ba381c9866a6d9f058c5c4b187681a35c86707a3d60d81fdca8343eaf4287",
+    "source_plant_contract_sha256": "7f329e76651aec696a888e0c2e852e574f6d3d92ea14cf17ae9b1454d08352ff",
+    "source_task_contract_sha256": "0ba3783fabf4751ad4c49bde5fb296c0276525988723bb05bde160d19af875f7",
+    "suite_definition_sha256": "7e38369b336b1283d2d2c1051083d1668247e9d4b8489a0dd91c4811b06d10da"
+  },
+  "schema_version": 1,
+  "status": "complete_failed_retention"
+}

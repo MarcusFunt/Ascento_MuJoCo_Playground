@@ -49,7 +49,7 @@ services:
         # The app retries the connection briefly, then falls back to filesystem state.
         condition: service_started
     ports:
-      - "127.0.0.1:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
+      - "${ASCENTO_DASHBOARD_BIND_ADDRESS:-127.0.0.1}:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
       - "127.0.0.1:${ASCENTO_VIEWER_PORT:-8081}:${ASCENTO_VIEWER_PORT:-8081}"
     volumes:
       # Run management writes launcher metadata, logs and checkpoints beneath

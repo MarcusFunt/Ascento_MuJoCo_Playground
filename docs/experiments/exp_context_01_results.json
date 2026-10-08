@@ -1,0 +1,61 @@
+{
+  "experiment_id": "EXP-CONTEXT-01",
+  "status": "complete_equivalent",
+  "migration": {
+    "source_checkpoint": "transfers/ascento_generalist_locomotion_flat/exp_norm_00_semantic/model_000000.pt",
+    "source_checkpoint_sha256": "c5fad548175eef3f41cda89cf6423d6fcf9c8d35a7c03ee34a007fff1c8e8794",
+    "migrated_checkpoint": "transfers/ascento_generalist_locomotion_flat/exp_context_01/model_000000.pt",
+    "migrated_checkpoint_sha256": "1030358a7f3cfca1c906eb8da00adf946c9bfaae980ad1fa193ac91616665aa0",
+    "normalizer_contract": "ascento_semantic_normalization/v2",
+    "actor_input_width": [41, 42],
+    "critic_input_width": [50, 51],
+    "mode_bit_index": 41,
+    "mode_bit_scale": 1.0,
+    "mode_zero_first_layer_column": true,
+    "optimizer_state_preserved_empty": true,
+    "learning_updates": 0
+  },
+  "fixed_observation_equivalence": {
+    "corpus": "retention/exp_retention_02_anchor_teacher_v1.npz",
+    "corpus_sha256": "1f9775ee7988fd0acb9bff44a0803df875ed540b9ee22bac83299b9a849f63c9",
+    "rows": 51200,
+    "mode_value": 0,
+    "action_width": 6,
+    "actor_output_max_abs_delta": 0.0,
+    "actor_output_rms_delta": 0.0,
+    "downstream_actor_weights_exact": true,
+    "artifact": "evaluations/exp_context_01/migration_equivalence.json"
+  },
+  "evaluation": {
+    "suite": "roadrunner_generalist_sequence_gate_v1",
+    "suite_definition_sha256": "7e38369b336b1283d2d2c1051083d1668247e9d4b8489a0dd91c4811b06d10da",
+    "suite_artifact_sha256": "218e14e6972bfa2b0dd37ae73fbd544fb29c1e7b3f2d88d09bbd8e12d3d8b388",
+    "resolved_scenarios_sha256": "a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1",
+    "scenario_count": 256,
+    "device": "cuda:0",
+    "batch_size": 256,
+    "commanded_obstacle_mode": 0,
+    "source_evaluation_id": "20261007T203400Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "migrated_evaluation_id": "20261007T213431Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "source_gate_status": "PASS",
+    "migrated_gate_status": "PASS",
+    "source_target_error_p95_m": 0.005582633661106229,
+    "migrated_target_error_p95_m": 0.005572796449996531,
+    "paired_scenarios": 256,
+    "max_abs_paired_iqm_metric_delta": 1.9073486328125e-6,
+    "paired_final_target_error_iqm_delta_m": -7.823473424650729e-8,
+    "paired_final_target_error_iqm_ci95_m": [
+      -4.980355470252107e-7,
+      3.558845037332503e-7
+    ],
+    "comparison_artifact": "evaluations/comparisons/exp_context_01_mode0.json",
+    "held_out_promotion_suite_used": false
+  },
+  "task_contract": {
+    "target_topology_sha256": "d0983d8af905067f63f2354178c9bbf26c5b56162547b3c71806a0bcbaac1ef4",
+    "source_41d_contract_status_against_target": "incompatible",
+    "actor_and_critic_include_obstacle_mode": true,
+    "play_and_evaluation_mode_flags": true
+  },
+  "decision": "mode-zero transfer equivalence gate passed; proceed to WP-07B reward-freedom audit; terrain remains gated by WP-07B and Guard observability contracts"
+}

@@ -271,7 +271,12 @@
     {
       "name": "ASCENTO_DASHBOARD_PORT",
       "default": "8000",
-      "purpose": "Local dashboard port in maintained Docker/launcher paths."
+      "purpose": "Dashboard host port in maintained Docker paths."
+    },
+    {
+      "name": "ASCENTO_DASHBOARD_BIND_ADDRESS",
+      "default": "127.0.0.1",
+      "purpose": "Host interface for Docker-published dashboard traffic."
     },
     {
       "name": "ASCENTO_SUPERVISOR_SOCKET",

@@ -1,0 +1,526 @@
+{
+  "schema_version": 1,
+  "plan_id": "AG-GENERALIST-LOCOMOTION-V3-2026-10-07",
+  "status": "in_progress",
+  "target_robot": "Ascento Guard",
+  "baseline": {
+    "checkpoint": "transfers/ascento_generalist_locomotion_flat/roadrunner_generalist_signed/model_000000.pt",
+    "checkpoint_sha256": "04e6e121faf1dec19376c33448ef75aa280b2b7448ccc674f511e7b79f332959",
+    "repository_commit": "49e6e89c8237749ea7586c23016e35965a58bcbc",
+    "repository_dirty_at_evaluation": true,
+    "dirty_paths_unrelated_to_locomotion": [
+      "config/maintenance.wsl-cu128.env",
+      "docker/compose.tailscale.yaml",
+      "docker/compose.yaml",
+      "docs/operations.md",
+      "docs/project-manifest.json",
+      "scripts/maintain.sh"
+    ],
+    "development_suite": {
+      "id": "roadrunner_generalist_sequence_gate_v1",
+      "definition": "benchmarks/suites/roadrunner_generalist_sequence_gate_v1.toml",
+      "definition_sha256": "7e38369b336b1283d2d2c1051083d1668247e9d4b8489a0dd91c4811b06d10da",
+      "resolved_scenario_count": 256,
+      "resolved_scenario_sha256": "a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1"
+    },
+    "evaluation_id": "20261007T161244Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "evaluation_status": "PASS",
+    "target_arrivals": "256/256",
+    "target_error_p95_m": 0.005566262407228351,
+    "comparison_to_prior_baseline": {
+      "evaluation_id": "20261007T085540Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+      "paired_scenarios": 256,
+      "target_arrival_delta": 0.0,
+      "target_error_iqm_delta_m": -3.3007836464094E-07
+    }
+  },
+  "promotion_suite": {
+    "id": "roadrunner_generalist_sequence_promotion_v1",
+    "definition": "benchmarks/suites/roadrunner_generalist_sequence_promotion_v1.toml",
+    "root_seed": 2026100701,
+    "definition_sha256": "ca45d762720601db08dc619d6e7c5a8bb48e2b667cef6ded539c836eed81b21b",
+    "scenario_count": 256,
+    "semantics": "copy of development suite with suite_id and root_seed changed",
+    "frozen_before_checkpoint_selection": true,
+    "routine_checkpoint_screening_allowed": false,
+    "planned_use": "one promotion evaluation after the final checkpoint is selected"
+  },
+  "morphology_baseline": {
+    "suite_id": "guard_generalist_morphology_baseline_v1",
+    "evaluation_id": "20261007T171416Z_guard_generalist_morphology_baseline_v1_model_000000",
+    "checkpoint_sha256": "04e6e121faf1dec19376c33448ef75aa280b2b7448ccc674f511e7b79f332959",
+    "repository_commit": "49e6e89c8237749ea7586c23016e35965a58bcbc",
+    "suite_definition_sha256": "6cf1549a86677957778ac47c7f835e81cf3f6c13a26507b2429a18c0d4738829",
+    "resolved_scenarios_sha256": "6bece67a65d848d10fe81142a92078b19c197d05c1d036f0f24443c4422b8f2b",
+    "scenario_count": 256,
+    "gates": "none; diagnostic baseline only",
+    "wheel_contact_semantics": "binary_found_boolean",
+    "wheel_normal_force_imbalance_available": false,
+    "deterministic_replay_verified": true,
+    "replay_suite_id": "guard_generalist_morphology_replay_smoke_v1",
+    "replay_scenario_count": 4,
+    "replay_evaluation_ids": [
+      "20261007T172730Z_guard_generalist_morphology_replay_smoke_v1_model_000000",
+      "20261007T173034Z_guard_generalist_morphology_replay_smoke_v1_model_000000"
+    ],
+    "replay_metric_rows_compared": 394,
+    "replay_metric_differences": 0,
+    "reward_term_integrals_reconcile_with_episode_return": true,
+    "max_absolute_reconciliation_error": 0.00184
+  },
+  "reward_audit": {
+    "work_package": "WP-03",
+    "script": "scripts/reward_probe.py",
+    "artifact": "docs/experiments/reward_audit_wp03.json",
+    "probe_type": "scripted_state_trajectories_not_policy_rollouts",
+    "cases": 6,
+    "diagnostic_conclusions": [
+      "a 10 cm overshoot retained 96.1% of the exact-arrival scripted return",
+      "the wrong-heading state was strongly penalized",
+      "long scripted travel accumulated substantially more progress return than short travel"
+    ],
+    "reward_ablation": {
+      "term": "target_arrival_settled_stop",
+      "default_weight": 5.0,
+      "settled_dwell_s": 0.35,
+      "target_radius_m": 0.035,
+      "control_arm_environment_variable": "ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT=0",
+      "reward_schema": "v4",
+      "training_only": true
+    }
+  },
+  "wp11a_observability_inventory": {
+    "status": "inventory_complete_guard_interface_validation_open",
+    "artifact": "docs/reports/ascento_guard_actor_observability_inventory_2026-10-07.md",
+    "actor_observation_width": 41,
+    "simulator_only_actor_channels_without_verified_hardware_contract": [
+      "base_height",
+      "wheel_contacts",
+      "wheel_contact_forces"
+    ],
+    "requires_state_or_localization_estimation": [
+      "projected_gravity",
+      "base_linear_velocity",
+      "body_target_error_xy",
+      "target_heading_error"
+    ],
+    "critic_only_privileged_channels": [
+      "root_position_world",
+      "root_linear_velocity_world",
+      "root_angular_velocity_world"
+    ],
+    "terrain_training_ready": false,
+    "exact_guard_sensor_topics_rates_frames_latency_and_calibration_verified": false
+  },
+  "anchor_cohorts": {
+    "work_package": "WP-04",
+    "status": "implemented_and_tested_training_ablation_pending",
+    "cohorts": [
+      {
+        "id": 0,
+        "name": "precision_anchor",
+        "default_fraction": 0.2
+      },
+      {
+        "id": 1,
+        "name": "recovery_retarget_anchor",
+        "default_fraction": 0.2
+      },
+      {
+        "id": 2,
+        "name": "generalist_navigation",
+        "default_fraction": 0.6
+      }
+    ],
+    "ablation_fraction_environment_variables": {
+      "precision_anchor": "ASCENTO_GENERALIST_PRECISION_ANCHOR_FRACTION",
+      "recovery_retarget_anchor": "ASCENTO_GENERALIST_RECOVERY_RETARGET_ANCHOR_FRACTION"
+    },
+    "fixed_environment_assignment": true,
+    "navigation_difficulty_only_changes_in_navigation_cohort": true,
+    "stage_evidence": "recovery_anchor_episode_outcomes_and_navigation_target_attempts",
+    "acceptance_tests": {
+      "exact_20_env_default_counts": [
+        4,
+        4,
+        12
+      ],
+      "exact_20_env_50_percent_anchor_counts": [
+        5,
+        5,
+        10
+      ],
+      "reset_target_partition_verified": true,
+      "cohort_episode_and_attempt_metrics_disjoint": true,
+      "focused_test_result": "22 passed",
+      "full_tests_mjlab_result": "291 passed; 1 known unrelated pre-existing failure",
+      "known_failure": "tests_mjlab/test_task_config.py::test_quiet_balance_is_versioned_and_uses_horizon_curriculum (expects -0.50; unchanged config is -10.0)"
+    }
+  },
+  "exp_retention_01": {
+    "status": "complete_failed_retention",
+    "anchor_fractions": {
+      "precision_anchor": 0.2,
+      "recovery_retarget_anchor": 0.2,
+      "generalist_navigation": 0.6
+    },
+    "teacher_loss": false,
+    "target_achievement_reward_weight": 5.0,
+    "planned_total_updates": 300,
+    "save_interval_updates": 50,
+    "source_transfer_checkpoint": "transfers/ascento_generalist_locomotion_flat/exp_retention_01/model_000000.pt",
+    "source_transfer_sha256": "0a0ba381c9866a6d9f058c5c4b187681a35c86707a3d60d81fdca8343eaf4287",
+    "source_transfer_evaluation_id": "20261007T181943Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "source_transfer_evaluation_status": "PASS",
+    "source_transfer_target_arrivals": "256/256",
+    "source_transfer_final_target_error_p95_m": 0.005583078018389642,
+    "first_update_checkpoint_sha256": "b9e96549360b7989fe21bc9b6c968ab5a59965963ec7b6daececa4e26f5caf82",
+    "first_update_evaluation_id": "20261007T183130Z_roadrunner_generalist_sequence_gate_v1_model_0",
+    "first_update_evaluation_status": "PASS",
+    "first_update_target_arrivals": "256/256",
+    "first_update_final_target_error_p95_m": 0.0059429071843624115,
+    "run_attempts": [
+      {
+        "run_id": "f70dd0c7b089",
+        "outcome": "failed_before_ppo_update",
+        "cause": "event-manager parameter forwarding; fixed callback signature"
+      },
+      {
+        "run_id": "3d60a32bce7a",
+        "outcome": "one_update_checkpoint_saved_then_telemetry_error",
+        "cause": "settled-stop vector included recovery environments without an active target; fixed sample filtering"
+      },
+      {
+        "run_id": "430a16cbadef",
+        "outcome": "active_continuation",
+        "additional_iterations": 299,
+        "resumes_checkpoint_from_run_id": "3d60a32bce7a"
+      }
+    ],
+    "completed_at_utc": "2026-10-07T19:10:22Z",
+    "conclusion": "permanent anchors without actor retention fail; EXP-RETENTION-02 required",
+    "checkpoint_evaluation_ids": [
+      "20261007T183130Z_roadrunner_generalist_sequence_gate_v1_model_0",
+      "20261007T185157Z_roadrunner_generalist_sequence_gate_v1_model_50",
+      "20261007T185606Z_roadrunner_generalist_sequence_gate_v1_model_100",
+      "20261007T185924Z_roadrunner_generalist_sequence_gate_v1_model_150",
+      "20261007T190319Z_roadrunner_generalist_sequence_gate_v1_model_200",
+      "20261007T190641Z_roadrunner_generalist_sequence_gate_v1_model_250",
+      "20261007T191002Z_roadrunner_generalist_sequence_gate_v1_model_298"
+    ],
+    "results_artifact": "docs/experiments/exp_retention_01_results.json",
+    "final_paired_target_error_iqm_delta_ci95_m": [
+      0.12548479050603872,
+      0.12638295244046277
+    ],
+    "final_paired_target_error_iqm_delta_m": 0.12594133894890547,
+    "final_target_error_p95_m": 0.1341894194483757,
+    "development_suite_resolved_scenario_sha256": "a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1",
+    "first_hard_gate_failure_checkpoint_index": 150
+  },
+  "experiment_matrix": [
+    {
+      "id": "EXP-RETENTION-00",
+      "depends_on": [
+        "WP-01",
+        "WP-02"
+      ],
+      "changes": [
+        "attempt-level telemetry only"
+      ],
+      "max_updates": 150
+    },
+    {
+      "id": "EXP-RETENTION-01",
+      "depends_on": [
+        "WP-04"
+      ],
+      "changes": [
+        "permanent anchor cohorts"
+      ],
+      "max_updates": 300,
+      "status": "complete_failed_retention"
+    },
+    {
+      "id": "EXP-RETENTION-02",
+      "depends_on": [
+        "WP-05"
+      ],
+      "changes": [
+        "frozen anchor replay actor mean-MSE"
+      ],
+      "max_updates": 300,
+      "status": "complete_failed_retention"
+    },
+    {
+      "id": "EXP-RETENTION-03",
+      "depends_on": [
+        "WP-05"
+      ],
+      "changes": [
+        "live rollout anchor-mask mean-MSE"
+      ],
+      "run_if": "only if frozen replay behavior is retained while on-policy anchor behavior drifts",
+      "max_updates": 300,
+      "status": "not_run_trigger_not_met"
+    },
+    {
+      "id": "EXP-RETENTION-04",
+      "depends_on": [
+        "WP-05"
+      ],
+      "changes": [
+        "one-way anchor policy KL"
+      ],
+      "run_if": "live mean-MSE is insufficient",
+      "max_updates": 300
+    },
+    {
+      "id": "EXP-NORM-00",
+      "depends_on": [
+        "WP-06"
+      ],
+      "changes": [
+        "exact affine normalizer migration"
+      ],
+      "max_updates": 0,
+      "status": "complete_equivalent",
+      "results_artifact": "docs/experiments/exp_norm_00_results.json"
+    },
+    {
+      "id": "EXP-NORM-01",
+      "depends_on": [
+        "WP-06"
+      ],
+      "changes": [
+        "semantic command normalization"
+      ],
+      "max_updates": 300,
+      "status": "complete_control_tradeoff_improved_not_promoted",
+      "training_run_id": "c27772ee729b",
+      "results_artifact": "docs/experiments/exp_norm_01_results.json"
+    },
+    {
+      "id": "EXP-MIX-01",
+      "depends_on": [
+        "WP-04"
+      ],
+      "changes": [
+        "40% versus 50% anchor share"
+      ],
+      "max_updates_per_arm": 200
+    },
+    {
+      "id": "EXP-CONTEXT-01",
+      "depends_on": [
+        "WP-07"
+      ],
+      "changes": [
+        "41-to-42 mode-bit transfer"
+      ],
+      "max_updates": 0,
+      "status": "complete_equivalent",
+      "results_artifact": "docs/experiments/exp_context_01_results.json",
+      "migrated_checkpoint_sha256": "1030358a7f3cfca1c906eb8da00adf946c9bfaae980ad1fa193ac91616665aa0",
+      "target_task_topology_sha256": "d0983d8af905067f63f2354178c9bbf26c5b56162547b3c71806a0bcbaac1ef4"
+    },
+    {
+      "id": "EXP-REWARD-FREEDOM-01",
+      "depends_on": [
+        "WP-07B"
+      ],
+      "changes": [
+        "relax only demonstrated conflicting posture priors"
+      ],
+      "max_updates": 250,
+      "status": "implementation_probe_and_mode0_control_complete_mode1_training_deferred",
+      "results_artifact": "docs/experiments/exp_reward_freedom_01_results.json",
+      "completed_updates": 0,
+      "training_deferred_reason": "No terrain or obstacle training task is configured; WP-11A identified unresolved deployment paths for simulator-only actor height/contact/force channels, and the WP-08 acceptance bars relying on those channels."
+    },
+    {
+      "id": "EXP-TERRAIN-01",
+      "depends_on": [
+        "WP-08"
+      ],
+      "changes": [
+        "mild terrain, obstacle_mode=0"
+      ],
+      "max_updates": 300
+    },
+    {
+      "id": "EXP-OBSTACLE-01",
+      "depends_on": [
+        "WP-09"
+      ],
+      "changes": [
+        "low obstacle, obstacle_mode=1"
+      ],
+      "max_updates": 300
+    },
+    {
+      "id": "EXP-DR-01..N",
+      "depends_on": [
+        "WP-10"
+      ],
+      "changes": [
+        "one randomization family at a time"
+      ],
+      "max_updates_per_arm": 300
+    },
+    {
+      "id": "EXP-SEED-01..03",
+      "depends_on": [
+        "WP-14"
+      ],
+      "changes": [
+        "final recipe seed replication and held-out promotion"
+      ]
+    }
+  ],
+  "promotion_contract": {
+    "hard_gates_first": true,
+    "retained_skills_use_non_inferiority_margins": true,
+    "training_return_is_diagnostic_only": true,
+    "promotion_suite_is_not_for_intermediate_screening": true
+  },
+  "exp_retention_02": {
+    "checkpoint_gate_statuses": [
+      "PASS",
+      "PASS",
+      "PASS",
+      "PASS",
+      "FAIL",
+      "FAIL",
+      "FAIL"
+    ],
+    "checkpoint_indices": [
+      0,
+      50,
+      100,
+      150,
+      200,
+      250,
+      299
+    ],
+    "training_run_id": "cb21b3ebbc21",
+    "final_replay_action_rms": 0.18749555945396423,
+    "exp_retention_03_trigger_met": false,
+    "final_target_error_p95_m": 0.16235901787877083,
+    "replay_action_dim": 6,
+    "replay_dataset_sha256": "f8bb908e8f301024067cb81609d363745583555a14b846141dfd8b2860b5e760",
+    "replay_observation_dim": 41,
+    "seed": 20261007,
+    "first_hard_gate_failure_checkpoint_index": 200,
+    "development_suite_resolved_scenario_sha256": "a7afcfe432d11d1bcc7694faf4e499ae9a62f37244b86a9a9e4b0de790892fc1",
+    "samples_by_cohort": {
+      "precision_anchor": 10240,
+      "recovery_retarget_anchor": 40960
+    },
+    "final_paired_target_error_iqm_ci95_vs_retention_01_m": [
+      0.02824808892037254,
+      0.028582547932455783
+    ],
+    "results_artifact": "docs/experiments/exp_retention_02_results.json",
+    "historical_bc_evaluation_id": "20261007T120309Z_roadrunner_generalist_sequence_gate_v1_model_99",
+    "reference_update": "balanced precision/recovery deterministic-mean actor MSE after each PPO update",
+    "replay_sample_count": 51200,
+    "planned_total_updates": 300,
+    "historical_bc_target_error_p95_m": 0.01523080887272954,
+    "checkpoint_evaluation_ids": [
+      "20261007T195315Z_roadrunner_generalist_sequence_gate_v1_model_0",
+      "20261007T201240Z_roadrunner_generalist_sequence_gate_v1_model_50",
+      "20261007T195631Z_roadrunner_generalist_sequence_gate_v1_model_100",
+      "20261007T195948Z_roadrunner_generalist_sequence_gate_v1_model_150",
+      "20261007T200303Z_roadrunner_generalist_sequence_gate_v1_model_200",
+      "20261007T200616Z_roadrunner_generalist_sequence_gate_v1_model_250",
+      "20261007T200929Z_roadrunner_generalist_sequence_gate_v1_model_299"
+    ],
+    "final_paired_target_error_iqm_delta_vs_retention_01_m": 0.028412885672878474,
+    "source_transfer_sha256": "0a0ba381c9866a6d9f058c5c4b187681a35c86707a3d60d81fdca8343eaf4287",
+    "reference_replay_batch_size": 256,
+    "reference_replay_weight": 0.1,
+    "conclusion": "Fixed frozen replay MSE at coefficient 0.1 delayed the first formal hard-gate failure from update 150 to update 200, but it did not outperform the permanent-anchor-only arm on paired final-target-error IQM at any matched checkpoint. The final checkpoint failed hard gates and its paired target-error IQM was worse than EXP-RETENTION-01 by 28.4 mm (95% CI approximately [28.25, 28.58] mm). The fixed replay-set action RMS also grew from 0.0078 at update 10 to approximately 0.1875 at update 299, so the frozen corpus was not retained well enough to justify live rollout masking under EXP-RETENTION-03 trigger conditions. The selected transfer remains the rollback floor.",
+    "status": "complete_failed_retention",
+    "final_paired_target_error_iqm_delta_vs_transfer_m": 0.15423480077970453,
+    "replay_collection_status": "PASS",
+    "first_practical_50mm_precision_target_exceedance_checkpoint_index": 150,
+    "final_paired_target_error_iqm_ci95_vs_transfer_m": [
+      0.15394768633898365,
+      0.1545484606151149
+    ],
+    "environment_count": 512,
+    "replay_npz_sha256": "1f9775ee7988fd0acb9bff44a0803df875ed540b9ee22bac83299b9a849f63c9",
+    "replay_dataset_path": "retention/exp_retention_02_anchor_teacher_v1.npz",
+    "replay_source_suite_id": "roadrunner_generalist_sequence_gate_v1",
+    "anchor_fractions": {
+      "generalist_navigation": 0.6,
+      "precision_anchor": 0.2,
+      "recovery_retarget_anchor": 0.2
+    }
+  },
+  "exp_norm_00": {
+    "status": "complete_equivalent",
+    "source_checkpoint_sha256": "0a0ba381c9866a6d9f058c5c4b187681a35c86707a3d60d81fdca8343eaf4287",
+    "migrated_checkpoint_sha256": "c5fad548175eef3f41cda89cf6423d6fcf9c8d35a7c03ee34a007fff1c8e8794",
+    "actor_corpus_rows": 51200,
+    "actor_output_max_abs_delta": 4.76837158203125E-07,
+    "source_evaluation_id": "20261007T203017Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "migrated_evaluation_id": "20261007T203400Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "paired_scenarios": 256,
+    "source_gate_status": "PASS",
+    "migrated_gate_status": "PASS",
+    "results_artifact": "docs/experiments/exp_norm_00_results.json"
+  },
+  "exp_norm_01": {
+    "status": "complete_control_tradeoff_improved_not_promoted",
+    "training_run_id": "c27772ee729b",
+    "planned_updates": 300,
+    "seed": 20261007,
+    "semantic_normalizer_contract": "ascento_semantic_normalization/v1",
+    "completed_updates": 300,
+    "last_checkpoint_index": 299,
+    "results_artifact": "docs/experiments/exp_norm_01_results.json",
+    "selected_development_checkpoint_index": 150,
+    "promoted": false,
+    "first_practical_p95_exceedance_checkpoint_index": 200,
+    "first_hard_gate_failure_checkpoint_index": 299,
+    "completed_at_utc": "2026-10-07T21:20:44Z",
+    "conclusion": "Late semantic-normalizer checkpoints improve the matched-control tradeoff, with update 150 the last checkpoint passing the formal gates and 0.05 m practical p95. Paired target-error IQM remains 37.2 mm worse than transfer there; update 299 fails hard gates. Transfer remains the quality floor."
+  },
+  "wp07b_reward_freedom_audit": {
+    "status": "complete_static_probe_and_mode0_control_passed",
+    "artifact": "docs/experiments/reward_freedom_wp07b.json",
+    "reward_schema": "v4",
+    "current_task_topology_sha256": "f27347eee8a2fcb7bae2af15a1996d13e1d0afcb815c11d48293fc5d3159e16c",
+    "mode_one_height_tolerance_m": 0.1,
+    "mode_one_leg_pose_hold_weight": 0.0,
+    "mode_one_leg_pose_symmetry_weight": 0.0,
+    "mode_zero_rewards_unchanged": true,
+    "flat_pseudo_step_penalty_rate_per_s": -3.2521178483963014,
+    "static_probe_is_physics_or_policy_rollout": false,
+    "mode_one_training_demonstrated": false
+  },
+  "current_execution_frontier": {
+    "last_completed_work_package": "WP-07B",
+    "next_work_package": "WP-08",
+    "status": "blocked_pending_deployment_feasible_observation_contract",
+    "terrain_training_ready": false,
+    "blocking_channels": [
+      "base_height",
+      "wheel_contacts",
+      "wheel_contact_forces"
+    ],
+    "blocking_reason": "WP-08 forbids terrain adaptation from relying on actor channels classified simulator-only by WP-11A."
+  },
+  "final_verification": {
+    "test_suite": "tests_mjlab",
+    "passed": 315,
+    "failed": 1,
+    "known_unrelated_failure": "tests_mjlab/test_task_config.py::test_quiet_balance_is_versioned_and_uses_horizon_curriculum",
+    "ruff_check": "passed",
+    "changed_python_file_format_check": "passed",
+    "git_diff_check": "passed",
+    "experiment_json_parse": "passed"
+  }
+}

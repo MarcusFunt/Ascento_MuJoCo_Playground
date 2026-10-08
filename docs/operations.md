@@ -164,8 +164,11 @@ metadata, status, logs, and checkpoints there. `checkpoints/`, `captures/`, and
 `evaluations/` are read-only in the dashboard container. Docker's control socket
 is never mounted into that container.
 
-The dashboard normally listens only at `127.0.0.1:8000`. Set
-`ASCENTO_DASHBOARD_PORT` to choose another local port.
+The dashboard normally listens only on host loopback at `127.0.0.1:8000`. Set
+`ASCENTO_DASHBOARD_PORT` to choose another port and
+`ASCENTO_DASHBOARD_BIND_ADDRESS` to choose the host interface. The default is
+`127.0.0.1`; use a specific LAN address when devices on that LAN need access.
+`0.0.0.0` binds all interfaces.
 
 ## Dashboard host supervisor
 
@@ -207,7 +210,8 @@ security model and setup examples.
 | `ASCENTO_EVALUATION_ROOT` | `evaluations` | CLI and MCP evaluation artifact operations |
 | `ASCENTO_STALE_AFTER_SECONDS` | `90` | Dashboard stale-run detection |
 | `ASCENTO_DASHBOARD_DIST` | `dashboard/frontend/dist` | Dashboard static frontend location |
-| `ASCENTO_DASHBOARD_PORT` | `8000` | Compose/launcher local port |
+| `ASCENTO_DASHBOARD_PORT` | `8000` | Compose host port |
+| `ASCENTO_DASHBOARD_BIND_ADDRESS` | `127.0.0.1` | Compose host bind address |
 | `ASCENTO_COMPUTE_EXTRA` | context-specific | Preflight and maintained Docker compute extra |
 | `ASCENTO_DISABLE_DENSE_SHAPING` | unset | Recovery/jump training ablation switch |
 

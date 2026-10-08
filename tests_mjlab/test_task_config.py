@@ -95,7 +95,11 @@ def test_quiet_balance_is_versioned_and_uses_horizon_curriculum():
     assert balance_cfg.task_id == "Ascento-Balance-Flat"
     assert "settled_action_second_difference" not in balance_cfg.rewards
     assert quiet_cfg.task_id == "Ascento-Balance-Quiet-Flat"
-    assert quiet_cfg.rewards["settled_action_second_difference"].weight == pytest.approx(-0.50)
+    assert quiet_cfg.rewards["settled_action_second_difference"].weight == pytest.approx(-10.0)
+    assert quiet_cfg.rewards["settled_high_frequency_action_power"].weight == pytest.approx(-0.025)
+    high_frequency = quiet_cfg.rewards["settled_high_frequency_action_power"].params
+    assert high_frequency["cutoff_hz"] == pytest.approx(10.0)
+    assert high_frequency["reference_action_power"] == pytest.approx(0.0002619041791405152)
     assert quiet_cfg.rewards["settled_body_rocking"].weight == pytest.approx(-0.10)
     assert "balance_push" not in quiet_cfg.events
     assert load_runner_cls("Ascento-Balance-Quiet-Flat") is HorizonCurriculumRunner
