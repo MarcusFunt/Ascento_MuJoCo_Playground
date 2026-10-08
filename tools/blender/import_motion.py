@@ -510,6 +510,21 @@ def _output_file_record(path: Path, manifest_path: Path) -> dict[str, Any]:
   }
 
 
+def _finalize_video_output(video_path: Path, frame_start: int, frame_end: int) -> Path:
+  """Normalize Blender's frame-range-suffixed movie name to the requested path."""
+  if video_path.is_file():
+    return video_path
+  ranged_path = video_path.with_name(
+    f"{video_path.stem}{frame_start:04d}-{frame_end:04d}{video_path.suffix}"
+  )
+  if not ranged_path.is_file():
+    raise FileNotFoundError(
+      f"Blender did not create the requested MP4: {video_path}; expected {ranged_path}"
+    )
+  ranged_path.replace(video_path)
+  return video_path
+
+
 def _choose_fps(capture: dict[str, np.ndarray], times: np.ndarray, requested: float | None) -> float:
   if requested is not None:
     if requested <= 0.0:
@@ -1783,8 +1798,7 @@ def run(args: argparse.Namespace) -> None:
         scene.render.ffmpeg.audio_codec = "NONE"
         scene.render.filepath = str(video_path.with_suffix(""))
         bpy.ops.render.render(animation=True)
-        if not video_path.is_file():
-          raise FileNotFoundError(f"Blender did not create the requested MP4: {video_path}")
+        _finalize_video_output(video_path, scene.frame_start, scene.frame_end)
         manifest["outputs"]["video"].update(_output_file_record(video_path, manifest_path))
         print(f"Rendered H.264 MP4: {video_path}")
 

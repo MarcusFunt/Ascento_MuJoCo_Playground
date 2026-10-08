@@ -99,6 +99,8 @@ Set `ASCENTO_WSL_REPOSITORY` or pass `-WslRepository` when the Linux checkout
 is at another path. For a legacy capture that lacks checkpoint provenance,
 pass `-Checkpoint` with the checkpoint that generated it. The Ascento robot
 description archive remains a local input asset and is not committed.
+Pass `-Fps 24` to render at a chosen output rate; zero (the default) preserves
+the capture's recorded frame rate.
 
 The Analyze page's Blender pipeline panel polls `GET /api/blender/renders` and
 plays MP4s or previews scenes from `captures/blender`. The dashboard container

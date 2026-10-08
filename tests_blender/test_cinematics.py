@@ -16,6 +16,18 @@ import import_motion  # noqa: E402
 
 
 class CinematicCameraTests(unittest.TestCase):
+  def test_range_suffixed_ffmpeg_output_is_renamed_to_requested_mp4(self):
+    with tempfile.TemporaryDirectory(prefix="ascento_video_output_test_") as temp_dir:
+      output = Path(temp_dir) / "render.mp4"
+      ranged_output = Path(temp_dir) / "render0001-0144.mp4"
+      ranged_output.write_bytes(b"encoded video")
+
+      result = import_motion._finalize_video_output(output, 1, 144)
+
+      self.assertEqual(result, output)
+      self.assertEqual(output.read_bytes(), b"encoded video")
+      self.assertFalse(ranged_output.exists())
+
   def test_front_camera_heading_bisects_wheel_contacts(self):
     from mathutils import Vector
 

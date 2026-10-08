@@ -14,6 +14,7 @@ param(
   [string] $Checkpoint = "",
   [string[]] $CameraShots = @("low_front", "side_follow", "orbit"),
   [int] $Resolution = 1280,
+  [double] $Fps = 0,
   [switch] $CinematicDof,
   [switch] $RenderPngFrames
 )
@@ -25,6 +26,9 @@ if ($Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
 }
 if ($Resolution -lt 16) {
   throw "Resolution must be at least 16 pixels."
+}
+if ($Fps -lt 0) {
+  throw "Fps must be zero to use the capture rate or a positive override."
 }
 
 if ([string]::IsNullOrWhiteSpace($WslRepository)) {
@@ -81,6 +85,9 @@ $blenderArgs = @(
 if ($CameraShots.Count -gt 0) {
   $blenderArgs += "--camera-shots"
   $blenderArgs += $CameraShots
+}
+if ($Fps -gt 0) {
+  $blenderArgs += @("--fps", $Fps.ToString([System.Globalization.CultureInfo]::InvariantCulture))
 }
 if ($CinematicDof) {
   $blenderArgs += "--cinematic-dof"
