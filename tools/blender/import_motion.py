@@ -11,14 +11,18 @@ Run with Blender's bundled Python:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import os
+import platform
 import stat
 import struct
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -463,6 +467,47 @@ def _metadata_text(capture: dict[str, np.ndarray], key: str) -> str:
   if value is None or np.asarray(value).ndim != 0:
     return ""
   return str(np.asarray(value).item())
+
+
+def _sha256_file(path: Path) -> str:
+  digest = hashlib.sha256()
+  with path.open("rb") as handle:
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+      digest.update(chunk)
+  return digest.hexdigest()
+
+
+def _sha256_path(path: Path) -> str:
+  source = path.expanduser().resolve()
+  if source.is_file():
+    return _sha256_file(source)
+  if not source.is_dir():
+    raise FileNotFoundError(f"input asset does not exist: {source}")
+  digest = hashlib.sha256()
+  for child in sorted(item for item in source.rglob("*") if item.is_file()):
+    relative = child.relative_to(source).as_posix().encode("utf-8")
+    digest.update(len(relative).to_bytes(8, "big"))
+    digest.update(relative)
+    digest.update(bytes.fromhex(_sha256_file(child)))
+  return digest.hexdigest()
+
+
+def _atomic_json_write(path: Path, value: dict[str, Any]) -> None:
+  temporary_path = path.with_name(f".{path.name}.tmp")
+  temporary_path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+  temporary_path.replace(path)
+
+
+def _relative_output_path(path: Path, manifest_path: Path) -> str:
+  return Path(os.path.relpath(path.resolve(), manifest_path.parent.resolve())).as_posix()
+
+
+def _output_file_record(path: Path, manifest_path: Path) -> dict[str, Any]:
+  return {
+    "path": _relative_output_path(path, manifest_path),
+    "sha256": _sha256_file(path),
+    "size_bytes": path.stat().st_size,
+  }
 
 
 def _choose_fps(capture: dict[str, np.ndarray], times: np.ndarray, requested: float | None) -> float:
@@ -985,6 +1030,13 @@ def _contact_bisector_heading(forward: Any, left_point: Any, right_point: Any, V
   return candidate
 
 
+def _constrain_camera_to_warehouse(camera: Any, bounds: tuple[float, float, float, float]) -> None:
+  min_x, max_x, min_y, max_y = bounds
+  margin = min(0.75, (max_x - min_x) * 0.1, (max_y - min_y) * 0.1)
+  camera.location.x = min(max(camera.location.x, min_x + margin), max_x - margin)
+  camera.location.y = min(max(camera.location.y, min_y + margin), max_y - margin)
+
+
 def _create_cinematic_cameras(
   bpy: Any,
   scene: Any,
@@ -996,6 +1048,7 @@ def _create_cinematic_cameras(
   start_frame: int,
   end_frame: int,
   depth_of_field: bool = False,
+  camera_bounds: tuple[float, float, float, float] | None = None,
 ) -> list[tuple[str, int, int, Any]]:
   from mathutils import Quaternion, Vector
 
@@ -1073,6 +1126,8 @@ def _create_cinematic_cameras(
         offset = (forward * math.cos(angle) + left * math.sin(angle)) * 4.3 + vertical * 0.95
 
       camera.location = target + offset
+      if camera_bounds is not None:
+        _constrain_camera_to_warehouse(camera, camera_bounds)
       camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()
       camera.keyframe_insert(data_path="location", frame=frame)
       camera.keyframe_insert(data_path="rotation_euler", frame=frame)
@@ -1119,6 +1174,51 @@ def _resolve_warehouse_fbx(warehouse_asset: Path, extraction_root: Path) -> Path
   return largest[0]
 
 
+def _configure_warehouse_lighting(
+  bpy: Any,
+  scene: Any,
+  center: tuple[float, float, float],
+  room_width: float,
+  room_depth: float,
+  light_height: float,
+) -> None:
+  from mathutils import Vector
+
+  world = scene.world
+  if world is None:
+    world = bpy.data.worlds.new("Ascento_Warehouse_World")
+    scene.world = world
+  world.use_nodes = True
+  nodes = world.node_tree.nodes
+  nodes.clear()
+  background = nodes.new("ShaderNodeBackground")
+  background.name = "Ascento_Warehouse_Ambience"
+  background.inputs["Color"].default_value = (0.20, 0.23, 0.28, 1.0)
+  background.inputs["Strength"].default_value = 0.32
+  output = nodes.new("ShaderNodeOutputWorld")
+  world.node_tree.links.new(background.outputs["Background"], output.inputs["Surface"])
+
+  target = Vector(center)
+  x_offsets = (-room_width * 0.18, 0.0, room_width * 0.18)
+  y_offsets = (-room_depth * 0.18, room_depth * 0.18)
+  for row, offset_y in enumerate(y_offsets):
+    color = (1.0, 0.94, 0.84) if row == 0 else (0.84, 0.92, 1.0)
+    energy = 520.0 if row == 0 else 480.0
+    for column, offset_x in enumerate(x_offsets):
+      light_index = row * len(x_offsets) + column + 1
+      name = f"Room_Light_{light_index:02d}"
+      light_data = bpy.data.lights.new(f"Ascento_{name}", "AREA")
+      light_data.energy = energy
+      light_data.shape = "RECTANGLE"
+      light_data.size = 4.5
+      light_data.size_y = 3.2
+      light_data.color = color
+      light = bpy.data.objects.new(f"Ascento_{name}", light_data)
+      scene.collection.objects.link(light)
+      light.location = Vector((target.x + offset_x, target.y + offset_y, light_height))
+      light.rotation_euler = (0.0, 0.0, 0.0)
+
+
 def _make_warehouse_stage(
   bpy: Any,
   scene: Any,
@@ -1163,6 +1263,12 @@ def _make_warehouse_stage(
 
   target_span = max(24.0, float(motion_span) + 16.0)
   uniform_scale = target_span / horizontal_span
+  warehouse_height = dimensions.z * uniform_scale
+  ceiling_margin = max(0.2, warehouse_height * 0.08)
+  light_height = min(
+    warehouse_height - ceiling_margin,
+    max(float(center[2]) + 0.55, warehouse_height * 0.72),
+  )
   stage.scale = (uniform_scale, uniform_scale, uniform_scale)
   stage.location = (
     float(center[0]) - (low.x + high.x) * 0.5 * uniform_scale,
@@ -1176,38 +1282,22 @@ def _make_warehouse_stage(
   scene["ascento_warehouse_creator"] = "Nicholas-3D"
   scene["ascento_warehouse_license"] = "CC BY 4.0"
   scene["ascento_warehouse_scale"] = uniform_scale
-
-  world = scene.world
-  if world is None:
-    world = bpy.data.worlds.new("Ascento_Warehouse_World")
-    scene.world = world
-  world.use_nodes = True
-  nodes = world.node_tree.nodes
-  nodes.clear()
-  background = nodes.new("ShaderNodeBackground")
-  background.name = "Ascento_Warehouse_Ambience"
-  background.inputs["Color"].default_value = (0.16, 0.17, 0.18, 1.0)
-  background.inputs["Strength"].default_value = 0.18
-  output = nodes.new("ShaderNodeOutputWorld")
-  world.node_tree.links.new(background.outputs["Background"], output.inputs["Surface"])
-
-  target = Vector(center)
-  light_specs = (
-    ("Ceiling_Key", 1500.0, 1.3, (1.0, 0.97, 0.92), (0.0, -1.0, 4.2)),
-    ("Ceiling_Fill", 360.0, 1.8, (0.94, 0.97, 1.0), (-2.8, 0.4, 3.4)),
-    ("Warehouse_Rim", 420.0, 1.0, (1.0, 0.99, 0.96), (2.2, 2.3, 4.0)),
+  scene["ascento_warehouse_camera_bounds"] = json.dumps(
+    [
+      float(center[0] - dimensions.x * uniform_scale * 0.5),
+      float(center[0] + dimensions.x * uniform_scale * 0.5),
+      float(center[1] - dimensions.y * uniform_scale * 0.5),
+      float(center[1] + dimensions.y * uniform_scale * 0.5),
+    ]
   )
-  for name, energy, size, color, offset in light_specs:
-    light_data = bpy.data.lights.new(f"Ascento_{name}", "AREA")
-    light_data.energy = energy
-    light_data.shape = "RECTANGLE"
-    light_data.size = size
-    light_data.size_y = size * 0.62
-    light_data.color = color
-    light = bpy.data.objects.new(f"Ascento_{name}", light_data)
-    scene.collection.objects.link(light)
-    light.location = target + Vector(offset)
-    light.rotation_euler = (target - light.location).to_track_quat("-Z", "Y").to_euler()
+  _configure_warehouse_lighting(
+    bpy,
+    scene,
+    center,
+    dimensions.x * uniform_scale,
+    dimensions.y * uniform_scale,
+    light_height,
+  )
 
   for camera in (obj for obj in scene.objects if obj.type == "CAMERA"):
     camera.data.clip_end = max(camera.data.clip_end, target_span * 4.0)
@@ -1434,7 +1524,52 @@ def run(args: argparse.Namespace) -> None:
     raise FileNotFoundError(f"capture file does not exist: {capture_path}")
   output_path = args.output.expanduser().resolve()
   output_path.parent.mkdir(parents=True, exist_ok=True)
+  manifest_path = output_path.with_name(f"{output_path.stem}.manifest.json")
+  capture_sha256 = _sha256_file(capture_path)
   capture, times, root_pos, root_quat, joint_pos, joint_indices = _load_capture(capture_path)
+  recorded_checkpoint = _metadata_text(capture, "meta_checkpoint").strip()
+  recorded_checkpoint_hash = _metadata_text(capture, "meta_model_sha256").strip().lower()
+  recorded_policy_kind = _metadata_text(capture, "meta_policy_kind").strip().lower()
+  explicit_checkpoint = getattr(args, "checkpoint", None)
+  if explicit_checkpoint is not None:
+    if recorded_policy_kind == "zero_policy":
+      raise ValueError("--checkpoint cannot be attached to a capture recorded as zero_policy")
+    explicit_checkpoint = explicit_checkpoint.expanduser().resolve()
+    if not explicit_checkpoint.is_file():
+      raise FileNotFoundError(f"checkpoint file does not exist: {explicit_checkpoint}")
+    policy_checkpoint_path = str(explicit_checkpoint)
+    policy_checkpoint_sha256 = _sha256_file(explicit_checkpoint)
+    if recorded_checkpoint_hash and recorded_checkpoint_hash != policy_checkpoint_sha256:
+      raise ValueError(
+        "--checkpoint does not match the checkpoint hash recorded in the source capture"
+      )
+    policy_kind = "checkpoint"
+    checkpoint_provenance = "explicit_checkpoint_file"
+  elif recorded_policy_kind == "zero_policy":
+    if recorded_checkpoint_hash:
+      raise ValueError("zero-policy capture unexpectedly records a checkpoint hash")
+    policy_checkpoint_path = None
+    policy_checkpoint_sha256 = None
+    policy_kind = "zero_policy"
+    checkpoint_provenance = "capture_metadata"
+  else:
+    policy_checkpoint_path = recorded_checkpoint or None
+    policy_checkpoint_sha256 = recorded_checkpoint_hash or None
+    if policy_checkpoint_path and not policy_checkpoint_sha256:
+      recorded_path = Path(policy_checkpoint_path).expanduser()
+      if recorded_path.is_file():
+        policy_checkpoint_sha256 = _sha256_file(recorded_path.resolve())
+    if not policy_checkpoint_sha256:
+      raise ValueError(
+        "capture has no verifiable policy checkpoint provenance; regenerate it with the current "
+        "capture tool or pass --checkpoint for the checkpoint that generated it"
+      )
+    if len(policy_checkpoint_sha256) != 64 or any(
+      character not in "0123456789abcdef" for character in policy_checkpoint_sha256
+    ):
+      raise ValueError("capture policy checkpoint SHA-256 metadata is invalid")
+    policy_kind = "checkpoint"
+    checkpoint_provenance = "capture_metadata"
   fps = _choose_fps(capture, times, args.fps)
   if args.camera_shots:
     clip_end_frame = max(2, int(math.ceil(1 + (float(times[-1]) - float(times[0])) * fps)))
@@ -1479,6 +1614,7 @@ def run(args: argparse.Namespace) -> None:
     scene.frame_set(start_frame)
     scene["ascento_robot"] = robot_name
     scene["ascento_source_capture"] = capture_path.name
+    scene["ascento_source_capture_sha256"] = capture_sha256
     scene["ascento_source_urdf"] = urdf_path.name
     scene["ascento_fps"] = fps
     scene["ascento_frame_count"] = len(times)
@@ -1486,6 +1622,11 @@ def run(args: argparse.Namespace) -> None:
       value = _metadata_text(capture, f"meta_{key}")
       if value:
         scene[f"ascento_{key}"] = value
+    scene["ascento_policy_kind"] = policy_kind
+    scene["ascento_checkpoint_provenance"] = checkpoint_provenance
+    scene["ascento_checkpoint"] = policy_checkpoint_path or ""
+    scene["ascento_checkpoint_sha256"] = policy_checkpoint_sha256 or ""
+    scene["ascento_provenance_manifest"] = manifest_path.name
 
     floor_clearance = _apply_wheel_floor_clearance(
       bpy,
@@ -1524,6 +1665,7 @@ def run(args: argparse.Namespace) -> None:
       camera_center,
       math.hypot(span_x, span_y),
     )
+    warehouse_camera_bounds = tuple(json.loads(scene["ascento_warehouse_camera_bounds"]))
     bpy.context.view_layer.update()
     bpy.ops.file.pack_all()
     if cinematic:
@@ -1538,6 +1680,7 @@ def run(args: argparse.Namespace) -> None:
         start_frame,
         scene.frame_end,
         depth_of_field=args.cinematic_dof,
+        camera_bounds=warehouse_camera_bounds,
       )
       scene["ascento_camera_shots"] = json.dumps(args.camera_shots)
       scene["ascento_cinematic_dof"] = args.cinematic_dof
@@ -1545,15 +1688,115 @@ def run(args: argparse.Namespace) -> None:
         "Cinematic camera cuts: "
         + ", ".join(f"{name} [{first}-{last}]" for name, first, last, _ in cuts)
       )
-    bpy.ops.wm.save_as_mainfile(filepath=str(output_path))
-    print(f"Saved animated Blender scene: {output_path}")
+    elif scene.camera is not None:
+      _constrain_camera_to_warehouse(scene.camera, warehouse_camera_bounds)
+      scene.camera.rotation_euler = (
+        Vector(camera_center) - scene.camera.location
+      ).to_track_quat("-Z", "Y").to_euler()
+    warehouse_path = args.warehouse.expanduser().resolve()
+    description_path = args.description.expanduser().resolve()
+    manifest: dict[str, Any] = {
+      "schema_version": 1,
+      "render_id": f"{output_path.parent.name}/{output_path.stem}",
+      "created_at_utc": datetime.now(timezone.utc).isoformat(),
+      "status": "rendering",
+      "inputs": {
+        "source_npz": {
+          "path": str(capture_path),
+          "sha256": capture_sha256,
+          "task": _metadata_text(capture, "meta_task") or None,
+          "seed": _metadata_text(capture, "meta_seed") or None,
+        },
+        "policy_checkpoint": {
+          "kind": policy_kind,
+          "path": policy_checkpoint_path,
+          "sha256": policy_checkpoint_sha256,
+          "provenance": checkpoint_provenance,
+        },
+        "robot_description": {
+          "path": str(description_path),
+          "sha256": _sha256_path(description_path),
+        },
+        "warehouse_asset": {
+          "path": str(warehouse_path),
+          "sha256": _sha256_path(warehouse_path),
+        },
+      },
+      "pipeline": {
+        "importer_sha256": _sha256_file(Path(__file__).resolve()),
+        "python_version": platform.python_version(),
+        "blender_version": bpy.app.version_string,
+      },
+      "render": {
+        "engine": scene.render.engine,
+        "device": getattr(getattr(scene, "cycles", None), "device", None),
+        "resolution": {
+          "width": round(scene.render.resolution_x * scene.render.resolution_percentage / 100),
+          "height": round(scene.render.resolution_y * scene.render.resolution_percentage / 100),
+        },
+        "fps": fps,
+        "frame_start": scene.frame_start,
+        "frame_end": scene.frame_end,
+        "samples": getattr(getattr(scene, "cycles", None), "samples", None),
+        "camera_shots": list(args.camera_shots or []),
+        "depth_of_field": bool(args.cinematic_dof),
+      },
+      "outputs": {
+        "blend": {"path": _relative_output_path(output_path, manifest_path)},
+        "video": (
+          {"path": _relative_output_path(args.video_output.expanduser().resolve(), manifest_path)}
+          if getattr(args, "video_output", None) is not None
+          else None
+        ),
+        "frames": (
+          {"path": _relative_output_path(args.render_dir.expanduser().resolve(), manifest_path)}
+          if args.render_dir is not None
+          else None
+        ),
+      },
+    }
+    _atomic_json_write(manifest_path, manifest)
+    try:
+      bpy.ops.wm.save_as_mainfile(filepath=str(output_path))
+      print(f"Saved animated Blender scene: {output_path}")
 
-    if args.render_dir is not None:
-      render_dir = args.render_dir.expanduser().resolve()
-      render_dir.mkdir(parents=True, exist_ok=True)
-      scene.render.filepath = str(render_dir / "frame_")
-      bpy.ops.render.render(animation=True)
-      print(f"Rendered PNG sequence: {render_dir}")
+      if args.render_dir is not None:
+        render_dir = args.render_dir.expanduser().resolve()
+        render_dir.mkdir(parents=True, exist_ok=True)
+        scene.render.filepath = str(render_dir / "frame_")
+        scene.render.image_settings.file_format = "PNG"
+        bpy.ops.render.render(animation=True)
+        frame_paths = sorted(render_dir.glob("*.png"))
+        manifest["outputs"]["frames"].update({"count": len(frame_paths)})
+        if frame_paths:
+          manifest["outputs"]["preview"] = _output_file_record(frame_paths[0], manifest_path)
+        print(f"Rendered PNG sequence: {render_dir}")
+
+      video_output = getattr(args, "video_output", None)
+      if video_output is not None:
+        video_path = video_output.expanduser().resolve()
+        video_path.parent.mkdir(parents=True, exist_ok=True)
+        scene.render.image_settings.file_format = "FFMPEG"
+        scene.render.ffmpeg.format = "MPEG4"
+        scene.render.ffmpeg.codec = "H264"
+        scene.render.ffmpeg.constant_rate_factor = "MEDIUM"
+        scene.render.ffmpeg.audio_codec = "NONE"
+        scene.render.filepath = str(video_path.with_suffix(""))
+        bpy.ops.render.render(animation=True)
+        if not video_path.is_file():
+          raise FileNotFoundError(f"Blender did not create the requested MP4: {video_path}")
+        manifest["outputs"]["video"].update(_output_file_record(video_path, manifest_path))
+        print(f"Rendered H.264 MP4: {video_path}")
+
+      manifest["outputs"]["blend"].update(_output_file_record(output_path, manifest_path))
+      manifest["status"] = "complete"
+      _atomic_json_write(manifest_path, manifest)
+      print(f"Wrote render provenance: {manifest_path}")
+    except Exception as error:
+      manifest["status"] = "failed"
+      manifest["error"] = f"{type(error).__name__}: {error}"
+      _atomic_json_write(manifest_path, manifest)
+      raise
   finally:
     temporary_directory.cleanup()
 
@@ -1569,6 +1812,12 @@ def _parse_args() -> argparse.Namespace:
   parser.add_argument("--description", type=Path, required=True, help="Ascento URDF, package directory, or ZIP archive")
   parser.add_argument("--output", type=Path, required=True, help="Output .blend scene")
   parser.add_argument(
+    "--checkpoint",
+    type=Path,
+    default=None,
+    help="Checkpoint file for legacy captures without a recorded checkpoint hash",
+  )
+  parser.add_argument(
     "--warehouse",
     type=Path,
     default=DEFAULT_WAREHOUSE_PATH,
@@ -1577,6 +1826,12 @@ def _parse_args() -> argparse.Namespace:
   parser.add_argument("--root-link", default=DEFAULT_ROOT_LINK, help=f"URDF frame matched to root_pos (default: {DEFAULT_ROOT_LINK})")
   parser.add_argument("--fps", type=float, default=None, help="Override capture or clip frame rate")
   parser.add_argument("--render-dir", type=Path, default=None, help="Optional directory for rendered PNG frames")
+  parser.add_argument(
+    "--video-output",
+    type=Path,
+    default=None,
+    help="Optional H.264 MP4 output path (rendered with Blender's FFmpeg support)",
+  )
   parser.add_argument(
     "--camera-shots",
     nargs="+",
@@ -1597,6 +1852,8 @@ def _parse_args() -> argparse.Namespace:
     parser.error("--cinematic-dof requires --camera-shots")
   if args.output.suffix.lower() != ".blend":
     parser.error("--output must use the .blend extension")
+  if args.video_output is not None and args.video_output.suffix.lower() != ".mp4":
+    parser.error("--video-output must use the .mp4 extension")
   return args
 
 

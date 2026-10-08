@@ -8,7 +8,9 @@ import math
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -41,6 +43,8 @@ CONFIG = load_config()
 STARTUP_WARNINGS = validate_startup(CONFIG, create_artifact_root=False)
 ARTIFACT_ROOT = CONFIG.artifact_root
 FRONTEND_DIST = CONFIG.frontend_dist
+BLENDER_RENDER_ROOT = CONFIG.repo_root / "captures" / "blender"
+BLENDER_RENDER_ASSET_SUFFIXES = {".blend", ".mp4", ".png"}
 RUN_SERVICE = RunService(ARTIFACT_ROOT, stale_after_seconds=CONFIG.stale_after_seconds)
 VIEWER_SERVICE = ViewerService(
     RUN_SERVICE,
@@ -180,6 +184,23 @@ def _artifact_health() -> list[str]:
         if not os.access(ARTIFACT_ROOT, os.X_OK):
             problems.append(f"artifact root is not searchable: {ARTIFACT_ROOT}")
     return problems
+
+
+def _blender_asset_url(path: Path, root: Path) -> str | None:
+    try:
+        resolved_root = root.resolve()
+        resolved_path = path.resolve(strict=True)
+        relative_path = resolved_path.relative_to(resolved_root)
+    except (OSError, ValueError):
+        return None
+    if not resolved_path.is_file():
+        return None
+    if (
+        resolved_path.suffix.lower() not in BLENDER_RENDER_ASSET_SUFFIXES
+        and not resolved_path.name.endswith(".manifest.json")
+    ):
+        return None
+    return f"/api/blender/renders/files/{quote(relative_path.as_posix(), safe='/')}"
 
 
 def _invalidate_summary_cache() -> None:
@@ -385,6 +406,67 @@ def health():
         "repository_version": current_repository_version(),
         "database": DATABASE.status(),
     }
+
+
+@app.get("/api/blender/renders")
+def blender_renders(limit: int = 100):
+    """List render manifests and safe links to media under the mounted captures tree."""
+    limit = max(1, min(limit, 500))
+    root = BLENDER_RENDER_ROOT.resolve()
+    if not root.is_dir():
+        return {"renders": [], "root": "captures/blender"}
+
+    try:
+        manifests = sorted(
+            (path for path in root.rglob("*.manifest.json") if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )[:limit]
+    except OSError as error:
+        raise HTTPException(
+            status_code=500, detail=f"could not scan Blender renders: {error}"
+        ) from error
+
+    renders = []
+    for manifest_path in manifests:
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        try:
+            manifest_relative = manifest_path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        manifest["manifest_path"] = manifest_relative
+        manifest["manifest_url"] = _blender_asset_url(manifest_path, root)
+        outputs = manifest.get("outputs")
+        if isinstance(outputs, dict):
+            for output_name in ("blend", "video", "preview"):
+                output = outputs.get(output_name)
+                if not isinstance(output, dict) or not isinstance(output.get("path"), str):
+                    continue
+                output["url"] = _blender_asset_url(manifest_path.parent / output["path"], root)
+        renders.append(manifest)
+    return {"renders": renders, "root": "captures/blender"}
+
+
+@app.get("/api/blender/renders/files/{asset_path:path}")
+def blender_render_file(asset_path: str):
+    root = BLENDER_RENDER_ROOT.resolve()
+    candidate = (root / Path(asset_path)).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="render asset not found") from error
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="render asset not found")
+    if candidate.suffix.lower() not in BLENDER_RENDER_ASSET_SUFFIXES and not candidate.name.endswith(
+        ".manifest.json"
+    ):
+        raise HTTPException(status_code=404, detail="render asset type is not served")
+    return FileResponse(candidate)
 
 
 @app.get("/api/config")

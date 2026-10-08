@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../api'
 import { CurriculumRail } from '../components/CurriculumRail'
+import { BlenderRenderGallery } from '../components/BlenderRenderGallery'
 import { LiveLog } from '../components/LiveLog'
 import { PageHeader } from '../components/PageHeader'
 import { TelemetryChart } from '../components/TelemetryChart'
@@ -102,6 +103,7 @@ export function AnalyzePage() {
           <LiveLog runId={selectedId} />
         </div>
       )}
+      <BlenderRenderGallery />
     </>
   )
 }

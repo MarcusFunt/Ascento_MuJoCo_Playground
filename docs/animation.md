@@ -29,17 +29,17 @@ uv run --extra cu128 ascento tools clip-motion -- captures/jump/take_000.npz \
 ## Build a Blender scene
 
 The description argument accepts the Ascento URDF, its extracted package
-directory, or a ZIP package. The optional warehouse is a separate Sketchfab
-asset and is not included in the repository; download it and pass its ZIP,
-package directory, or FBX explicitly with `--warehouse`:
+directory, or a ZIP package. The warehouse FBX package is vendored and is the
+default for `--warehouse`; its source and attribution are recorded beside the
+asset archive. A different FBX, package directory, or ZIP can still be passed
+explicitly:
 
 ```bash
 blender --background --python tools/blender/import_motion.py -- \
   --capture captures/jump/jump_short.npz \
   --description /path/to/ascento_description.zip \
-  --warehouse /path/to/warehouse_fbx_model_free.zip \
-  --output captures/blender/jump_short.blend \
-  --render-dir captures/blender/jump_short_frames
+  --output captures/blender/jump_short/scene.blend \
+  --video-output captures/blender/jump_short/render.mp4
 ```
 
 The importer evaluates the URDF joint tree, creates the visual meshes and
@@ -54,10 +54,9 @@ For a moving-camera sequence, add an ordered list of shot presets:
 blender --background --python tools/blender/import_motion.py -- \
   --capture captures/jump/jump_short.npz \
   --description /path/to/ascento_description.zip \
-  --warehouse /path/to/warehouse_fbx_model_free.zip \
-  --output captures/blender/jump_cinematic.blend \
+  --output captures/blender/jump_cinematic/scene.blend \
+  --video-output captures/blender/jump_cinematic/render.mp4 \
   --camera-shots low_front side_follow orbit \
-  --render-dir captures/blender/jump_cinematic_frames \
   --resolution 1920
 ```
 
@@ -68,10 +67,43 @@ is off by default and can be enabled with `--cinematic-dof` when camera shots
 are selected. At least one output frame is required for each selected shot.
 
 The warehouse model and required attribution details are documented in
-[`tools/blender/assets/README.md`](../tools/blender/assets/README.md). The
-archive is not vendored because the source requires an authenticated download.
-The Ascento robot description archive supplied with the local workspace remains
-an input asset and is not committed to the repository.
+[`tools/blender/assets/README.md`](../tools/blender/assets/README.md). Every
+scene gets a sibling `*.manifest.json` containing the source capture SHA-256,
+policy kind and checkpoint path/hash, robot-description and warehouse hashes,
+Blender/importer versions, render settings, output hashes, and status. A
+checkpointed capture without a recorded checkpoint hash must be rendered with
+`--checkpoint`; the importer verifies that file against any hash already in
+the capture. Zero-policy captures are explicitly recorded as such. Captures
+whose policy cannot be identified are rejected rather than silently rendered
+without checkpoint provenance.
+
+MP4 output uses Blender's FFmpeg support with MPEG-4/H.264. `--render-dir` can
+also write a PNG sequence; requesting both the PNG sequence and MP4 renders the
+animation twice. Keep the scene, manifest, video, and optional frames under
+`captures/blender` so the dashboard can serve them from the read-only WSL
+captures mount.
+
+When Blender is installed on Windows and the project/dashboard captures live
+in WSL, run the checked-in wrapper from this checkout. It invokes this
+checkout's importer and writes directly through the WSL UNC path into the
+Linux checkout's mounted captures directory:
+
+```powershell
+.\scripts\render_blender.ps1 `
+  -Capture '\\wsl.localhost\Ubuntu\root\Ascento_MuJoCo_Playground\captures\jump\take_000.npz' `
+  -Description 'C:\path\to\ascento_description.zip' `
+  -Name 'jump-take-000'
+```
+
+Set `ASCENTO_WSL_REPOSITORY` or pass `-WslRepository` when the Linux checkout
+is at another path. For a legacy capture that lacks checkpoint provenance,
+pass `-Checkpoint` with the checkpoint that generated it. The Ascento robot
+description archive remains a local input asset and is not committed.
+
+The Analyze page's Blender pipeline panel polls `GET /api/blender/renders` and
+plays MP4s or previews scenes from `captures/blender`. The dashboard container
+mounts `captures` read-only; Blender writes through the WSL host path and the
+dashboard only serves completed/partial artifacts and their manifests.
 
 ## Camera checks
 

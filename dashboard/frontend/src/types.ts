@@ -367,3 +367,34 @@ export type SystemStatus = {
   update_blockers?: string[]
   can_update?: boolean
 }
+
+export type BlenderRenderOutput = {
+  path?: string
+  url?: string | null
+  sha256?: string
+  size_bytes?: number
+  count?: number
+}
+
+export type BlenderRender = {
+  schema_version?: number
+  render_id?: string
+  status?: 'rendering' | 'complete' | 'failed' | string
+  created_at_utc?: string
+  manifest_path?: string
+  manifest_url?: string | null
+  inputs?: {
+    source_npz?: { path?: string; sha256?: string; task?: string | null; seed?: string | null }
+    policy_checkpoint?: { kind?: string; path?: string | null; sha256?: string | null; provenance?: string }
+  }
+  render?: {
+    fps?: number
+    resolution?: { width?: number; height?: number }
+  }
+  outputs?: {
+    blend?: BlenderRenderOutput
+    video?: BlenderRenderOutput | null
+    preview?: BlenderRenderOutput
+  }
+  error?: string
+}

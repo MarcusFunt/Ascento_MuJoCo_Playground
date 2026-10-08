@@ -1,5 +1,6 @@
 import type {
   Checkpoint,
+  BlenderRender,
   OverviewResponse,
   PolicyArchitecture,
   IntrospectionSchema,
@@ -26,6 +27,7 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
 }
 
 export const api = {
+  blenderRenders: () => fetchJson<{ renders: BlenderRender[]; root: string }>(`/api/blender/renders`),
   overview: () => fetchJson<OverviewResponse>('/api/overview'),
   runs: () => fetchJson<{ runs: RunIndexRow[] }>('/api/runs/index'),
   run: (id: string) => fetchJson<RunDetail>(`/api/runs/${id}`),

@@ -3,7 +3,8 @@
 The dashboard is a local control plane for artifact-backed RSL-RL/mjlab runs.
 It monitors existing artifacts, starts and stops managed runs, compares
 normalized telemetry, reports provenance and health, and can ask the guarded
-host supervisor to update the checkout.
+host supervisor to update the checkout. The Analyze page also shows Blender
+renders written under the mounted `captures/blender` directory.
 
 ## Pages and data semantics
 
@@ -71,9 +72,14 @@ human-oriented endpoint list is:
 | `GET` | `/api/runs/{id}/telemetry` | Normalized telemetry (`limit`, optional `max_points`) |
 | `GET` | `/api/runs/{id}/logs` | Bounded log tail |
 | `GET` | `/api/runs/{id}/logs/stream` | Live server-sent log stream |
+| `GET` | `/api/blender/renders` | Recent Blender render manifests and safe media URLs |
+| `GET` | `/api/blender/renders/files/{path}` | Serve `.blend`, `.mp4`, `.png`, or manifest files under `captures/blender` |
 
 The REST API does not expose evaluator or capture mutation. Use the CLI or MCP
 for those operations so all artifact handling follows the same project contract.
+Blender media routes are read-only and restricted to the mounted
+`captures/blender` tree; the host-side render wrapper writes to the WSL path,
+while the dashboard container keeps its capture mount read-only.
 
 ## Deliberately non-dashboard evidence
 

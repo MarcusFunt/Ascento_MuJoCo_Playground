@@ -181,8 +181,8 @@ class CinematicCameraTests(unittest.TestCase):
     self.assertIsNone(stage.parent)
     self.assertEqual(scene.render.engine, "CYCLES")
     self.assertEqual(
-      sum(obj.type == "LIGHT" and obj.name.startswith("Ascento_") for obj in scene.objects),
-      3,
+      sum(obj.type == "LIGHT" and obj.name.startswith("Ascento_Room_Light_") for obj in scene.objects),
+      6,
     )
     depsgraph = bpy.context.evaluated_depsgraph_get()
     corners = [

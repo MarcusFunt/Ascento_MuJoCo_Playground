@@ -1,0 +1,6 @@
+Environment asset: Warehouse FBX Model Free
+Creator: Nicholas-3D (Sketchfab username: Nicholas01)
+Source: https://sketchfab.com/3d-models/warehouse-fbx-model-free-daa7fd3ff88945298d00045ca40a4c03
+License: Creative Commons Attribution 4.0 (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+Changes: Scaled and imported into Blender, with the Ascento robot and cinematic lighting added.

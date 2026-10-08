@@ -219,6 +219,7 @@ def capture(
                     "fps": str(round(1.0 / base_env.step_dt)),
                     "physics_timestep_s": str(float(base_env.cfg.sim.mujoco.timestep)),
                     "policy_timestep_s": str(float(base_env.step_dt)),
+                    "policy_kind": "checkpoint" if checkpoint is not None else "zero_policy",
                     "checkpoint": str(checkpoint) if checkpoint is not None else "",
                     "model_sha256": checkpoint_hash,
                     "physics_profile": PHYSICS_PROFILE.name,
