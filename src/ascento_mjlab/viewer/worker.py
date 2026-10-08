@@ -30,6 +30,10 @@ from ascento_mjlab.evaluation.policy import RslRlPolicyAdapter
 from ascento_mjlab.geometry import projected_gravity_tilt
 from ascento_mjlab.mdp.jump import PHASE_FLIGHT
 from ascento_mjlab.physics import PHYSICS_PROFILE
+from ascento_mjlab.semantic_normalization import (
+    configure_model_normalizer_for_contract,
+    require_model_normalizer_contract,
+)
 from ascento_mjlab.structured_action import StructuredTargetAction
 
 from .attribution import explain_integrated_gradients, normalizer_mean_baseline
@@ -81,12 +85,15 @@ def _load_actor_transactionally(
     device: str,
 ) -> dict[str, Any]:
     """Load actor weights without leaving a rejected candidate partially applied."""
-    _preflight_checkpoint(checkpoint_path, canonical_env_cfg)
+    infos = _preflight_checkpoint(checkpoint_path, canonical_env_cfg)
     actor = runner.alg.get_policy()
-    previous_state = {
-        name: value.detach().clone() for name, value in actor.state_dict().items()
-    }
+    critic = runner.alg.critic
+    previous_normalizer = actor.obs_normalizer
+    previous_critic_normalizer = critic.obs_normalizer
+    previous_state = {name: value.detach().clone() for name, value in actor.state_dict().items()}
     try:
+        configure_model_normalizer_for_contract(actor, infos.get("normalizer_contract"))
+        configure_model_normalizer_for_contract(critic, infos.get("normalizer_contract"))
         infos = runner.load(
             str(checkpoint_path),
             load_cfg={"actor": True},
@@ -94,8 +101,12 @@ def _load_actor_transactionally(
             map_location=device,
         )
         require_current_checkpoint_contracts(infos, canonical_env_cfg)
+        require_model_normalizer_contract(infos, actor)
+        require_model_normalizer_contract(infos, critic)
     except Exception:
-        runner.alg.get_policy().load_state_dict(previous_state, strict=True)
+        actor.obs_normalizer = previous_normalizer
+        critic.obs_normalizer = previous_critic_normalizer
+        actor.load_state_dict(previous_state, strict=True)
         runner.alg.eval_mode()
         raise
     return infos
@@ -324,9 +335,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         succeeded = super()._execute_step()
         if succeeded and isinstance(self.policy, _ViewerPolicy):
             transition = (
-                self._transition_observer.latest
-                if self._transition_observer is not None
-                else None
+                self._transition_observer.latest if self._transition_observer is not None else None
             )
             frame = self.policy.complete_transition(transition)
             if frame is not None and self._replay_buffer is not None:
@@ -355,10 +364,14 @@ class _FollowViserPlayViewer(ViserPlayViewer):
             fall_boundary_rad=fall_boundary_rad,
         )
         if event_type is not None:
-            reason = "fallen termination term" if event_type == "fall" else (
-                "stability margin recovered and remained above 70% for 0.5 seconds"
+            reason = (
+                "fallen termination term"
+                if event_type == "fall"
+                else ("stability margin recovered and remained above 70% for 0.5 seconds")
             )
-            self._persist_capture(frame, event_type, reason, markers=self._event_detector.last_markers)
+            self._persist_capture(
+                frame, event_type, reason, markers=self._event_detector.last_markers
+            )
         if self._introspection_ipc is not None:
             if self._introspection_ipc.consume_manual_capture_request() is not None:
                 self._persist_capture(frame, "manual", "manual dashboard capture")
@@ -373,23 +386,27 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         result: dict[str, Any]
         try:
             if request.get("checkpoint") != frame.checkpoint:
-                raise ValueError("requested frame checkpoint is not the checkpoint currently loaded in the viewer")
+                raise ValueError(
+                    "requested frame checkpoint is not the checkpoint currently loaded in the viewer"
+                )
             baseline_kind = request.get("baseline_kind")
             if baseline_kind == "normalizer_mean":
                 baseline = normalizer_mean_baseline(self.policy.introspector.handles)
-                baseline_description = (
-                    "Raw input corresponding to normalized zero (the running mean when a normalizer exists; raw zero otherwise)."
-                )
+                baseline_description = "Raw input corresponding to normalized zero (the running mean when a normalizer exists; raw zero otherwise)."
             elif baseline_kind == "episode_start":
                 episode_id = request.get("episode_id")
                 baseline_values = self._episode_start_observations.get(int(episode_id))
                 if baseline_values is None:
-                    raise ValueError("this viewer no longer has the first observation for that episode")
+                    raise ValueError(
+                        "this viewer no longer has the first observation for that episode"
+                    )
                 baseline = baseline_values
                 baseline_description = "First actor observation captured in the selected episode."
             elif baseline_kind == "selected_frame":
                 baseline = request.get("baseline_raw")
-                baseline_description = str(request.get("baseline_description") or "Selected replay frame.")
+                baseline_description = str(
+                    request.get("baseline_description") or "Selected replay frame."
+                )
             else:
                 raise ValueError("unsupported Integrated Gradients baseline")
             explained = explain_integrated_gradients(
@@ -439,9 +456,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
         manager = getattr(self, "_ckpt_mgr", None)
         checkpoint = str(getattr(manager, "current_name", frame.checkpoint))
         schema = (
-            self._checkpoint_schema_provider()
-            if callable(self._checkpoint_schema_provider)
-            else {}
+            self._checkpoint_schema_provider() if callable(self._checkpoint_schema_provider) else {}
         )
         try:
             self._replay_recorder.persist(
@@ -490,9 +505,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
 
         episode_step = int(env.episode_length_buf[env_idx].item())
         previous_episode_step = self._diagnostic_prev_episode_step
-        reset_detected = (
-            previous_episode_step is not None and episode_step < previous_episode_step
-        )
+        reset_detected = previous_episode_step is not None and episode_step < previous_episode_step
 
         if (
             reset_detected
@@ -565,9 +578,7 @@ class _FollowViserPlayViewer(ViserPlayViewer):
 
         self._diagnostic_history["reward_rate"].append(reward_rate)
         self._diagnostic_history["tilt_deg"].append(tilt_deg)
-        self._diagnostic_history["confidence"].append(
-            self._diagnostic_smoothed_confidence * 100.0
-        )
+        self._diagnostic_history["confidence"].append(self._diagnostic_smoothed_confidence * 100.0)
 
         fallen = False
         try:
@@ -1011,8 +1022,13 @@ def run_viewer(
     viewer_id: str = "standalone",
     run_id: str | None = None,
     capture_dir: Path | None = None,
+    obstacle_mode: int | None = None,
 ) -> None:
     """Load one policy environment and serve the interactive Viser viewer."""
+    if obstacle_mode is not None:
+        if obstacle_mode not in (0, 1):
+            raise ValueError("obstacle_mode must be 0 or 1")
+        os.environ["ASCENTO_GENERALIST_OBSTACLE_MODE"] = str(obstacle_mode)
     configure_torch_backends()
     run_dir = run_dir.expanduser().resolve()
 
@@ -1068,7 +1084,9 @@ def run_viewer(
         checkpoint_path = run_dir / info.relative_path
         candidate_generation = policy_generation + 1
         actor = runner.alg.get_policy()
-        previous_state = {name: value.detach().clone() for name, value in actor.state_dict().items()}
+        previous_state = {
+            name: value.detach().clone() for name, value in actor.state_dict().items()
+        }
         previous_modes = tuple((module, module.training) for module in actor.modules())
         candidate_introspector: PolicyIntrospector | None = None
         try:
@@ -1234,6 +1252,12 @@ def main() -> None:
     parser.add_argument("--run-id")
     parser.add_argument("--capture-dir", type=Path)
     parser.add_argument(
+        "--obstacle-mode",
+        type=int,
+        choices=(0, 1),
+        help="explicit obstacle behavior command for the generalist task (default: 0)",
+    )
+    parser.add_argument(
         "--device",
         default="cuda:0" if torch.cuda.is_available() else "cpu",
     )
@@ -1254,6 +1278,7 @@ def main() -> None:
         viewer_id=args.viewer_id,
         run_id=args.run_id,
         capture_dir=args.capture_dir,
+        obstacle_mode=args.obstacle_mode,
     )
 
 

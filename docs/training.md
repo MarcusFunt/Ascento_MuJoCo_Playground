@@ -74,8 +74,10 @@ ascento evaluate compare <reference-evaluation> <candidate-evaluation> --json
 ```
 
 The anti-rocking reward keeps the action-rate term and adds state-weighted
-action second-difference and body-rocking terms. Their weight is highest only
-inside the settled-balance envelope, so recovery maneuvers remain available.
+action second-difference and body-rocking terms. In the quiet-balance task,
+their weight is highest inside the settled-balance envelope so recovery
+maneuvers remain available. Generalist locomotion adds a 0.20 minimum weight
+outside that envelope so these regularizers cannot disappear during motion.
 The [v1 offline calibration](../benchmarks/baselines/quiet_reward_calibration_v1.md)
 records the 79,999/oscillation-fixture separation used for the initial weights.
 
@@ -149,11 +151,13 @@ ascento evaluate compare <transfer-evaluation> <candidate-evaluation> --json
 
 RAI Institute's public [Roadrunner overview](https://rai-inst.com/resources/videos/meet-roadrunner-a-bipedal-wheeled-robot-for-multi-modal-locomotion/) describes one policy for side-by-side and in-line wheel driving, with several other behaviors also demonstrated zero-shot on hardware. RAI has not published the exact training stages or reward schedule. This task adapts the public shared-policy, multi-behavior approach; it is not a reproduction of Roadrunner's internal curriculum.
 
-`Ascento-Generalist-Locomotion-Flat` keeps the existing 41-value actor observation and six-action interface. It samples one policy across world-target travel, heading changes, settled stops, and mild push recovery:
+`Ascento-Generalist-Locomotion-Flat` keeps the existing 41-value actor observation and six-action interface. Its shared policy trains on three fixed environment cohorts:
 
-1. Sample short (0.15-0.35 m), medium (0.5-1.5 m), and long (2-3 m) target bands from the first rollout. Long-goal share starts at 10%, with 25% medium and 65% short goals.
-2. Keep all three bands and gate-like episodes present at every stage. Increase long-goal share to 25% and then 40% only after the gate-recovery and target-arrival Wilson lower-bound thresholds pass with at least 64 samples in each required slice.
-3. Gate-like exposure starts at 10% and ramps to a configurable 25% endpoint over 24,000 control steps. Regular episodes chain another stratified target after a 0.35 s settled stop. Gate-like episodes apply a 0.05-0.15 m/s planar push at 4 s, retarget 0.10-0.20 m forward at 9 s, and then hold the target.
+1. `precision_anchor` receives short (0.15-0.35 m) target-and-stop attempts. Its default allocation is 20%.
+2. `recovery_retarget_anchor` receives a planar push at 4 s, a 0.10-0.20 m forward retarget at 9 s, then holds the target. Its default allocation is 20%.
+3. `generalist_navigation` receives short, medium (0.5-1.5 m), and long (2-3 m) targets, chaining each waypoint after a 0.35 s settled stop. It receives the remaining 60% by default. Its long-goal share starts at 10%, with 25% medium and 65% short goals, and advances to 25% and then 40% only after recovery and navigation attempt evidence clears the configured Wilson lower-bound thresholds.
+
+Each environment retains its cohort across resets and navigation-stage changes. Thus the anchor floors remain present in every rollout; only navigation target difficulty changes. Set `ASCENTO_GENERALIST_PRECISION_ANCHOR_FRACTION=0.25` and `ASCENTO_GENERALIST_RECOVERY_RETARGET_ANCHOR_FRACTION=0.25` for the 50% total-anchor ablation. Fractions must be positive and sum to less than one. The old `ASCENTO_GENERALIST_GATE_LIKE_FRACTION` is accepted as a fallback for the recovery share, and the old start-fraction setting must match that fixed share.
 
 The separate task leaves `Ascento-Locomotion-Flat` and its task contract unchanged. Initialize only compatible actor weights and observation normalization from the existing gate-selected checkpoint; use a new critic, optimizer, and iteration count. Compare the transfer baseline and every candidate on `roadrunner_generalist_sequence_gate_v1`, which has the same 256 fixed settle/push/short-goal/stop scenarios and gates for both policies:
 
@@ -201,32 +205,51 @@ not a PPO tuning result.
 
 ### Generalist curriculum and drift-control pilots
 
-The generalist locomotion task now samples a stratified target-distance mixture
-throughout training: 15-35 cm short goals, 0.5-1.5 m medium goals, and 2-3 m
-long goals. Long-goal exposure starts at 10%; the short/medium/long shares are
-65/25/10 at stage 0, 50/25/25 at stage 1, and 35/25/40 at stage 2. The mix
-advances only after at least 64 completed episodes in each required slice and
-the 95% Wilson lower bounds clear the task thresholds: gate recovery >= 0.85
-and short-goal arrival >= 0.50 before stage 1; long-goal arrival >= 0.50 before
-stage 2. Gate-like episodes remain in the mix throughout. Their fraction starts
-at 10% and ramps to 25% by default. The frozen-normalizer 100-update pilot
-ended at about 11.5%; 25% is the configured endpoint. Set
-ASCENTO_GENERALIST_GATE_LIKE_FRACTION to compare a different endpoint, for
-example 0.40, while keeping the target mixture and PPO settings fixed. The
-long-goal stage and training recovery telemetry are provisional until the
-recovery lifecycle and slice-cohort issues below are corrected.
+The generalist locomotion task uses fixed, disjoint environment cohorts. The
+default allocation is 20% precision anchor, 20% recovery/retarget anchor, and
+60% generalist navigation; set both anchor variables to 0.25 for a 50% anchor
+arm. Navigation target bands are 15-35 cm short, 0.5-1.5 m medium, and 2-3 m
+long. Long-goal exposure starts at 10%; navigation short/medium/long shares are
+65/25/10 at stage 0, 50/25/25 at stage 1, and 35/25/40 at stage 2. Stage
+evidence uses recovery-anchor episode outcomes and navigation target attempts,
+never precision-anchor attempts. It requires at least 64 observations in the
+relevant windows and the 95% Wilson lower bounds: recovery >= 0.85 and short
+arrival >= 0.50 before stage 1; long arrival >= 0.50 before stage 2. Fixed
+cohort assignment does not change as those navigation stages advance.
 
 Managed training metrics expose curriculum step/progress, mixture stage and
-shares, sampled target-band counts, gate exposure, and provisional episode
-outcomes. Do not interpret the gate-recovery count as a valid success rate yet:
-retarget clears the recovery flag, then recovery tracking skips retargeted
-environments. Also, short/medium/long masks include gate-like episodes, so
-those outcome slices overlap; current telemetry does not separately measure
-push received, retarget, second-target arrival, settled stop, and post-arrival
-heading. These training measures need a lifecycle/cohort fix before they can
-show that each behavior was learned. The fixed-suite evaluator measures
-recovery independently. Reward weights remain unchanged until trustworthy
-outcome measures and the reward breakdown show a specific shaping gap.
+shares, sampled target-band counts, episode reliability by fixed cohort, and
+target-attempt outcomes by cohort and distance band. Gate recovery remains
+recorded through retarget, while pre-retarget recovery episodes are not counted
+as target arrivals.
+Per-episode counters distinguish push received, recovery, retarget, target
+arrivals, the post-retarget arrival, and settled stops; heading-error sums and
+sample counts are recorded at arrival and at the settled stop. These corrected
+signals apply to new runs. Older run records retain the telemetry generated by
+the earlier lifecycle and overlapping cohort masks and must not be used to
+retroactively claim those behaviors were learned. The fixed-suite evaluator
+measures recovery independently.
+
+The reward already has dense target proximity (weight 4.0), target heading
+(weight 1.0), yaw-rate tracking (weight 0.5), signed target progress (weight
+8.0), and near-target speed penalty (weight -2.0). The proximity term changes
+only slightly between 3.5 cm success and a 5 cm near miss, and it has no
+explicit settled-arrival event. Use the repaired short-goal and settled-stop
+metrics, plus per-term training reward breakdowns, to decide whether an
+arrival/settle bonus or a tighter post-arrival heading term is warranted. Keep
+each reward change in its own ablation and compare against the same actor-only
+transfer and fixed suite.
+
+Retention pilots identified a reward escape path: `settled_balance` multiplies
+tilt, speed, angular-rate, heading, height, and two-wheel support scores. When
+any factor falls, the action-second-difference and rocking penalties used the
+same product and nearly vanished, while target-progress reward remained active.
+The generalist task now sets `unsettled_penalty_floor=0.20` on those two terms.
+The quiet-balance task keeps the prior zero-floor behavior. This changes the
+reward contract to v5; new continuation runs must start from the selected
+actor-only transfer and be screened on the fixed suite, including the practical
+0.05 m target-error limit. The change is a corrective training hypothesis and
+has not yet been validated by a post-change training run.
 
 ASCENTO_GENERALIST_OPTIMIZER_PROFILE=default keeps the inherited 1e-4
 learning rate and 0.01 desired KL. The conservative profile uses a 3e-5 shared
@@ -439,3 +462,6 @@ ascento evaluate run --checkpoint <selected-checkpoint> --suite balance_gate_v5
 Use a new managed run for a material change in rewards, curriculum, seed,
 environment count, simulator, or source revision. Preserve lineage instead of
 overwriting prior evidence.
+## Guard generalist experiment controls
+
+The roadmap keeps `roadrunner_generalist_sequence_gate_v1` as the 256-scenario development screen and freezes `roadrunner_generalist_sequence_promotion_v1` as a separately seeded final promotion suite. Screen intermediate checkpoints only on development suites. Record the exact code commit, task/action/plant contracts, checkpoint SHA-256, suite-definition hash, and resolved-scenario hash for every arm. The selected actor-only transfer and current-code baseline report are frozen in `docs/experiments/ascento_guard_generalist_locomotion_v3.json`; promotion-suite results are reserved for the final checkpoint decision.

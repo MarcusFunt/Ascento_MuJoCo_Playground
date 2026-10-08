@@ -8,6 +8,7 @@ from copy import deepcopy
 from rsl_rl.models.mlp_model import MLPModel
 from tensordict import TensorDict
 
+from ascento_mjlab.semantic_normalization import semantic_model_class_name
 from ascento_mjlab.tasks.locomotion.rl_cfg import AscentoLocomotionRlCfg
 
 
@@ -38,18 +39,25 @@ class FrozenActorMLPModel(MLPModel):
 
 
 def configure_generalist_normalizer_profile(cfg, profile: str):
-    """Choose adaptive normalization or preserve the transferred actor statistics."""
+    """Choose adaptive, frozen, or semantic observation normalization."""
     if profile == "adaptive":
         cfg.actor.class_name = "MLPModel"
+        cfg.critic.class_name = "MLPModel"
         return cfg
     if profile == "frozen_transfer":
         if not cfg.actor.obs_normalization:
             raise ValueError("frozen-transfer normalizer profile requires actor normalization")
         cfg.actor.class_name = f"{__name__}:FrozenActorMLPModel"
+        cfg.critic.class_name = "MLPModel"
+        return cfg
+    if profile == "semantic_command":
+        class_name = semantic_model_class_name()
+        cfg.actor.class_name = class_name
+        cfg.critic.class_name = class_name
         return cfg
     raise ValueError(
         f"unknown generalist normalizer profile {profile!r}; "
-        "expected 'adaptive' or 'frozen_transfer'"
+        "expected 'adaptive', 'frozen_transfer', or 'semantic_command'"
     )
 
 

@@ -12,6 +12,7 @@ from ascento_mjlab.plant_contract import (
     robot_mjcf_sha256,
 )
 from ascento_mjlab.provenance_runner import AscentoProvenanceRunner
+from ascento_mjlab.semantic_normalization import model_normalizer_contract
 from ascento_mjlab.task_contract import current_task_contract, task_contracts_compatible
 
 
@@ -20,6 +21,7 @@ def _checkpoint_infos(cfg):
         "plant_contract": current_plant_contract(),
         "action_contract": current_action_contract(),
         "task_contract": current_task_contract(cfg),
+        "normalizer_contract": model_normalizer_contract(object()),
     }
 
 
@@ -32,6 +34,7 @@ def _resume_runner(cfg):
     )()
     runner.current_learning_iteration = 0
     runner.cfg = {"num_steps_per_env": 24}
+    runner.alg = type("Algorithm", (), {"actor": object(), "critic": object()})()
     return runner
 
 
@@ -58,7 +61,15 @@ def test_checkpoint_embeds_the_plant_contract_and_supports_safe_actor_transfer(
     )()
     runner.current_learning_iteration = 3
     runner.cfg = {"num_steps_per_env": 24, "upload_model": False}
-    runner.alg = type("Algorithm", (), {"save": lambda self: {"actor_state_dict": {}}})()
+    runner.alg = type(
+        "Algorithm",
+        (),
+        {
+            "actor": object(),
+            "critic": object(),
+            "save": lambda self: {"actor_state_dict": {}},
+        },
+    )()
     runner.logger = type("Logger", (), {})()
     path = tmp_path / "model.pt"
 
@@ -83,7 +94,10 @@ def test_checkpoint_embeds_the_plant_contract_and_supports_safe_actor_transfer(
     transfer_runner.alg = type(
         "Algorithm",
         (),
-        {"load": lambda self, state, load_cfg, strict: loaded.update(state)},
+        {
+            "actor": object(),
+            "load": lambda self, state, load_cfg, strict: loaded.update(state),
+        },
     )()
     original_load = torch.load
 
@@ -113,7 +127,15 @@ def test_viewer_checkpoint_save_uses_the_canonical_training_task_contract(tmp_pa
     )()
     runner.current_learning_iteration = 0
     runner.cfg = {"num_steps_per_env": 24, "upload_model": False}
-    runner.alg = type("Algorithm", (), {"save": lambda self: {"actor_state_dict": {}}})()
+    runner.alg = type(
+        "Algorithm",
+        (),
+        {
+            "actor": object(),
+            "critic": object(),
+            "save": lambda self: {"actor_state_dict": {}},
+        },
+    )()
     runner.logger = type("Logger", (), {})()
     path = tmp_path / "viewer-model.pt"
 

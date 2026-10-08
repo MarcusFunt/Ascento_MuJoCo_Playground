@@ -18,6 +18,8 @@ def test_checkpoint_save_is_published_atomically(monkeypatch, tmp_path):
     monkeypatch.setattr(MjlabOnPolicyRunner, "save", fake_base_save)
     monkeypatch.setattr(provenance, "current_plant_contract", lambda: {"plant": 1})
     monkeypatch.setattr(provenance, "current_action_contract", lambda: {"action": 1})
+    normalizer_contract = {"schema": "ascento_empirical_normalization/v1", "epsilon": 0.01}
+    monkeypatch.setattr(provenance, "model_normalizer_contract", lambda _model: normalizer_contract)
     monkeypatch.setattr(provenance, "canonical_task_cfg_for_runtime_cfg", lambda cfg: cfg)
     monkeypatch.setattr(
         provenance,
@@ -28,6 +30,7 @@ def test_checkpoint_save_is_published_atomically(monkeypatch, tmp_path):
     runner = object.__new__(provenance.AscentoProvenanceRunner)
     runner.cfg = {"upload_model": True}
     runner.current_learning_iteration = 42
+    runner.alg = SimpleNamespace(actor=object(), critic=object())
     runner.env = SimpleNamespace(unwrapped=SimpleNamespace(cfg=object()))
     runner.logger = SimpleNamespace(
         save_model=lambda path, iteration: uploaded.append((path, iteration))
@@ -42,6 +45,7 @@ def test_checkpoint_save_is_published_atomically(monkeypatch, tmp_path):
     assert writes[0][0].name.endswith(".tmp")
     assert not writes[0][0].exists()
     assert writes[0][1]["custom"] == "value"
+    assert writes[0][1]["normalizer_contract"] == normalizer_contract
     assert uploaded == [(str(target.resolve()), 42)]
     assert runner.cfg["upload_model"] is True
 
@@ -50,9 +54,7 @@ def test_environment_progress_reads_rollout_length_from_runner_config():
     runner = object.__new__(provenance.AscentoProvenanceRunner)
     runner.cfg = {"num_steps_per_env": 24}
     runner.current_learning_iteration = 5
-    runner.env = SimpleNamespace(
-        unwrapped=SimpleNamespace(common_step_counter=123)
-    )
+    runner.env = SimpleNamespace(unwrapped=SimpleNamespace(common_step_counter=123))
 
     progress = runner._environment_progress()
 

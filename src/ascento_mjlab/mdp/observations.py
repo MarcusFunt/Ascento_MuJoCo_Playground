@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import torch
@@ -30,9 +31,7 @@ def actuator_effort(env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg) -> torch.
     return asset.data.actuator_force[:, asset_cfg.actuator_ids]
 
 
-def world_target_error_body(
-    env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg
-) -> torch.Tensor:
+def world_target_error_body(env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     """Express the world-frame target displacement in the robot's yaw frame.
 
     The target remains an absolute, per-environment world coordinate. Rotating
@@ -54,9 +53,7 @@ def world_target_error_body(
     )
 
 
-def world_target_heading_error(
-    env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg
-) -> torch.Tensor:
+def world_target_heading_error(env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     """Return signed target-minus-current yaw error in the principal branch.
 
     The target is the robot's supported reset yaw, not a fixed global heading.
@@ -103,6 +100,34 @@ def motion_command(env: ManagerBasedRlEnv, command_name: str = "motion") -> torc
     command = env.command_manager.get_command(command_name)
     assert command is not None
     return command
+
+
+def obstacle_mode(env: ManagerBasedRlEnv) -> torch.Tensor:
+    """Return the fixed operator/task command that enables obstacle behavior.
+
+    The value is shared across environments for a play/evaluation process and
+    is configured with ``ASCENTO_GENERALIST_OBSTACLE_MODE``. Keeping the mode
+    value out of the task configuration preserves one topology for both modes.
+    """
+    configured = getattr(env, "ascento_obstacle_mode", None)
+    if configured is None:
+        raw_value = os.environ.get("ASCENTO_GENERALIST_OBSTACLE_MODE", "0").strip()
+        if raw_value not in ("0", "1"):
+            raise ValueError("ASCENTO_GENERALIST_OBSTACLE_MODE must be 0 or 1")
+        return torch.full((env.num_envs, 1), float(raw_value), device=env.device)
+
+    value = torch.as_tensor(configured, dtype=torch.float32, device=env.device)
+    if value.ndim == 0:
+        value = value.expand(env.num_envs).reshape(env.num_envs, 1)
+    elif value.shape == (env.num_envs,):
+        value = value.reshape(env.num_envs, 1)
+    elif value.shape != (env.num_envs, 1):
+        raise ValueError(
+            f"ascento_obstacle_mode must have shape ({env.num_envs},) or ({env.num_envs}, 1)"
+        )
+    if not torch.isfinite(value).all() or not torch.logical_or(value == 0, value == 1).all():
+        raise ValueError("ascento_obstacle_mode values must be 0 or 1")
+    return value
 
 
 def jump_state(env: ManagerBasedRlEnv) -> torch.Tensor:

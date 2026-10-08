@@ -32,6 +32,14 @@ def initialize_transfer(
 
     cfg = load_env_cfg(target_task, play=False)
     cfg.scene.num_envs = 1
+    sequence_cfg = cfg.events.get("repeated_random_world_targets")
+    if sequence_cfg is not None and {
+        "precision_anchor_fraction",
+        "recovery_retarget_anchor_fraction",
+    }.issubset(sequence_cfg.params):
+        # The task requires all fixed cohorts to exist, even though this probe
+        # only needs a tiny environment to construct the actor and copy weights.
+        cfg.scene.num_envs = 3
     env = RslRlVecEnvWrapper(
         ManagerBasedRlEnv(cfg, device=device), clip_actions=load_rl_cfg(target_task).clip_actions
     )

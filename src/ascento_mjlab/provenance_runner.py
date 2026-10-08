@@ -13,6 +13,12 @@ from mjlab.rl import MjlabOnPolicyRunner
 from .checkpoint_contract import require_current_checkpoint_contracts
 from .control_contract import current_action_contract, require_current_action_contract
 from .plant_contract import current_plant_contract, require_current_plant_contract
+from .retention_replay import (
+    canonical_sha256,
+    load_anchor_replay,
+    validate_anchor_replay_contract,
+)
+from .semantic_normalization import model_normalizer_contract, require_model_normalizer_contract
 from .task_contract import (
     canonical_task_cfg_for_runtime_cfg,
     classify_actor_transfer_compatibility,
@@ -24,6 +30,45 @@ _ENVIRONMENT_PROGRESS_SCHEMA_VERSION = 1
 
 class AscentoProvenanceRunner(MjlabOnPolicyRunner):
     """Persist the compiled simulation authority with all Ascento checkpoints."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        replay_path = os.environ.get("ASCENTO_GENERALIST_REFERENCE_REPLAY_PATH", "").strip()
+        coefficient = float(os.environ.get("ASCENTO_GENERALIST_REFERENCE_REPLAY_WEIGHT", "0"))
+        if not torch.isfinite(torch.tensor(coefficient)) or coefficient < 0.0:
+            raise ValueError(
+                "ASCENTO_GENERALIST_REFERENCE_REPLAY_WEIGHT must be finite and nonnegative"
+            )
+        if coefficient == 0.0:
+            return
+        if not replay_path:
+            raise ValueError(
+                "ASCENTO_GENERALIST_REFERENCE_REPLAY_PATH is required when replay weight is positive"
+            )
+        configure_replay = getattr(self.alg, "configure_anchor_replay", None)
+        if not callable(configure_replay):
+            raise TypeError("active PPO algorithm does not support actor reference replay")
+
+        contract_cfg = canonical_task_cfg_for_runtime_cfg(self.env.unwrapped.cfg)
+        task_contract = current_task_contract(contract_cfg)
+        actor_observation_contract = task_contract["topology"]["observations"]["actor"]
+        actor = self.alg.actor
+        action_dim = int(self.env.unwrapped.action_manager.total_action_dim)
+        dataset = load_anchor_replay(
+            replay_path,
+            expected_observation_dim=int(actor.obs_dim),
+            expected_action_dim=action_dim,
+        )
+        validate_anchor_replay_contract(
+            dataset.metadata,
+            actor_observation_contract_sha256=canonical_sha256(actor_observation_contract),
+            action_contract_sha256=canonical_sha256(current_action_contract()),
+            plant_contract_sha256=canonical_sha256(current_plant_contract()),
+            observation_dim=int(actor.obs_dim),
+            action_dim=action_dim,
+        )
+        batch_size = int(os.environ.get("ASCENTO_GENERALIST_REFERENCE_REPLAY_BATCH_SIZE", "256"))
+        configure_replay(dataset, coefficient=coefficient, batch_size=batch_size)
 
     def _num_steps_per_env(self) -> int:
         """Return rollout length across supported RSL-RL runner versions."""
@@ -43,11 +88,18 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
 
     def save(self, path: str, infos: dict[str, Any] | None = None) -> None:
         contract_cfg = canonical_task_cfg_for_runtime_cfg(self.env.unwrapped.cfg)
+        actor_normalizer_contract = model_normalizer_contract(self.alg.actor)
+        critic_normalizer_contract = model_normalizer_contract(self.alg.critic)
+        if actor_normalizer_contract != critic_normalizer_contract:
+            raise ValueError(
+                "actor and critic normalizer contracts must match in saved checkpoints"
+            )
         provenance = {
             **(infos or {}),
             "plant_contract": current_plant_contract(),
             "action_contract": current_action_contract(),
             "task_contract": current_task_contract(contract_cfg),
+            "normalizer_contract": actor_normalizer_contract,
             "environment_progress": self._environment_progress(),
         }
         target = Path(path).expanduser().resolve()
@@ -114,6 +166,8 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
         runtime_cfg = self.env.unwrapped.cfg
         contract_cfg = canonical_task_cfg_for_runtime_cfg(runtime_cfg)
         require_current_checkpoint_contracts(infos, contract_cfg)
+        require_model_normalizer_contract(infos, self.alg.actor)
+        require_model_normalizer_contract(infos, self.alg.critic)
         load_cfg = kwargs.get("load_cfg")
         if load_cfg is not None and not isinstance(load_cfg, dict):
             raise TypeError("load_cfg must be a mapping when provided")
@@ -140,6 +194,7 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
             raise ValueError("source checkpoint lacks provenance metadata")
         require_current_plant_contract(infos.get("plant_contract"))
         require_current_action_contract(infos.get("action_contract"))
+        require_model_normalizer_contract(infos, self.alg.actor)
         compatibility = classify_actor_transfer_compatibility(
             infos.get("task_contract"), current_task_contract(self.env.unwrapped.cfg)
         )

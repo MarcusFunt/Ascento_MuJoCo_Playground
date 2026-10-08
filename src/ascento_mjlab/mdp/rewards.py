@@ -19,6 +19,7 @@ from .events import (
     yaw_from_quaternion_wxyz,
 )
 from .metrics import controller_requested_effort
+from .observations import obstacle_mode
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -53,6 +54,25 @@ def height_tracking(
     asset: Entity = env.scene[asset_cfg.name]
     error = asset.data.root_link_pos_w[:, 2] - target
     return torch.exp(-torch.square(error) / (std * std))
+
+
+def mode_conditioned_height_tracking(
+    env: ManagerBasedRlEnv,
+    target: float = 0.75,
+    std: float = 0.08,
+    obstacle_height_tolerance_m: float = 0.10,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Use a fixed target in normal mode and a safe height band in obstacle mode."""
+    if obstacle_height_tolerance_m < 0.0:
+        raise ValueError("obstacle_height_tolerance_m must be nonnegative")
+    fixed_height_score = height_tracking(env, target=target, std=std, asset_cfg=asset_cfg)
+    asset: Entity = env.scene[asset_cfg.name]
+    height_error = torch.abs(asset.data.root_link_pos_w[:, 2] - float(target))
+    range_violation = torch.relu(height_error - float(obstacle_height_tolerance_m))
+    obstacle_height_score = torch.exp(-torch.square(range_violation) / (std * std))
+    mode = obstacle_mode(env).reshape(-1) > 0.5
+    return torch.where(mode, obstacle_height_score, fixed_height_score)
 
 
 def commanded_height_tracking(
@@ -143,6 +163,115 @@ def world_target_speed_penalty(
     return near_target * speed_sq / (speed_scale * speed_scale)
 
 
+class GeneralistTargetArrivalSettledStopBonus:
+    """Pay once per tracked target after arrival and a settled dwell.
+
+    The return is an impulse with unit area before its configured weight is
+    applied. Attempt IDs make the latch exact even if two consecutive targets
+    happen to share the same coordinates.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+        del cfg
+        self._settled_time_s = torch.zeros(env.num_envs, device=env.device)
+        self._rewarded = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        self._last_attempt_id = torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device)
+        self._last_target_xy = world_target_xy(env).clone()
+        self._last_target_yaw = world_target_yaw(env).clone()
+
+    def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+        if env_ids is None:
+            env_ids = slice(None)
+        self._settled_time_s[env_ids] = 0.0
+        self._rewarded[env_ids] = False
+        self._last_attempt_id[env_ids] = -1
+
+    def __call__(
+        self,
+        env: ManagerBasedRlEnv,
+        hold_s: float = 0.35,
+        target_reached_distance_m: float = 0.035,
+        target_height_m: float = 0.75,
+        height_tolerance_m: float = 0.05,
+        max_tilt_rad: float = 0.08,
+        max_planar_speed_mps: float = 0.10,
+        max_angular_xy_radps: float = 0.25,
+        max_yaw_rate_radps: float = 0.25,
+        max_heading_error_rad: float = 0.15,
+        asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    ) -> torch.Tensor:
+        if hold_s <= 0.0 or target_reached_distance_m <= 0.0:
+            raise ValueError("hold_s and target_reached_distance_m must be positive")
+        if env.step_dt <= 0.0:
+            raise ValueError("env.step_dt must be positive")
+
+        asset: Entity = env.scene[asset_cfg.name]
+        target_xy = world_target_xy(env)
+        target_yaw = world_target_yaw(env)
+        metrics = getattr(env, "ascento_generalist_episode_metrics", None)
+        attempt_ids = metrics.get("attempt_id") if isinstance(metrics, dict) else None
+        if (
+            isinstance(attempt_ids, torch.Tensor)
+            and attempt_ids.shape == self._last_attempt_id.shape
+        ):
+            attempt_ids = attempt_ids.to(device=env.device, dtype=torch.long)
+            attempt_changed = attempt_ids != self._last_attempt_id
+            has_attempt = attempt_ids >= 0
+            self._last_attempt_id.copy_(attempt_ids)
+        else:
+            target_changed = (
+                torch.linalg.vector_norm(target_xy - self._last_target_xy, dim=1) > 1.0e-6
+            )
+            target_changed |= (
+                wrapped_angle_difference(target_yaw, self._last_target_yaw).abs() > 1.0e-6
+            )
+            attempt_changed = target_changed
+            has_attempt = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
+        self._last_target_xy.copy_(target_xy)
+        self._last_target_yaw.copy_(target_yaw)
+        self._settled_time_s[attempt_changed] = 0.0
+        self._rewarded[attempt_changed] = False
+
+        position_error = torch.linalg.vector_norm(
+            asset.data.root_link_pos_w[:, :2] - target_xy, dim=1
+        )
+        tilt = projected_gravity_tilt(asset.data.projected_gravity_b)
+        planar_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_b[:, :2], dim=1)
+        angular_xy = torch.linalg.vector_norm(asset.data.root_link_ang_vel_b[:, :2], dim=1)
+        yaw_rate = asset.data.root_link_ang_vel_b[:, 2].abs()
+        height_error = (asset.data.root_link_pos_w[:, 2] - target_height_m).abs()
+        current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
+        heading_error = wrapped_angle_difference(target_yaw, current_yaw).abs()
+
+        left = env.scene["left_wheel_contact"].data.found
+        right = env.scene["right_wheel_contact"].data.found
+        assert left is not None and right is not None
+        both_supported = left.flatten(start_dim=1).any(dim=1) & right.flatten(start_dim=1).any(
+            dim=1
+        )
+        settled = (
+            (tilt <= max_tilt_rad)
+            & (planar_speed <= max_planar_speed_mps)
+            & (angular_xy <= max_angular_xy_radps)
+            & (yaw_rate <= max_yaw_rate_radps)
+            & (height_error <= height_tolerance_m)
+            & (heading_error <= max_heading_error_rad)
+            & both_supported
+            & (position_error <= target_reached_distance_m)
+            & has_attempt
+        )
+        self._settled_time_s.copy_(
+            torch.where(
+                settled,
+                self._settled_time_s + float(env.step_dt),
+                torch.zeros_like(self._settled_time_s),
+            )
+        )
+        newly_completed = settled & ~self._rewarded & (self._settled_time_s >= hold_s)
+        self._rewarded |= newly_completed
+        return newly_completed.to(dtype=asset.data.root_link_pos_w.dtype) / float(env.step_dt)
+
+
 def world_target_heading(
     env: ManagerBasedRlEnv,
     std: float = 0.35,
@@ -223,6 +352,22 @@ def leg_pose_symmetry_penalty(
     return torch.mean(huber, dim=1)
 
 
+def mode_conditioned_leg_pose_symmetry_penalty(
+    env: ManagerBasedRlEnv,
+    beta: float = 0.15,
+    joint_pairs: tuple[tuple[str, str], ...] = (
+        ("left_hip", "right_hip"),
+        ("left_knee", "right_knee"),
+    ),
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Retain the symmetry prior in normal mode and remove it in obstacle mode."""
+    penalty = leg_pose_symmetry_penalty(
+        env, beta=beta, joint_pairs=joint_pairs, asset_cfg=asset_cfg
+    )
+    return penalty * (~(obstacle_mode(env).reshape(-1) > 0.5)).to(penalty.dtype)
+
+
 def leg_pose_hold_penalty(
     env: ManagerBasedRlEnv,
     target: float = -math.pi,
@@ -245,9 +390,24 @@ def leg_pose_hold_penalty(
     return torch.mean(torch.square(error) / (std * std), dim=1)
 
 
+def mode_conditioned_leg_pose_hold_penalty(
+    env: ManagerBasedRlEnv,
+    target: float = -math.pi,
+    std: float = 0.35,
+    joint_names: tuple[str, ...] = ("left_hip", "left_knee", "right_hip", "right_knee"),
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Keep nominal leg posture pressure in normal mode, remove it in obstacle mode."""
+    penalty = leg_pose_hold_penalty(
+        env, target=target, std=std, joint_names=joint_names, asset_cfg=asset_cfg
+    )
+    return penalty * (~(obstacle_mode(env).reshape(-1) > 0.5)).to(penalty.dtype)
+
+
 def settled_balance(
     env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    obstacle_height_tolerance_m: float | None = None,
 ) -> torch.Tensor:
     """Reward the same low-motion, supported state required by the balance gate."""
     asset: Entity = env.scene[asset_cfg.name]
@@ -256,7 +416,8 @@ def settled_balance(
     angular_speed_sq = torch.sum(torch.square(asset.data.root_link_ang_vel_b), dim=1)
     current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
     heading_error_sq = torch.square(wrapped_angle_difference(world_target_yaw(env), current_yaw))
-    height_error_sq = torch.square(asset.data.root_link_pos_w[:, 2] - 0.75)
+    height_error = asset.data.root_link_pos_w[:, 2] - 0.75
+    height_error_sq = torch.square(height_error)
     left = env.scene["left_wheel_contact"].data.found
     right = env.scene["right_wheel_contact"].data.found
     assert left is not None and right is not None
@@ -265,7 +426,17 @@ def settled_balance(
     score *= torch.exp(-planar_speed_sq / 0.10**2)
     score *= torch.exp(-angular_speed_sq / 0.25**2)
     score *= torch.exp(-heading_error_sq / 0.35**2)
-    score *= torch.exp(-height_error_sq / 0.05**2)
+    fixed_height_factor = torch.exp(-height_error_sq / 0.05**2)
+    if obstacle_height_tolerance_m is not None:
+        if not math.isfinite(obstacle_height_tolerance_m) or obstacle_height_tolerance_m < 0.0:
+            raise ValueError("obstacle_height_tolerance_m must be finite and nonnegative")
+        range_violation = torch.relu(torch.abs(height_error) - float(obstacle_height_tolerance_m))
+        obstacle_height_factor = torch.exp(-torch.square(range_violation) / 0.05**2)
+        mode = obstacle_mode(env).reshape(-1) > 0.5
+        height_factor = torch.where(mode, obstacle_height_factor, fixed_height_factor)
+    else:
+        height_factor = fixed_height_factor
+    score *= height_factor
     return score * supported.float()
 
 
@@ -319,28 +490,32 @@ def settled_action_second_difference_penalty(
     env: ManagerBasedRlEnv,
     reference_dt: float = 0.01,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    unsettled_penalty_floor: float = 0.0,
 ) -> torch.Tensor:
-    """Penalize alternating actions only after the robot has reached equilibrium.
+    """Penalize alternating actions, with an optional floor outside equilibrium.
 
     A first-order action-rate cost cannot distinguish a smooth correction from
     an A-B-A-B command sequence with the same average action.  The discrete
-    second difference exposes that alternating component.  Multiplying it by
-    :func:`settled_balance` leaves genuine disturbance recovery largely
-    unregularized: tilt, translational speed, angular speed, target-heading
-    error, height error, or loss of wheel support all reduce the penalty.
+    second difference exposes that alternating component.  The settled score
+    still controls most of the penalty, while ``unsettled_penalty_floor`` keeps
+    it from disappearing completely during motion or recovery.
     """
     if reference_dt <= 0.0 or env.step_dt <= 0.0:
         raise ValueError("time steps must be positive")
+    if (
+        not math.isfinite(unsettled_penalty_floor)
+        or not 0.0 <= unsettled_penalty_floor <= 1.0
+    ):
+        raise ValueError("unsettled_penalty_floor must lie in [0, 1]")
     acceleration = (
         env.action_manager.action
         - 2.0 * env.action_manager.prev_action
         + env.action_manager.prev_prev_action
     )
     scaled_acceleration = acceleration * (reference_dt / float(env.step_dt)) ** 2
-    return settled_balance(env, asset_cfg=asset_cfg) * torch.mean(
-        torch.square(scaled_acceleration), dim=1
-    )
-
+    settled_score = settled_balance(env, asset_cfg=asset_cfg)
+    penalty_scale = unsettled_penalty_floor + (1.0 - unsettled_penalty_floor) * settled_score
+    return penalty_scale * torch.mean(torch.square(scaled_acceleration), dim=1)
 
 
 class SettledHighFrequencyActionPowerPenalty:
@@ -358,9 +533,7 @@ class SettledHighFrequencyActionPowerPenalty:
         self._high_frequency_power_sum = torch.zeros(
             env.num_envs, dtype=actions.dtype, device=env.device
         )
-        self._stationary_count = torch.zeros(
-            env.num_envs, dtype=actions.dtype, device=env.device
-        )
+        self._stationary_count = torch.zeros(env.num_envs, dtype=actions.dtype, device=env.device)
 
     def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
         if env_ids is None:
@@ -382,27 +555,17 @@ class SettledHighFrequencyActionPowerPenalty:
 
         asset: Entity = env.scene[asset_cfg.name]
         tilt = projected_gravity_tilt(asset.data.projected_gravity_b)
-        planar_speed = torch.linalg.vector_norm(
-            asset.data.root_link_lin_vel_w[:, :2], dim=1
-        )
-        height_error = torch.abs(
-            asset.data.root_link_pos_w[:, 2] - float(target_height)
-        )
-        angular_xy = torch.linalg.vector_norm(
-            asset.data.root_link_ang_vel_b[:, :2], dim=1
-        )
+        planar_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_w[:, :2], dim=1)
+        height_error = torch.abs(asset.data.root_link_pos_w[:, 2] - float(target_height))
+        angular_xy = torch.linalg.vector_norm(asset.data.root_link_ang_vel_b[:, :2], dim=1)
         yaw_rate = torch.abs(asset.data.root_link_ang_vel_b[:, 2])
         current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
-        heading_error = torch.abs(
-            wrapped_angle_difference(world_target_yaw(env), current_yaw)
-        )
+        heading_error = torch.abs(wrapped_angle_difference(world_target_yaw(env), current_yaw))
 
         left = env.scene["left_wheel_contact"].data.found
         right = env.scene["right_wheel_contact"].data.found
         assert left is not None and right is not None
-        supported = left.flatten(start_dim=1).any(dim=1) & right.flatten(
-            start_dim=1
-        ).any(dim=1)
+        supported = left.flatten(start_dim=1).any(dim=1) & right.flatten(start_dim=1).any(dim=1)
         stationary = (
             (tilt <= 0.08)
             & (planar_speed <= 0.10)
@@ -414,27 +577,18 @@ class SettledHighFrequencyActionPowerPenalty:
         )
 
         actions = env.action_manager.action
-        alpha = float(
-            env.step_dt
-            / (env.step_dt + 1.0 / (2.0 * math.pi * float(cutoff_hz)))
-        )
+        alpha = float(env.step_dt / (env.step_dt + 1.0 / (2.0 * math.pi * float(cutoff_hz))))
         candidate_low_pass = self._low_pass + alpha * (actions - self._low_pass)
-        self._low_pass.copy_(
-            torch.where(stationary[:, None], candidate_low_pass, self._low_pass)
-        )
+        self._low_pass.copy_(torch.where(stationary[:, None], candidate_low_pass, self._low_pass))
         high_pass = actions - self._low_pass
 
         stationary_weight = stationary.to(dtype=actions.dtype)
-        self._high_frequency_power_sum.add_(
-            high_pass.square().mean(dim=1) * stationary_weight
-        )
+        self._high_frequency_power_sum.add_(high_pass.square().mean(dim=1) * stationary_weight)
         self._stationary_count.add_(stationary_weight)
 
         count = self._stationary_count.clamp_min(1.0)
         reference_normalized_power = (
-            self._high_frequency_power_sum
-            / count
-            / float(reference_action_power)
+            self._high_frequency_power_sum / count / float(reference_action_power)
         )
         ready = stationary & (self._stationary_count >= 20.0)
         return torch.where(
@@ -445,11 +599,19 @@ class SettledHighFrequencyActionPowerPenalty:
 def settled_body_rocking_penalty(
     env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    unsettled_penalty_floor: float = 0.0,
 ) -> torch.Tensor:
-    """Penalize roll/pitch rocking only in the supported, near-static state."""
+    """Penalize roll/pitch rocking, with an optional floor outside equilibrium."""
+    if (
+        not math.isfinite(unsettled_penalty_floor)
+        or not 0.0 <= unsettled_penalty_floor <= 1.0
+    ):
+        raise ValueError("unsettled_penalty_floor must lie in [0, 1]")
     asset: Entity = env.scene[asset_cfg.name]
     rocking_energy = torch.mean(torch.square(asset.data.root_link_ang_vel_b[:, :2]), dim=1)
-    return settled_balance(env, asset_cfg=asset_cfg) * rocking_energy
+    settled_score = settled_balance(env, asset_cfg=asset_cfg)
+    penalty_scale = unsettled_penalty_floor + (1.0 - unsettled_penalty_floor) * settled_score
+    return penalty_scale * rocking_energy
 
 
 def track_velocity(

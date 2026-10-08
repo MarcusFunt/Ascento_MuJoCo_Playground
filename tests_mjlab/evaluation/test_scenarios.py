@@ -116,3 +116,31 @@ def test_specialist_suites_cover_binary_hold_and_shaping_metrics():
     } <= jump_metrics
     assert "shaping_reward_abs_mean" in recovery_metrics
     assert "shaping_reward_abs_mean" in jump_metrics
+
+
+def test_guard_morphology_baseline_suite_covers_precision_recovery_medium_and_long():
+    suite = load_suite(Path("benchmarks/suites/guard_generalist_morphology_baseline_v1.toml"))
+    scenarios = materialize_suite(suite, step_dt=0.02)
+
+    assert suite.task == "Ascento-Generalist-Locomotion-Flat"
+    assert not suite.gates
+    assert len(scenarios) == 256
+    families = {scenario.family for scenario in scenarios}
+    assert families == {
+        "flat_precision",
+        "push_recovery_retarget",
+        "medium_target",
+        "long_target",
+    }
+    by_family = {
+        name: [scenario for scenario in scenarios if scenario.family == name] for name in families
+    }
+    assert {len(items) for items in by_family.values()} == {64}
+    command_offsets = {name: items[0].commands[0].values[0] for name, items in by_family.items()}
+    assert command_offsets == {
+        "flat_precision": 0.15,
+        "push_recovery_retarget": 0.15,
+        "medium_target": 0.75,
+        "long_target": 2.5,
+    }
+    assert by_family["push_recovery_retarget"][0].disturbances[0].equivalent_delta_v == 0.05

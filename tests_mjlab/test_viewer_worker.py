@@ -10,7 +10,8 @@ import ascento_mjlab.viewer.worker as worker
 
 class _FakeAlg:
     def __init__(self):
-        self.actor = torch.nn.Linear(1, 1, bias=False)
+        self.actor = _FakeModel()
+        self.critic = _FakeModel()
         with torch.no_grad():
             self.actor.weight.fill_(1.0)
 
@@ -19,6 +20,13 @@ class _FakeAlg:
 
     def eval_mode(self):
         self.actor.eval()
+
+
+class _FakeModel(torch.nn.Linear):
+    def __init__(self):
+        super().__init__(1, 1, bias=False)
+        self.obs_dim = 1
+        self.obs_normalizer = None
 
 
 class _FakeRunner:

@@ -29,6 +29,10 @@ from ascento_mjlab.mdp.events import (
 from ascento_mjlab.mdp.metrics import controller_requested_effort
 from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
 from ascento_mjlab.plant_contract import current_plant_contract
+from ascento_mjlab.semantic_normalization import (
+    configure_rl_cfg_for_normalizer_contract,
+    require_model_normalizer_contract,
+)
 from ascento_mjlab.task_contract import current_task_contract
 
 from .policy import RslRlPolicyAdapter
@@ -266,11 +270,11 @@ def _apply_commands(
     ]
     if target_updates:
         _apply_world_target_offset(base_env, target_updates)
-    target_commanded = torch.zeros(
-        base_env.num_envs, dtype=torch.bool, device=base_env.device
-    )
+    target_commanded = torch.zeros(base_env.num_envs, dtype=torch.bool, device=base_env.device)
     if target_updates:
-        target_commanded[torch.tensor([env_id for env_id, _ in target_updates], device=base_env.device)] = True
+        target_commanded[
+            torch.tensor([env_id for env_id, _ in target_updates], device=base_env.device)
+        ] = True
     for name, updates in _command_values_for_step(scenarios, step).items():
         if name == "world_target_offset":
             continue
@@ -439,6 +443,10 @@ def _create_runtime(
     base_env = ManagerBasedRlEnv(cfg, device=device, render_mode=None)
     try:
         agent_cfg = load_rl_cfg(task)
+        payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+        infos = payload.get("infos") if isinstance(payload, dict) else None
+        normalizer_contract = infos.get("normalizer_contract") if isinstance(infos, dict) else None
+        configure_rl_cfg_for_normalizer_contract(agent_cfg, normalizer_contract)
         env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
         # Task registration selects HorizonCurriculumRunner for *training*.
         # Evaluations hold completed slots rather than resetting them, so that
@@ -459,6 +467,8 @@ def _create_runtime(
             checkpoint_infos.get("task_contract") if isinstance(checkpoint_infos, dict) else None
         )
         require_current_checkpoint_contracts(checkpoint_infos, contract_cfg)
+        require_model_normalizer_contract(checkpoint_infos, runner.alg.actor)
+        require_model_normalizer_contract(checkpoint_infos, runner.alg.critic)
         return _EvaluationRuntime(
             base_env=base_env,
             env=env,
@@ -484,6 +494,7 @@ def _run_batch(
     deterministic: bool,
     plant_effort_limit: float,
     runtime: _EvaluationRuntime | None = None,
+    replay_recorder: Any | None = None,
 ) -> tuple[list[EpisodeResult], dict[str, Any]]:
     if not scenarios:
         return [], {}
@@ -527,6 +538,8 @@ def _run_batch(
         device=dev,
     )
     termination_reason = [""] * count
+    reward_term_names = list(base_env.reward_manager.active_terms)
+    reward_term_integrals = torch.zeros((count, len(reward_term_names)), device=dev)
 
     sum_tilt = torch.zeros(count, device=dev)
     sum_tilt_sq = torch.zeros(count, device=dev)
@@ -567,11 +580,29 @@ def _run_batch(
     request_count = torch.zeros(count, device=dev)
     support_count = torch.zeros(count, device=dev)
     airborne_count = torch.zeros(count, device=dev)
+    left_only_contact_count = torch.zeros(count, device=dev)
+    right_only_contact_count = torch.zeros(count, device=dev)
+    single_wheel_support_run_s = torch.zeros(count, device=dev)
+    max_single_wheel_support_s = torch.zeros(count, device=dev)
+    wheel_contact_transition_count = torch.zeros(count, device=dev)
+    previous_left_contact = torch.zeros(count, dtype=torch.bool, device=dev)
+    previous_right_contact = torch.zeros(count, dtype=torch.bool, device=dev)
+    has_previous_contact_sample = torch.zeros(count, dtype=torch.bool, device=dev)
     path_length = torch.zeros(count, device=dev)
     sum_velocity_tracking_sq = torch.zeros(count, device=dev)
     sum_height_tracking_sq = torch.zeros(count, device=dev)
     sum_hip_mismatch_sq = torch.zeros(count, device=dev)
     sum_knee_mismatch_sq = torch.zeros(count, device=dev)
+    sum_leg_pose_asymmetry_sq = torch.zeros(count, device=dev)
+    leg_pose_asymmetry_trace = torch.full(
+        (count, max_horizon), float("nan"), dtype=torch.float32, device=dev
+    )
+    sum_leg_target_offset_sq = torch.zeros(count, device=dev)
+    leg_target_offset_count = torch.zeros(count, device=dev)
+    sum_leg_target_rate_sq = torch.zeros(count, device=dev)
+    leg_target_rate_count = torch.zeros(count, device=dev)
+    previous_leg_targets = torch.zeros((count, 4), device=dev)
+    leg_target_history_count = torch.zeros(count, device=dev)
     recovery_stable_count = torch.zeros(count, dtype=torch.long, device=dev)
     recovery_success = torch.zeros(count, dtype=torch.bool, device=dev)
     recovery_from_start_s = torch.full((count,), float("nan"), device=dev)
@@ -697,6 +728,14 @@ def _run_batch(
             raw_action = policy.act(observations)
             if not torch.isfinite(raw_action).all():
                 raise RuntimeError("Policy emitted NaN/Inf action during evaluation")
+            if replay_recorder is not None:
+                replay_recorder.record(
+                    observations=observations["actor"],
+                    teacher_actions=raw_action,
+                    scenarios=scenarios,
+                    step=step,
+                    active=active,
+                )
 
             clip_limit = float(agent_cfg.clip_actions)
             clipped_fraction = (torch.abs(raw_action) > clip_limit).float().mean(dim=-1)
@@ -720,6 +759,26 @@ def _run_batch(
             _, step_rewards, dones, _ = env.step(action)
 
             robot = base_env.scene["robot"]
+            structured_action = base_env.action_manager.get_term("targets")
+            leg_targets = structured_action.position_targets
+            leg_joint_order = (
+                joint_indices["left_hip"],
+                joint_indices["left_knee"],
+                joint_indices["right_hip"],
+                joint_indices["right_knee"],
+            )
+            nominal_leg_position = robot.data.default_joint_pos[:, leg_joint_order]
+            leg_target_offset = leg_targets - nominal_leg_position
+            leg_target_offset_sq = leg_target_offset.square().mean(dim=1)
+            has_previous_leg_target = active & (leg_target_history_count > 0.0)
+            leg_target_rate = (leg_targets - previous_leg_targets) / step_dt
+            leg_target_rate_sq = leg_target_rate.square().mean(dim=1)
+            sum_leg_target_offset_sq += leg_target_offset_sq * active.float()
+            leg_target_offset_count += active.float()
+            sum_leg_target_rate_sq += leg_target_rate_sq * has_previous_leg_target.float()
+            leg_target_rate_count += has_previous_leg_target.float()
+            previous_leg_targets = torch.where(active[:, None], leg_targets, previous_leg_targets)
+            leg_target_history_count += active.float()
             gravity_xy = torch.linalg.vector_norm(robot.data.projected_gravity_b[:, :2], dim=1)
             tilt = torch.atan2(
                 gravity_xy,
@@ -754,6 +813,13 @@ def _run_batch(
                 robot.data.joint_pos[:, joint_indices["left_knee"]]
                 - robot.data.joint_pos[:, joint_indices["right_knee"]]
             )
+            leg_pose_asymmetry = torch.sqrt(0.5 * (hip_mismatch.square() + knee_mismatch.square()))
+            sum_leg_pose_asymmetry_sq += leg_pose_asymmetry.square() * active.float()
+            leg_pose_asymmetry_trace[:, step] = torch.where(
+                active,
+                leg_pose_asymmetry,
+                torch.full_like(leg_pose_asymmetry, float("nan")),
+            )
             xy = robot.data.root_link_pos_w[:, :2]
             target_error = torch.linalg.vector_norm(xy - world_target_xy(base_env), dim=1)
             current_yaw = yaw_from_quaternion_wxyz(robot.data.root_link_quat_w)
@@ -771,6 +837,28 @@ def _run_batch(
             right = right_data.flatten(start_dim=1).any(dim=1)
             both_supported = left & right
             airborne = ~left & ~right
+            left_only = left & ~right
+            right_only = right & ~left
+            single_wheel_support = left_only | right_only
+            wheel_contact_transition = (
+                ((left != previous_left_contact) | (right != previous_right_contact))
+                & active
+                & has_previous_contact_sample
+            )
+            wheel_contact_transition_count += wheel_contact_transition.float()
+            previous_left_contact = torch.where(active, left, previous_left_contact)
+            previous_right_contact = torch.where(active, right, previous_right_contact)
+            has_previous_contact_sample |= active
+            single_wheel_support_run_s = torch.where(
+                active & single_wheel_support,
+                single_wheel_support_run_s + step_dt,
+                torch.where(
+                    active, torch.zeros_like(single_wheel_support_run_s), single_wheel_support_run_s
+                ),
+            )
+            max_single_wheel_support_s = torch.maximum(
+                max_single_wheel_support_s, single_wheel_support_run_s
+            )
 
             newly_target_arrived = (
                 active & target_commanded & ~target_arrived & (target_error <= 0.035)
@@ -841,18 +929,31 @@ def _run_batch(
             )
             angular_xy_components = robot.data.root_link_ang_vel_b[:, :2]
             reversals = (
-                (angular_xy_components * previous_angular_xy < 0.0)
-                & (torch.minimum(angular_xy_components.abs(), previous_angular_xy.abs()) >= 0.005)
-            ).float().sum(dim=1)
+                (
+                    (angular_xy_components * previous_angular_xy < 0.0)
+                    & (
+                        torch.minimum(angular_xy_components.abs(), previous_angular_xy.abs())
+                        >= 0.005
+                    )
+                )
+                .float()
+                .sum(dim=1)
+            )
 
             weight = active.float()
             sum_reward += step_rewards * weight
             reward_step_values = getattr(base_env.reward_manager, "_step_reward", None)
             if isinstance(reward_step_values, torch.Tensor):
-                term_names = list(base_env.reward_manager.active_terms)
+                if reward_step_values.shape != reward_term_integrals.shape:
+                    raise RuntimeError(
+                        "reward manager term shape changed during evaluation: "
+                        f"{tuple(reward_step_values.shape)} != {tuple(reward_term_integrals.shape)}"
+                    )
+                reward_term_integrals.add_(reward_step_values * weight[:, None] * step_dt)
+            if isinstance(reward_step_values, torch.Tensor):
                 shaping_mask = [
                     index
-                    for index, name in enumerate(term_names)
+                    for index, name in enumerate(reward_term_names)
                     if name in {"recovery_dwell", "post_landing_stability"}
                 ]
                 if shaping_mask:
@@ -903,6 +1004,8 @@ def _run_batch(
             request_count += weight
             support_count += both_supported.float() * weight
             airborne_count += airborne.float() * weight
+            left_only_contact_count += left_only.float() * weight
+            right_only_contact_count += right_only.float() * weight
             path_length += segment * weight
             sum_hip_mismatch_sq += hip_mismatch.square() * weight
             sum_knee_mismatch_sq += knee_mismatch.square() * weight
@@ -1099,8 +1202,7 @@ def _run_batch(
         stationary_nan = torch.full((count,), float("nan"), device=dev)
         stationary_action_mean = stationary_action_sum / stationary_denom[:, None]
         stationary_action_centered_power = (
-            stationary_action_sq_sum
-            - stationary_action_sum.square() / stationary_denom[:, None]
+            stationary_action_sq_sum - stationary_action_sum.square() / stationary_denom[:, None]
         ).clamp(min=0.0)
         stationary_alternating_parity_sum = torch.where(
             settled_samples.remainder(2) == 0,
@@ -1125,13 +1227,18 @@ def _run_batch(
         stationary_tilt_mean = sum_stationary_tilt / stationary_denom
         stationary_tilt_rms = torch.sqrt(sum_stationary_tilt_sq / stationary_denom)
         stationary_planar_speed_rms = torch.sqrt(sum_stationary_planar_speed_sq / stationary_denom)
-        stationary_heading_error_rms = torch.sqrt(sum_stationary_heading_error_sq / stationary_denom)
+        stationary_heading_error_rms = torch.sqrt(
+            sum_stationary_heading_error_sq / stationary_denom
+        )
         stationary_effort_rms = torch.sqrt(sum_stationary_effort_sq / stationary_denom)
         stationary_body_rocking_rms = torch.sqrt(sum_stationary_angular_xy_sq / stationary_denom)
         stationary_contact_fraction = stationary_support_count / stationary_denom
         stationary_reversal_rate = stationary_reversal_count / (stationary_denom * step_dt)
         net_displacement = torch.linalg.vector_norm(final_xy_snapshot - initial_xy, dim=1)
-        stationary_net_displacement = torch.linalg.vector_norm(final_xy_snapshot - settled_xy, dim=1)
+        stationary_net_displacement = torch.linalg.vector_norm(
+            final_xy_snapshot - settled_xy, dim=1
+        )
+        leg_pose_asymmetry_p95 = torch.nanquantile(leg_pose_asymmetry_trace, 0.95, dim=1)
 
         arrays = {
             "success": finished_success,
@@ -1154,12 +1261,9 @@ def _run_batch(
             "physical_request_rms": torch.sqrt(sum_request_sq / denom),
             "physical_request_max_abs": max_request_abs,
             "action_clip_fraction": action_clip_count / action_count.clamp(min=1.0),
-            "action_rate_rms": torch.sqrt(
-                sum_action_rate_sq / action_rate_count.clamp(min=1.0)
-            ),
+            "action_rate_rms": torch.sqrt(sum_action_rate_sq / action_rate_count.clamp(min=1.0)),
             "action_second_difference_rms": torch.sqrt(
-                sum_action_second_difference_sq
-                / action_second_difference_count.clamp(min=1.0)
+                sum_action_second_difference_sq / action_second_difference_count.clamp(min=1.0)
             ),
             "physical_saturation_fraction": saturation_count / request_count.clamp(min=1.0),
             "commanded_effort_mean_abs": sum_request_abs / denom,
@@ -1174,7 +1278,12 @@ def _run_batch(
             "joint_applied_saturation_fraction": joint_saturation_count
             / request_count.clamp(min=1.0),
             "both_supported_fraction": support_count / denom,
+            "dual_wheel_contact_fraction": support_count / denom,
+            "left_only_contact_fraction": left_only_contact_count / denom,
+            "right_only_contact_fraction": right_only_contact_count / denom,
             "airborne_fraction": airborne_count / denom,
+            "max_continuous_single_wheel_support_s": max_single_wheel_support_s,
+            "wheel_contact_transition_count": wheel_contact_transition_count,
             "path_length": path_length,
             "net_displacement": net_displacement,
             "settling_time_s": torch.where(
@@ -1246,6 +1355,14 @@ def _run_batch(
             ),
             "leg_hip_mismatch_rms": torch.sqrt(sum_hip_mismatch_sq / denom),
             "leg_knee_mismatch_rms": torch.sqrt(sum_knee_mismatch_sq / denom),
+            "left_right_leg_pose_asymmetry_rms_rad": torch.sqrt(sum_leg_pose_asymmetry_sq / denom),
+            "left_right_leg_pose_asymmetry_p95_rad": leg_pose_asymmetry_p95,
+            "leg_target_offset_rms_rad": torch.sqrt(
+                sum_leg_target_offset_sq / leg_target_offset_count.clamp(min=1.0)
+            ),
+            "leg_target_rate_rms_rad_s": torch.sqrt(
+                sum_leg_target_rate_sq / leg_target_rate_count.clamp(min=1.0)
+            ),
             "recovered": recovered.float(),
             "recovery_time_s": recovery_time,
             "max_recovery_hold_s": max_recovery_hold_s,
@@ -1264,15 +1381,15 @@ def _run_batch(
             ),
             "post_target_heading_error_rms": torch.where(
                 post_target_samples > 0.0,
-                torch.sqrt(
-                    sum_post_target_heading_error_sq / post_target_samples.clamp(min=1.0)
-                ),
+                torch.sqrt(sum_post_target_heading_error_sq / post_target_samples.clamp(min=1.0)),
                 stationary_nan,
             ),
         }
         if is_velocity_task:
             arrays["velocity_tracking_rmse"] = torch.sqrt(sum_velocity_tracking_sq / denom)
             arrays["height_tracking_rmse"] = torch.sqrt(sum_height_tracking_sq / denom)
+        for term_index, term_name in enumerate(reward_term_names):
+            arrays[f"reward_term_return_{term_name}"] = reward_term_integrals[:, term_index]
         if is_recovery_task:
             arrays["recovery_success"] = recovery_success.float()
             arrays["recovery_from_start_s"] = recovery_from_start_s
@@ -1319,6 +1436,8 @@ def _run_batch(
             "step_dt": step_dt,
             "num_envs": count,
             "robot_total_mass_kg": mass,
+            "wheel_contact_sensor_semantics": "binary_found_boolean",
+            "wheel_normal_force_imbalance_available": False,
             "policy": asdict(policy.metadata()),
             "reward_schema": REWARD_SCHEMA_VERSION,
             "plant_contract": current_plant_contract(),
@@ -1343,6 +1462,7 @@ def run_scenarios(
     device: str = "cuda:0",
     deterministic: bool = True,
     plant_effort_limit: float = DEFAULT_PLANT_EFFORT_LIMIT,
+    replay_recorder: Any | None = None,
 ) -> tuple[list[EpisodeResult], dict[str, Any]]:
     checkpoint = Path(checkpoint)
     if not checkpoint.is_file():
@@ -1386,6 +1506,7 @@ def run_scenarios(
                     deterministic=deterministic,
                     plant_effort_limit=plant_effort_limit,
                     runtime=runtime,
+                    replay_recorder=replay_recorder,
                 )
                 results.extend(batch_results[: len(batch)])
                 batch_metadata.append({"family": family, **metadata})

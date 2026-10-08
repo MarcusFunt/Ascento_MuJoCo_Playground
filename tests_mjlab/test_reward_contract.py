@@ -6,6 +6,7 @@ import torch
 from ascento_mjlab.mdp.jump import PHASE_CROUCH, PHASE_FLIGHT, PHASE_IDLE, PHASE_THRUST
 from ascento_mjlab.mdp.recovery import recovery_progress
 from ascento_mjlab.mdp.rewards import (
+    GeneralistTargetArrivalSettledStopBonus,
     action_rate_penalty,
     effort_penalty,
     effort_target_barrier,
@@ -175,3 +176,49 @@ def test_world_target_rewards_distinguish_arrival_from_near_target_departure():
 
     env.ascento_world_target_state["target_yaw"][0] = 0.5
     assert world_target_heading(env).item() < 1.0
+
+
+def test_generalist_arrival_settle_bonus_is_once_per_attempt_and_requires_dwell():
+    env = _env()
+    env.num_envs = 1
+    robot = env.scene["robot"]
+    robot.data.root_link_pos_w[:] = torch.tensor([[0.0, 0.0, 0.75]])
+    robot.data.root_link_lin_vel_w.zero_()
+    robot.data.root_link_lin_vel_b.zero_()
+    robot.data.root_link_ang_vel_b.zero_()
+    robot.data.root_link_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    robot.data.projected_gravity_b[:] = torch.tensor([[0.0, 0.0, -1.0]])
+    env.ascento_world_target_state = {
+        "target_xy": torch.tensor([[0.03, 0.0]]),
+        "target_yaw": torch.tensor([0.0]),
+    }
+    env.ascento_generalist_episode_metrics = {"attempt_id": torch.tensor([1])}
+    term = GeneralistTargetArrivalSettledStopBonus(None, env)
+
+    returns = [term(env, hold_s=0.35, target_reached_distance_m=0.035).item() for _ in range(40)]
+    assert sum(returns) == pytest.approx(1.0 / env.step_dt)
+    assert returns.count(1.0 / env.step_dt) == 1
+
+    env.ascento_generalist_episode_metrics["attempt_id"][0] = 2
+    second_attempt = [
+        term(env, hold_s=0.35, target_reached_distance_m=0.035).item() for _ in range(40)
+    ]
+    assert sum(second_attempt) == pytest.approx(1.0 / env.step_dt)
+
+    env.ascento_generalist_episode_metrics["attempt_id"][0] = 3
+    env.ascento_world_target_state["target_xy"][0, 0] = 0.15
+    overshoot = [term(env, hold_s=0.35, target_reached_distance_m=0.035).item() for _ in range(40)]
+    assert sum(overshoot) == pytest.approx(0.0)
+
+
+def test_generalist_arrival_settle_bonus_changes_reward_contract():
+    from ascento_mjlab.physics import REWARD_SCHEMA_VERSION
+    from ascento_mjlab.tasks.generalist_locomotion.env_cfg import (
+        ascento_generalist_locomotion_env_cfg,
+    )
+
+    cfg = ascento_generalist_locomotion_env_cfg(play=False, num_envs=2)
+    term = cfg.rewards["target_arrival_settled_stop"]
+    assert term.weight == pytest.approx(5.0)
+    assert term.params["hold_s"] == pytest.approx(0.35)
+    assert REWARD_SCHEMA_VERSION == "v5"

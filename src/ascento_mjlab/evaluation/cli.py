@@ -146,6 +146,11 @@ def _manifest(
         "resolved_scenarios_sha256": scenarios_sha256(scenarios),
         "scenario_count": len(scenarios),
         "task": suite.task,
+        "commanded_obstacle_mode": (
+            int(os.environ.get("ASCENTO_GENERALIST_OBSTACLE_MODE", "0"))
+            if suite.task == "Ascento-Generalist-Locomotion-Flat"
+            else None
+        ),
         "policy_mode": suite.policy_mode,
         "checkpoint": str(checkpoint),
         "checkpoint_sha256": checkpoint_sha256(checkpoint),
@@ -252,7 +257,12 @@ def evaluate(
     render_clips: bool = False,
     clip_takes: int = 3,
     clip_steps: int = 600,
+    obstacle_mode: int | None = None,
 ) -> tuple[EvaluationStatus, Path]:
+    if obstacle_mode is not None:
+        if obstacle_mode not in (0, 1):
+            raise ValueError("obstacle_mode must be 0 or 1")
+        os.environ["ASCENTO_GENERALIST_OBSTACLE_MODE"] = str(obstacle_mode)
     suite = load_suite(suite_path)
     capabilities = task_capabilities(suite.task)
     missing = sorted(set(suite.required_capabilities) - capabilities)
@@ -410,6 +420,12 @@ def main() -> None:
     )
     parser.add_argument("--clip-takes", type=int, default=3)
     parser.add_argument("--clip-steps", type=int, default=600)
+    parser.add_argument(
+        "--obstacle-mode",
+        type=int,
+        choices=(0, 1),
+        help="explicit obstacle behavior command for the generalist task (default: 0)",
+    )
     args = parser.parse_args()
 
     if not args.checkpoint.is_file():
@@ -428,6 +444,7 @@ def main() -> None:
         render_clips=args.render_clips,
         clip_takes=args.clip_takes,
         clip_steps=args.clip_steps,
+        obstacle_mode=0 if args.obstacle_mode is None else args.obstacle_mode,
     )
     print(f"\nEvaluation: {status.value}")
     print(f"Artifacts: {output_dir}")

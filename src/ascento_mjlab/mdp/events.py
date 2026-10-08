@@ -12,6 +12,80 @@ from mjlab.utils.lab_api.math import quat_apply
 DEFAULT_WHEEL_RADIUS_M = 0.25
 DEFAULT_WHEEL_HALF_WIDTH_M = 0.0025
 
+GENERALIST_TARGET_BAND_SHORT = 0
+GENERALIST_TARGET_BAND_MEDIUM = 1
+GENERALIST_TARGET_BAND_LONG = 2
+GENERALIST_TARGET_BAND_COUNT = 3
+GENERALIST_COHORT_PRECISION_ANCHOR = 0
+GENERALIST_COHORT_RECOVERY_RETARGET_ANCHOR = 1
+GENERALIST_COHORT_GENERALIST_NAVIGATION = 2
+GENERALIST_COHORT_COUNT = 3
+# Backward-compatible aliases for legacy dashboards and non-fixed test events.
+GENERALIST_COHORT_REGULAR = GENERALIST_COHORT_GENERALIST_NAVIGATION
+GENERALIST_COHORT_GATE = GENERALIST_COHORT_RECOVERY_RETARGET_ANCHOR
+GENERALIST_TARGET_ATTEMPT_HISTORY_CAPACITY = 512
+GENERALIST_SETTLED_HEADING_VALID_THRESHOLD_RAD = 0.15
+
+
+def generalist_fixed_cohort_ids(
+    env,
+    *,
+    precision_anchor_fraction: float,
+    recovery_retarget_anchor_fraction: float,
+) -> torch.Tensor:
+    """Return a stable, approximately proportion-exact cohort assignment per env slot."""
+    precision = float(precision_anchor_fraction)
+    recovery = float(recovery_retarget_anchor_fraction)
+    fractions = (precision, recovery, 1.0 - precision - recovery)
+    if any(not math.isfinite(value) for value in fractions):
+        raise ValueError("generalist cohort fractions must be finite")
+    if precision <= 0.0 or recovery <= 0.0 or fractions[2] <= 0.0:
+        raise ValueError("precision, recovery, and navigation cohort fractions must be positive")
+    if env.num_envs < GENERALIST_COHORT_COUNT:
+        raise ValueError("fixed generalist cohorts require at least three environments")
+
+    existing = getattr(env, "ascento_generalist_cohort_ids", None)
+    existing_fractions = getattr(env, "ascento_generalist_cohort_fractions", None)
+    if existing is not None:
+        if existing.numel() != env.num_envs:
+            raise ValueError("fixed cohort assignment size does not match env.num_envs")
+        if existing_fractions != (precision, recovery):
+            raise ValueError("fixed cohort fractions cannot change during an environment lifetime")
+        return existing
+
+    quotas = [fraction * env.num_envs for fraction in fractions]
+    counts = [max(1, math.floor(quota)) for quota in quotas]
+    while sum(counts) > env.num_envs:
+        donors = [index for index, count in enumerate(counts) if count > 1]
+        donor = max(donors, key=lambda index: counts[index] - quotas[index])
+        counts[donor] -= 1
+    while sum(counts) < env.num_envs:
+        receiver = max(
+            range(GENERALIST_COHORT_COUNT), key=lambda index: quotas[index] - counts[index]
+        )
+        counts[receiver] += 1
+
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(20261007)
+    permutation = torch.randperm(env.num_envs, generator=generator, device="cpu").to(env.device)
+    assignment = torch.empty(env.num_envs, dtype=torch.long, device=env.device)
+    offset = 0
+    for cohort_id, count in enumerate(counts):
+        assignment[permutation[offset : offset + count]] = cohort_id
+        offset += count
+    env.ascento_generalist_cohort_ids = assignment
+    env.ascento_generalist_cohort_fractions = (precision, recovery)
+    return assignment
+
+
+GENERALIST_ATTEMPT_TERMINAL_PENDING = 0
+GENERALIST_ATTEMPT_TERMINAL_SETTLED = 1
+GENERALIST_ATTEMPT_TERMINAL_FALL = 2
+GENERALIST_ATTEMPT_TERMINAL_TIMEOUT = 3
+GENERALIST_ATTEMPT_TERMINAL_RESET = 4
+GENERALIST_ATTEMPT_TERMINAL_RETARGETED = 5
+GENERALIST_ATTEMPT_TERMINAL_EPISODE_END = 6
+
 
 def linear_curriculum_value(
     control_step: int,
@@ -28,8 +102,10 @@ def linear_curriculum_value(
     return float(start) + (float(end) - float(start)) * progress
 
 
-GENERALIST_SHORT_TARGET_MAX_DISTANCE_M = 0.50
+GENERALIST_SHORT_TARGET_MAX_DISTANCE_M = 0.35
+GENERALIST_MEDIUM_TARGET_MIN_DISTANCE_M = 0.50
 GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M = 1.50
+GENERALIST_LONG_TARGET_MIN_DISTANCE_M = 2.0
 GENERALIST_TARGET_ARRIVAL_DISTANCE_M = 0.035
 
 
@@ -179,6 +255,61 @@ def advance_generalist_goal_mix_stage(
     return stage + 1
 
 
+def update_generalist_goal_mix_stage(
+    stage: int,
+    *,
+    gate_recovery_successes: int,
+    gate_episodes: int,
+    short_arrival_successes: int,
+    short_episodes: int,
+    long_arrival_successes: int,
+    long_episodes: int,
+    minimum_attempts: int = 64,
+    demotion_streak: int = 0,
+    promotion_gate_lcb_threshold: float = 0.85,
+    promotion_target_lcb_threshold: float = 0.50,
+    demotion_gate_lcb_threshold: float = 0.70,
+    demotion_target_lcb_threshold: float = 0.35,
+    demotion_windows: int = 2,
+) -> tuple[int, int]:
+    """Update a stage from one fresh evidence window with promotion hysteresis."""
+    if stage not in (0, 1, 2):
+        raise ValueError("generalist goal-mix stage must be 0, 1, or 2")
+    if minimum_attempts <= 0 or demotion_windows <= 0:
+        raise ValueError("attempt and demotion window counts must be positive")
+    if demotion_streak < 0:
+        raise ValueError("demotion_streak must be nonnegative")
+
+    enough_gate_and_short = gate_episodes >= minimum_attempts and short_episodes >= minimum_attempts
+    enough_long = long_episodes >= minimum_attempts
+    if not enough_gate_and_short or (stage > 0 and not enough_long):
+        return stage, demotion_streak
+
+    gate_lcb = wilson_lower_bound(gate_recovery_successes, gate_episodes)
+    short_lcb = wilson_lower_bound(short_arrival_successes, short_episodes)
+    long_lcb = wilson_lower_bound(long_arrival_successes, long_episodes)
+
+    promotion_ready = (
+        gate_lcb >= promotion_gate_lcb_threshold and short_lcb >= promotion_target_lcb_threshold
+    )
+    if stage == 1:
+        promotion_ready = promotion_ready and long_lcb >= promotion_target_lcb_threshold
+    if promotion_ready and stage < 2:
+        return stage + 1, 0
+
+    below_floor = (
+        gate_lcb < demotion_gate_lcb_threshold
+        or short_lcb < demotion_target_lcb_threshold
+        or (stage > 0 and long_lcb < demotion_target_lcb_threshold)
+    )
+    if stage == 0 or not below_floor:
+        return stage, 0
+    next_streak = demotion_streak + 1
+    if next_streak >= demotion_windows:
+        return stage - 1, 0
+    return stage, next_streak
+
+
 def generalist_goal_mix_state(
     env,
     *,
@@ -205,9 +336,47 @@ def generalist_goal_mix_state(
             "short_arrival_successes": 0,
             "long_episodes": 0,
             "long_arrival_successes": 0,
+            "short_attempts": 0,
+            "short_attempt_arrivals": 0,
+            "long_attempts": 0,
+            "long_attempt_arrivals": 0,
+            "window_gate_episodes": 0,
+            "window_gate_recovery_successes": 0,
+            "window_short_attempts": 0,
+            "window_short_arrivals": 0,
+            "window_long_attempts": 0,
+            "window_long_arrivals": 0,
+            "demotion_streak": 0,
         }
         env.ascento_generalist_goal_mix = state
     return state
+
+
+def _generalist_target_attempt_history(env) -> dict[str, torch.Tensor]:
+    shape = (env.num_envs, GENERALIST_TARGET_ATTEMPT_HISTORY_CAPACITY)
+    return {
+        "attempt_id": torch.full(shape, -1, dtype=torch.long, device=env.device),
+        "cohort_id": torch.full(shape, -1, dtype=torch.long, device=env.device),
+        "target_band": torch.full(shape, -1, dtype=torch.long, device=env.device),
+        "target_distance_m_at_issue": torch.zeros(shape, dtype=torch.float32, device=env.device),
+        "target_issued_control_step": torch.full(shape, -1, dtype=torch.long, device=env.device),
+        "target_issued_time_s": torch.full(shape, -1.0, dtype=torch.float32, device=env.device),
+        "arrival_completed": torch.zeros(shape, dtype=torch.bool, device=env.device),
+        "settled_stop_completed": torch.zeros(shape, dtype=torch.bool, device=env.device),
+        "heading_valid_at_settle": torch.zeros(shape, dtype=torch.bool, device=env.device),
+        "heading_error_at_settle_rad": torch.zeros(shape, dtype=torch.float32, device=env.device),
+        "target_error_at_settle_m": torch.full(shape, -1.0, dtype=torch.float32, device=env.device),
+        "root_speed_at_settle_mps": torch.full(shape, -1.0, dtype=torch.float32, device=env.device),
+        "angular_speed_at_settle_radps": torch.full(
+            shape, -1.0, dtype=torch.float32, device=env.device
+        ),
+        "time_to_arrival_s": torch.full(shape, -1.0, dtype=torch.float32, device=env.device),
+        "time_to_settle_s": torch.full(shape, -1.0, dtype=torch.float32, device=env.device),
+        "terminal_reason": torch.full(
+            shape, GENERALIST_ATTEMPT_TERMINAL_PENDING, dtype=torch.long, device=env.device
+        ),
+        "completion_id": torch.full(shape, -1, dtype=torch.long, device=env.device),
+    }
 
 
 def generalist_episode_metrics_state(env) -> dict[str, torch.Tensor]:
@@ -220,12 +389,217 @@ def generalist_episode_metrics_state(env) -> dict[str, torch.Tensor]:
             ),
             "gate_like": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
             "arrived": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "current_target_arrived": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "push_received": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "retargeted": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
             "recovery_completed": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "recovery_completed_before_retarget": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "retarget_issued": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "target_arrival_count": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "second_target_arrived": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "settled_stop_count": torch.zeros(env.num_envs, dtype=torch.float32, device=env.device),
+            "current_attempt_settled_stop_completed": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "current_attempt_heading_valid_at_settle": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "settled_stop_recorded_for_target": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
             "heading_error_at_arrival_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "arrival_heading_error_sum_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "arrival_heading_error_samples": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "post_retarget_heading_error_sum_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "post_retarget_heading_error_samples": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "settled_heading_error_sum_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "settled_heading_error_samples": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "post_retarget_settled_stop": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "post_retarget_settled_heading_error_sum_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "post_retarget_settled_heading_error_samples": torch.zeros(
                 env.num_envs, dtype=torch.float32, device=env.device
             ),
             "sampled_target_band_counts": torch.zeros(
                 (env.num_envs, 3), dtype=torch.float32, device=env.device
+            ),
+            "attempt_id": torch.zeros(env.num_envs, dtype=torch.long, device=env.device),
+            "cohort_id": torch.full(
+                (env.num_envs,), GENERALIST_COHORT_REGULAR, dtype=torch.long, device=env.device
+            ),
+            "target_band": torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device),
+            "target_distance_m_at_issue": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "target_issued_control_step": torch.full(
+                (env.num_envs,), -1, dtype=torch.long, device=env.device
+            ),
+            "target_issued_time_s": torch.full(
+                (env.num_envs,), -1.0, dtype=torch.float32, device=env.device
+            ),
+            "arrival_completed": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "settled_stop_completed": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "heading_valid_at_settle": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "heading_error_at_settle_rad": torch.zeros(
+                env.num_envs, dtype=torch.float32, device=env.device
+            ),
+            "target_error_at_settle_m": torch.full(
+                (env.num_envs,), -1.0, dtype=torch.float32, device=env.device
+            ),
+            "root_speed_at_settle_mps": torch.full(
+                (env.num_envs,), -1.0, dtype=torch.float32, device=env.device
+            ),
+            "angular_speed_at_settle_radps": torch.full(
+                (env.num_envs,), -1.0, dtype=torch.float32, device=env.device
+            ),
+            "time_to_arrival_s": torch.full(
+                (env.num_envs,), -1.0, dtype=torch.float32, device=env.device
+            ),
+            "time_to_settle_s": torch.full(
+                (env.num_envs,), -1.0, dtype=torch.float32, device=env.device
+            ),
+            "terminal_reason": torch.full(
+                (env.num_envs,),
+                GENERALIST_ATTEMPT_TERMINAL_PENDING,
+                dtype=torch.long,
+                device=env.device,
+            ),
+            "completion_id": torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device),
+            "target_attempt_pending": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "target_attempt_arrival_control_step": torch.full(
+                (env.num_envs,), -1, dtype=torch.long, device=env.device
+            ),
+            "target_attempt_history_write_index": torch.zeros(
+                env.num_envs, dtype=torch.long, device=env.device
+            ),
+            "target_attempt_history_current_index": torch.full(
+                (env.num_envs,), -1, dtype=torch.long, device=env.device
+            ),
+            "episode_attempt_start_id": torch.ones(
+                env.num_envs, dtype=torch.long, device=env.device
+            ),
+            "curriculum_outcome_recorded": torch.zeros(
+                env.num_envs, dtype=torch.bool, device=env.device
+            ),
+            "target_attempt_history": _generalist_target_attempt_history(env),
+            "target_attempt_count_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "arrival_completed_count_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "settled_stop_completed_count_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "heading_valid_at_settle_count_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "interrupted_by_fall_count_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "interrupted_by_timeout_count_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "interrupted_by_reset_count_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "target_distance_sum_m_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "time_to_arrival_sum_s_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "time_to_arrival_samples_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "time_to_settle_sum_s_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "time_to_settle_samples_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "heading_error_at_settle_sum_rad_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "heading_error_at_settle_samples_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "target_error_at_settle_sum_m_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "target_error_at_settle_samples_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "root_speed_at_settle_sum_mps_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "angular_speed_at_settle_sum_radps_by_cohort_band": torch.zeros(
+                (env.num_envs, GENERALIST_COHORT_COUNT, GENERALIST_TARGET_BAND_COUNT),
+                dtype=torch.float32,
+                device=env.device,
             ),
         }
         env.ascento_generalist_episode_metrics = state
@@ -241,16 +615,370 @@ def reset_generalist_episode_metrics(
     """Reset slice outcomes for selected episodes and optionally record their sampled distance."""
     state = generalist_episode_metrics_state(env)
     ids = _resolved_env_ids(env, env_ids)
+    finalize_generalist_target_attempts(env, ids, reason=GENERALIST_ATTEMPT_TERMINAL_RESET)
     state["initial_target_distance_m"][ids] = 0.0
-    state["gate_like"][ids] = False
+    fixed_cohorts = getattr(env, "ascento_generalist_cohort_ids", None)
+    if fixed_cohorts is None:
+        state["cohort_id"][ids] = GENERALIST_COHORT_GENERALIST_NAVIGATION
+        state["gate_like"][ids] = False
+    else:
+        cohort_ids = fixed_cohorts[ids]
+        state["cohort_id"][ids] = cohort_ids
+        state["gate_like"][ids] = cohort_ids == GENERALIST_COHORT_RECOVERY_RETARGET_ANCHOR
     state["arrived"][ids] = False
+    state["current_target_arrived"][ids] = False
+    state["push_received"][ids] = False
+    state["retargeted"][ids] = False
     state["recovery_completed"][ids] = False
+    state["recovery_completed_before_retarget"][ids] = False
+    state["retarget_issued"][ids] = False
+    state["target_arrival_count"][ids] = 0.0
+    state["second_target_arrived"][ids] = False
+    state["settled_stop_count"][ids] = 0.0
+    state["settled_stop_completed"][ids] = False
+    state["heading_valid_at_settle"][ids] = False
+    state["current_attempt_settled_stop_completed"][ids] = False
+    state["current_attempt_heading_valid_at_settle"][ids] = False
+    state["settled_stop_recorded_for_target"][ids] = False
     state["heading_error_at_arrival_rad"][ids] = 0.0
+    state["arrival_heading_error_sum_rad"][ids] = 0.0
+    state["arrival_heading_error_samples"][ids] = 0.0
+    state["post_retarget_heading_error_sum_rad"][ids] = 0.0
+    state["post_retarget_heading_error_samples"][ids] = 0.0
+    state["settled_heading_error_sum_rad"][ids] = 0.0
+    state["settled_heading_error_samples"][ids] = 0.0
+    state["post_retarget_settled_stop"][ids] = False
+    state["post_retarget_settled_heading_error_sum_rad"][ids] = 0.0
+    state["post_retarget_settled_heading_error_samples"][ids] = 0.0
     state["sampled_target_band_counts"][ids] = 0.0
+    for key in (
+        "target_attempt_count_by_cohort_band",
+        "arrival_completed_count_by_cohort_band",
+        "settled_stop_completed_count_by_cohort_band",
+        "heading_valid_at_settle_count_by_cohort_band",
+        "interrupted_by_fall_count_by_cohort_band",
+        "interrupted_by_timeout_count_by_cohort_band",
+        "interrupted_by_reset_count_by_cohort_band",
+        "target_distance_sum_m_by_cohort_band",
+        "time_to_arrival_sum_s_by_cohort_band",
+        "time_to_arrival_samples_by_cohort_band",
+        "time_to_settle_sum_s_by_cohort_band",
+        "time_to_settle_samples_by_cohort_band",
+        "heading_error_at_settle_sum_rad_by_cohort_band",
+        "heading_error_at_settle_samples_by_cohort_band",
+        "target_error_at_settle_sum_m_by_cohort_band",
+        "target_error_at_settle_samples_by_cohort_band",
+        "root_speed_at_settle_sum_mps_by_cohort_band",
+        "angular_speed_at_settle_sum_radps_by_cohort_band",
+    ):
+        state[key][ids] = 0.0
+    state["target_band"][ids] = -1
+    state["target_distance_m_at_issue"][ids] = 0.0
+    state["target_issued_control_step"][ids] = -1
+    state["target_issued_time_s"][ids] = -1.0
+    state["arrival_completed"][ids] = False
+    state["current_attempt_settled_stop_completed"][ids] = False
+    state["current_attempt_heading_valid_at_settle"][ids] = False
+    state["heading_error_at_settle_rad"][ids] = 0.0
+    state["target_error_at_settle_m"][ids] = -1.0
+    state["root_speed_at_settle_mps"][ids] = -1.0
+    state["angular_speed_at_settle_radps"][ids] = -1.0
+    state["time_to_arrival_s"][ids] = -1.0
+    state["time_to_settle_s"][ids] = -1.0
+    state["terminal_reason"][ids] = GENERALIST_ATTEMPT_TERMINAL_PENDING
+    state["completion_id"][ids] = -1
+    state["target_attempt_pending"][ids] = False
+    state["target_attempt_arrival_control_step"][ids] = -1
+    state["target_attempt_history_current_index"][ids] = -1
+    state["episode_attempt_start_id"][ids] = state["attempt_id"][ids] + 1
+    state["curriculum_outcome_recorded"][ids] = False
     if initial_target_distance_m is not None:
         state["initial_target_distance_m"][ids] = initial_target_distance_m.to(
             dtype=torch.float32, device=env.device
         ).reshape(-1)
+
+
+def _generalist_attempt_vector(value, ids: torch.Tensor, *, dtype, name: str) -> torch.Tensor:
+    result = torch.as_tensor(value, dtype=dtype, device=ids.device).reshape(-1)
+    if result.numel() == 1 and ids.numel() != 1:
+        result = result.expand(ids.numel())
+    if result.numel() != ids.numel():
+        raise ValueError(f"{name} must provide one value per selected environment")
+    return result
+
+
+def begin_generalist_target_attempt(
+    env,
+    env_ids: torch.Tensor | slice | None,
+    *,
+    target_distance_m: torch.Tensor | float,
+    target_band: torch.Tensor | int,
+    cohort_id: torch.Tensor | int | None = None,
+) -> None:
+    """Start and persist one target attempt for every selected environment."""
+    state = generalist_episode_metrics_state(env)
+    ids = _resolved_env_ids(env, env_ids)
+    if ids.numel() == 0:
+        return
+    pending_ids = ids[state["target_attempt_pending"][ids]]
+    if pending_ids.numel() > 0:
+        finalize_generalist_target_attempts(
+            env, pending_ids, reason=GENERALIST_ATTEMPT_TERMINAL_RETARGETED
+        )
+
+    distances = _generalist_attempt_vector(
+        target_distance_m, ids, dtype=torch.float32, name="target_distance_m"
+    )
+    bands = _generalist_attempt_vector(target_band, ids, dtype=torch.long, name="target_band")
+    if not bool(torch.isfinite(distances).all()) or bool((distances <= 0.0).any()):
+        raise ValueError("target_distance_m must contain finite positive distances")
+    if bool(((bands < 0) | (bands >= GENERALIST_TARGET_BAND_COUNT)).any()):
+        raise ValueError("target_band must be short, medium, or long")
+    if cohort_id is None:
+        cohorts = state["cohort_id"][ids]
+    else:
+        cohorts = _generalist_attempt_vector(cohort_id, ids, dtype=torch.long, name="cohort_id")
+    if bool(((cohorts < 0) | (cohorts >= GENERALIST_COHORT_COUNT)).any()):
+        raise ValueError("cohort_id must identify a configured generalist cohort")
+
+    attempt_ids = state["attempt_id"][ids] + 1
+    history_indices = (
+        state["target_attempt_history_write_index"][ids]
+        % GENERALIST_TARGET_ATTEMPT_HISTORY_CAPACITY
+    )
+    issue_step = int(getattr(env, "common_step_counter", 0))
+    issue_time = issue_step * float(getattr(env, "step_dt", 0.0))
+    state["attempt_id"][ids] = attempt_ids
+    state["cohort_id"][ids] = cohorts
+    state["target_band"][ids] = bands
+    state["target_distance_m_at_issue"][ids] = distances
+    state["target_issued_control_step"][ids] = issue_step
+    state["target_issued_time_s"][ids] = issue_time
+    state["arrival_completed"][ids] = False
+    state["current_attempt_settled_stop_completed"][ids] = False
+    state["current_attempt_heading_valid_at_settle"][ids] = False
+    state["heading_error_at_settle_rad"][ids] = 0.0
+    state["target_error_at_settle_m"][ids] = -1.0
+    state["root_speed_at_settle_mps"][ids] = -1.0
+    state["angular_speed_at_settle_radps"][ids] = -1.0
+    state["time_to_arrival_s"][ids] = -1.0
+    state["time_to_settle_s"][ids] = -1.0
+    state["terminal_reason"][ids] = GENERALIST_ATTEMPT_TERMINAL_PENDING
+    state["completion_id"][ids] = -1
+    state["target_attempt_pending"][ids] = True
+    state["target_attempt_arrival_control_step"][ids] = -1
+    state["target_attempt_history_current_index"][ids] = history_indices
+    state["target_attempt_history_write_index"][ids] += 1
+
+    history = state["target_attempt_history"]
+    history["attempt_id"][ids, history_indices] = attempt_ids
+    history["cohort_id"][ids, history_indices] = cohorts
+    history["target_band"][ids, history_indices] = bands
+    history["target_distance_m_at_issue"][ids, history_indices] = distances
+    history["target_issued_control_step"][ids, history_indices] = issue_step
+    history["target_issued_time_s"][ids, history_indices] = issue_time
+    history["arrival_completed"][ids, history_indices] = False
+    history["settled_stop_completed"][ids, history_indices] = False
+    history["heading_valid_at_settle"][ids, history_indices] = False
+    history["heading_error_at_settle_rad"][ids, history_indices] = 0.0
+    history["target_error_at_settle_m"][ids, history_indices] = -1.0
+    history["root_speed_at_settle_mps"][ids, history_indices] = -1.0
+    history["angular_speed_at_settle_radps"][ids, history_indices] = -1.0
+    history["time_to_arrival_s"][ids, history_indices] = -1.0
+    history["time_to_settle_s"][ids, history_indices] = -1.0
+    history["terminal_reason"][ids, history_indices] = GENERALIST_ATTEMPT_TERMINAL_PENDING
+    history["completion_id"][ids, history_indices] = -1
+
+    state["target_attempt_count_by_cohort_band"][ids, cohorts, bands] += 1.0
+    state["target_distance_sum_m_by_cohort_band"][ids, cohorts, bands] += distances
+
+
+def reclassify_generalist_target_attempt_cohort(
+    env,
+    env_ids: torch.Tensor | slice | None,
+    *,
+    cohort_id: torch.Tensor | int,
+) -> None:
+    """Move a just-issued attempt into its episode's final disjoint cohort."""
+    state = generalist_episode_metrics_state(env)
+    ids = _resolved_env_ids(env, env_ids)
+    if ids.numel() == 0:
+        return
+    ids = ids[state["target_attempt_pending"][ids]]
+    if ids.numel() == 0:
+        return
+    new_cohorts = _generalist_attempt_vector(cohort_id, ids, dtype=torch.long, name="cohort_id")
+    if bool(((new_cohorts < 0) | (new_cohorts >= GENERALIST_COHORT_COUNT)).any()):
+        raise ValueError("cohort_id must identify a configured generalist cohort")
+    old_cohorts = state["cohort_id"][ids]
+    changed = old_cohorts != new_cohorts
+    if not bool(changed.any()):
+        return
+    changed_ids = ids[changed]
+    old = old_cohorts[changed]
+    new = new_cohorts[changed]
+    bands = state["target_band"][changed_ids]
+    distance = state["target_distance_m_at_issue"][changed_ids]
+    state["target_attempt_count_by_cohort_band"][changed_ids, old, bands] -= 1.0
+    state["target_attempt_count_by_cohort_band"][changed_ids, new, bands] += 1.0
+    state["target_distance_sum_m_by_cohort_band"][changed_ids, old, bands] -= distance
+    state["target_distance_sum_m_by_cohort_band"][changed_ids, new, bands] += distance
+    state["cohort_id"][changed_ids] = new
+    history_indices = state["target_attempt_history_current_index"][changed_ids]
+    state["target_attempt_history"]["cohort_id"][changed_ids, history_indices] = new
+
+
+def record_generalist_target_arrival(env, env_ids: torch.Tensor | slice | None) -> None:
+    """Latch arrival and time-to-arrival for each active target attempt."""
+    state = generalist_episode_metrics_state(env)
+    ids = _resolved_env_ids(env, env_ids)
+    if ids.numel() == 0:
+        return
+    ids = ids[state["target_attempt_pending"][ids] & ~state["arrival_completed"][ids]]
+    if ids.numel() == 0:
+        return
+    step = int(getattr(env, "common_step_counter", 0))
+    elapsed = (step - state["target_issued_control_step"][ids]).clamp_min(0).float()
+    elapsed *= float(env.step_dt)
+    cohorts = state["cohort_id"][ids]
+    bands = state["target_band"][ids]
+    history_indices = state["target_attempt_history_current_index"][ids]
+    state["arrival_completed"][ids] = True
+    state["time_to_arrival_s"][ids] = elapsed
+    state["target_attempt_arrival_control_step"][ids] = step
+    state["arrival_completed_count_by_cohort_band"][ids, cohorts, bands] += 1.0
+    state["time_to_arrival_sum_s_by_cohort_band"][ids, cohorts, bands] += elapsed
+    state["time_to_arrival_samples_by_cohort_band"][ids, cohorts, bands] += 1.0
+    history = state["target_attempt_history"]
+    history["arrival_completed"][ids, history_indices] = True
+    history["time_to_arrival_s"][ids, history_indices] = elapsed
+
+
+def record_generalist_target_settled_stop(
+    env,
+    env_ids: torch.Tensor | slice | None,
+    *,
+    heading_error_rad: torch.Tensor,
+    final_target_error_m: torch.Tensor | None = None,
+    root_speed_mps: torch.Tensor | None = None,
+    angular_speed_radps: torch.Tensor | None = None,
+) -> None:
+    """Record settled-stop quality and close each completed target attempt."""
+    state = generalist_episode_metrics_state(env)
+    selected_ids = _resolved_env_ids(env, env_ids)
+    if selected_ids.numel() == 0:
+        return
+    eligible = (
+        state["target_attempt_pending"][selected_ids]
+        & ~state["current_attempt_settled_stop_completed"][selected_ids]
+    )
+    ids = selected_ids[eligible]
+    if ids.numel() == 0:
+        return
+
+    def selected_vector(value, name: str) -> torch.Tensor:
+        return _generalist_attempt_vector(value, selected_ids, dtype=torch.float32, name=name)[
+            eligible
+        ]
+
+    errors = selected_vector(heading_error_rad, "heading_error_rad").abs()
+    step = int(getattr(env, "common_step_counter", 0))
+    elapsed = (step - state["target_issued_control_step"][ids]).clamp_min(0).float()
+    elapsed *= float(env.step_dt)
+    valid_heading = errors <= GENERALIST_SETTLED_HEADING_VALID_THRESHOLD_RAD
+    target_errors = (
+        None
+        if final_target_error_m is None
+        else selected_vector(final_target_error_m, "final_target_error_m").abs()
+    )
+    root_speeds = (
+        None if root_speed_mps is None else selected_vector(root_speed_mps, "root_speed_mps").abs()
+    )
+    angular_speeds = (
+        None
+        if angular_speed_radps is None
+        else selected_vector(angular_speed_radps, "angular_speed_radps").abs()
+    )
+    cohorts = state["cohort_id"][ids]
+    bands = state["target_band"][ids]
+    history_indices = state["target_attempt_history_current_index"][ids]
+    state["current_attempt_settled_stop_completed"][ids] = True
+    state["current_attempt_heading_valid_at_settle"][ids] = valid_heading
+    episode_lifecycle_stop = ~state["gate_like"][ids] | state["retarget_issued"][ids]
+    state["settled_stop_completed"][ids] |= episode_lifecycle_stop
+    state["heading_valid_at_settle"][ids] |= valid_heading & episode_lifecycle_stop
+    state["heading_error_at_settle_rad"][ids] = errors
+    state["time_to_settle_s"][ids] = elapsed
+    if target_errors is not None:
+        state["target_error_at_settle_m"][ids] = target_errors
+        state["target_error_at_settle_sum_m_by_cohort_band"][ids, cohorts, bands] += target_errors
+        state["target_error_at_settle_samples_by_cohort_band"][ids, cohorts, bands] += 1.0
+    if root_speeds is not None:
+        state["root_speed_at_settle_mps"][ids] = root_speeds
+        state["root_speed_at_settle_sum_mps_by_cohort_band"][ids, cohorts, bands] += root_speeds
+    if angular_speeds is not None:
+        state["angular_speed_at_settle_radps"][ids] = angular_speeds
+        state["angular_speed_at_settle_sum_radps_by_cohort_band"][ids, cohorts, bands] += (
+            angular_speeds
+        )
+    state["settled_stop_recorded_for_target"][ids] = True
+    state["settled_stop_count"][ids] += 1.0
+    state["settled_heading_error_sum_rad"][ids] += errors
+    state["settled_heading_error_samples"][ids] += 1.0
+    state["settled_stop_completed_count_by_cohort_band"][ids, cohorts, bands] += 1.0
+    state["heading_valid_at_settle_count_by_cohort_band"][ids, cohorts, bands] += (
+        valid_heading.float()
+    )
+    state["time_to_settle_sum_s_by_cohort_band"][ids, cohorts, bands] += elapsed
+    state["time_to_settle_samples_by_cohort_band"][ids, cohorts, bands] += 1.0
+    state["heading_error_at_settle_sum_rad_by_cohort_band"][ids, cohorts, bands] += errors
+    state["heading_error_at_settle_samples_by_cohort_band"][ids, cohorts, bands] += 1.0
+    history = state["target_attempt_history"]
+    history["settled_stop_completed"][ids, history_indices] = True
+    history["heading_valid_at_settle"][ids, history_indices] = valid_heading
+    history["heading_error_at_settle_rad"][ids, history_indices] = errors
+    history["time_to_settle_s"][ids, history_indices] = elapsed
+    if target_errors is not None:
+        history["target_error_at_settle_m"][ids, history_indices] = target_errors
+    if root_speeds is not None:
+        history["root_speed_at_settle_mps"][ids, history_indices] = root_speeds
+    if angular_speeds is not None:
+        history["angular_speed_at_settle_radps"][ids, history_indices] = angular_speeds
+    finalize_generalist_target_attempts(env, ids, reason=GENERALIST_ATTEMPT_TERMINAL_SETTLED)
+
+
+def finalize_generalist_target_attempts(
+    env,
+    env_ids: torch.Tensor | slice | None,
+    *,
+    reason: int,
+) -> None:
+    """Give active attempts a terminal reason and immutable completion identity."""
+    if reason == GENERALIST_ATTEMPT_TERMINAL_PENDING:
+        raise ValueError("pending is not a valid target-attempt terminal reason")
+    state = generalist_episode_metrics_state(env)
+    ids = _resolved_env_ids(env, env_ids)
+    if ids.numel() == 0:
+        return
+    ids = ids[state["target_attempt_pending"][ids]]
+    if ids.numel() == 0:
+        return
+    cohorts = state["cohort_id"][ids]
+    bands = state["target_band"][ids]
+    history_indices = state["target_attempt_history_current_index"][ids]
+    if reason == GENERALIST_ATTEMPT_TERMINAL_FALL:
+        state["interrupted_by_fall_count_by_cohort_band"][ids, cohorts, bands] += 1.0
+    elif reason == GENERALIST_ATTEMPT_TERMINAL_TIMEOUT:
+        state["interrupted_by_timeout_count_by_cohort_band"][ids, cohorts, bands] += 1.0
+    elif reason == GENERALIST_ATTEMPT_TERMINAL_RESET:
+        state["interrupted_by_reset_count_by_cohort_band"][ids, cohorts, bands] += 1.0
+    attempt_ids = state["attempt_id"][ids]
+    state["terminal_reason"][ids] = int(reason)
+    state["completion_id"][ids] = ids * (1 << 32) + attempt_ids
+    state["target_attempt_pending"][ids] = False
+    history = state["target_attempt_history"]
+    history["terminal_reason"][ids, history_indices] = int(reason)
+    history["completion_id"][ids, history_indices] = ids * (1 << 32) + attempt_ids
 
 
 def _scheduled_target_distance_range(
@@ -561,6 +1289,8 @@ def initialize_random_world_target(
     initial_long_goal_fraction: float = 0.10,
     medium_goal_fraction: float = 0.25,
     max_long_goal_fraction: float = 0.40,
+    precision_anchor_fraction: float | None = None,
+    recovery_retarget_anchor_fraction: float | None = None,
 ) -> None:
     """Assign each selected environment an immediate bounded random XY target.
 
@@ -574,6 +1304,20 @@ def initialize_random_world_target(
         return
     asset = env.scene[asset_name]
     if stratified_goal_mix:
+        if (precision_anchor_fraction is None) != (recovery_retarget_anchor_fraction is None):
+            raise ValueError("both fixed generalist anchor fractions must be provided together")
+        fixed_cohorts = None
+        if precision_anchor_fraction is not None:
+            fixed_cohorts = generalist_fixed_cohort_ids(
+                env,
+                precision_anchor_fraction=precision_anchor_fraction,
+                recovery_retarget_anchor_fraction=recovery_retarget_anchor_fraction,
+            )
+            episode_state = generalist_episode_metrics_state(env)
+            episode_state["cohort_id"][ids] = fixed_cohorts[ids]
+            episode_state["gate_like"][ids] = (
+                fixed_cohorts[ids] == GENERALIST_COHORT_RECOVERY_RETARGET_ANCHOR
+            )
         mix = generalist_goal_mix_state(
             env,
             initial_long_goal_fraction=initial_long_goal_fraction,
@@ -582,21 +1326,73 @@ def initialize_random_world_target(
         )
         if record_training_metrics:
             reset_generalist_episode_metrics(env, ids)
-        _set_stratified_random_world_targets(
-            env,
-            asset,
-            ids,
-            arena_half_extent_m=arena_half_extent_m,
-            long_goal_fraction=float(mix["long_goal_fraction"]),
-            medium_goal_fraction=medium_goal_fraction,
-            short_min_distance_m=short_min_distance_m,
-            short_max_distance_m=short_max_distance_m,
-            medium_min_distance_m=medium_min_distance_m,
-            medium_max_distance_m=medium_max_distance_m,
-            long_min_distance_m=long_min_distance_m,
-            long_max_distance_m=long_max_distance_m,
-            record_training_metrics=record_training_metrics,
-        )
+        if fixed_cohorts is None:
+            _set_stratified_random_world_targets(
+                env,
+                asset,
+                ids,
+                arena_half_extent_m=arena_half_extent_m,
+                long_goal_fraction=float(mix["long_goal_fraction"]),
+                medium_goal_fraction=medium_goal_fraction,
+                short_min_distance_m=short_min_distance_m,
+                short_max_distance_m=short_max_distance_m,
+                medium_min_distance_m=medium_min_distance_m,
+                medium_max_distance_m=medium_max_distance_m,
+                long_min_distance_m=long_min_distance_m,
+                long_max_distance_m=long_max_distance_m,
+                record_training_metrics=record_training_metrics,
+            )
+        else:
+            precision_ids = ids[fixed_cohorts[ids] == GENERALIST_COHORT_PRECISION_ANCHOR]
+            recovery_ids = ids[fixed_cohorts[ids] == GENERALIST_COHORT_RECOVERY_RETARGET_ANCHOR]
+            navigation_ids = ids[fixed_cohorts[ids] == GENERALIST_COHORT_GENERALIST_NAVIGATION]
+            target_state = _world_target_state(env, asset_name=asset_name)
+            target_state["target_xy"][recovery_ids] = asset.data.root_link_pos_w[recovery_ids, :2]
+            target_state["target_yaw"][recovery_ids] = yaw_from_quaternion_wxyz(
+                asset.data.root_link_quat_w[recovery_ids]
+            )
+            if precision_ids.numel() > 0:
+                _set_bounded_random_world_targets(
+                    env,
+                    asset,
+                    precision_ids,
+                    min_distance_m=short_min_distance_m,
+                    max_distance_m=short_max_distance_m,
+                    arena_half_extent_m=arena_half_extent_m,
+                )
+                precision_distances = torch.linalg.vector_norm(
+                    target_state["target_xy"][precision_ids]
+                    - asset.data.root_link_pos_w[precision_ids, :2],
+                    dim=1,
+                )
+                if record_training_metrics:
+                    state = generalist_episode_metrics_state(env)
+                    state["sampled_target_band_counts"][
+                        precision_ids, GENERALIST_TARGET_BAND_SHORT
+                    ] += 1.0
+                    begin_generalist_target_attempt(
+                        env,
+                        precision_ids,
+                        target_distance_m=precision_distances,
+                        target_band=GENERALIST_TARGET_BAND_SHORT,
+                        cohort_id=GENERALIST_COHORT_PRECISION_ANCHOR,
+                    )
+            if navigation_ids.numel() > 0:
+                _set_stratified_random_world_targets(
+                    env,
+                    asset,
+                    navigation_ids,
+                    arena_half_extent_m=arena_half_extent_m,
+                    long_goal_fraction=float(mix["long_goal_fraction"]),
+                    medium_goal_fraction=medium_goal_fraction,
+                    short_min_distance_m=short_min_distance_m,
+                    short_max_distance_m=short_max_distance_m,
+                    medium_min_distance_m=medium_min_distance_m,
+                    medium_max_distance_m=medium_max_distance_m,
+                    long_min_distance_m=long_min_distance_m,
+                    long_max_distance_m=long_max_distance_m,
+                    record_training_metrics=record_training_metrics,
+                )
     else:
         min_distance_m, max_distance_m = _scheduled_target_distance_range(
             env,
@@ -614,6 +1410,17 @@ def initialize_random_world_target(
             max_distance_m=max_distance_m,
             arena_half_extent_m=arena_half_extent_m,
         )
+        if record_training_metrics:
+            distances = torch.linalg.vector_norm(
+                world_target_xy(env)[ids] - asset.data.root_link_pos_w[ids, :2], dim=1
+            )
+            bands = _target_bands_for_distances(distances)
+            begin_generalist_target_attempt(
+                env,
+                ids,
+                target_distance_m=distances,
+                target_band=bands,
+            )
     if record_training_metrics:
         state = generalist_episode_metrics_state(env)
         state["initial_target_distance_m"][ids] = torch.linalg.vector_norm(
@@ -701,6 +1508,19 @@ class RepeatedRandomWorldTargetSequence:
         params = getattr(cfg, "params", {}) if cfg is not None else {}
         self._env = env
         self._stratified_goal_mix = bool(params.get("stratified_goal_mix", False))
+        precision_fraction = params.get("precision_anchor_fraction")
+        recovery_fraction = params.get("recovery_retarget_anchor_fraction")
+        if (precision_fraction is None) != (recovery_fraction is None):
+            raise ValueError("both fixed generalist anchor fractions must be configured together")
+        self._fixed_cohort_ids = (
+            None
+            if precision_fraction is None
+            else generalist_fixed_cohort_ids(
+                env,
+                precision_anchor_fraction=float(precision_fraction),
+                recovery_retarget_anchor_fraction=float(recovery_fraction),
+            )
+        )
         self._minimum_episodes_per_stage = int(params.get("minimum_episodes_per_stage", 64))
         self._goal_mix_state = generalist_goal_mix_state(
             env,
@@ -759,6 +1579,8 @@ class RepeatedRandomWorldTargetSequence:
         curriculum_ramp_control_steps: int | None = None,
         arena_half_extent_m: float = 0.65,
         gate_like_fraction: float = 0.25,
+        precision_anchor_fraction: float | None = None,
+        recovery_retarget_anchor_fraction: float | None = None,
         track_training_metrics: bool = False,
         stratified_goal_mix: bool = False,
         short_min_distance_m: float = 0.15,
@@ -770,7 +1592,8 @@ class RepeatedRandomWorldTargetSequence:
         medium_goal_fraction: float = 0.25,
         initial_long_goal_fraction: float = 0.10,
         max_long_goal_fraction: float = 0.40,
-        minimum_episodes_per_stage: int = 64,
+        minimum_attempts_per_window: int = 64,
+        minimum_episodes_per_stage: int | None = None,
         gate_recovery_lcb_threshold: float = 0.85,
         target_arrival_lcb_threshold: float = 0.50,
         gate_push_time_s: float = 4.0,
@@ -781,6 +1604,21 @@ class RepeatedRandomWorldTargetSequence:
         gate_max_target_distance_m: float = 0.20,
         asset_cfg: SceneEntityCfg,
     ) -> None:
+        if (precision_anchor_fraction is None) != (recovery_retarget_anchor_fraction is None):
+            raise ValueError("both fixed generalist anchor fractions must be configured together")
+        if precision_anchor_fraction is not None:
+            fixed_cohorts = generalist_fixed_cohort_ids(
+                env,
+                precision_anchor_fraction=precision_anchor_fraction,
+                recovery_retarget_anchor_fraction=recovery_retarget_anchor_fraction,
+            )
+            if self._fixed_cohort_ids is not None and not torch.equal(
+                self._fixed_cohort_ids, fixed_cohorts
+            ):
+                raise ValueError(
+                    "event-call cohort assignment differs from its fixed configuration"
+                )
+            self._fixed_cohort_ids = fixed_cohorts
         if target_reached_distance_m <= 0.0:
             raise ValueError("target_reached_distance_m must be positive")
         if target_hold_s <= 0.0:
@@ -824,6 +1662,13 @@ class RepeatedRandomWorldTargetSequence:
             raise ValueError("gate push requires 0 < min_delta_v <= max_delta_v")
         if not 0.0 < gate_min_target_distance_m <= gate_max_target_distance_m:
             raise ValueError("gate target distance requires 0 < min <= max")
+        minimum_attempts = (
+            int(minimum_attempts_per_window)
+            if minimum_episodes_per_stage is None
+            else int(minimum_episodes_per_stage)
+        )
+        if minimum_attempts <= 0:
+            raise ValueError("minimum target attempts per evidence window must be positive")
 
         ids = _resolved_env_ids(env, env_ids)
         if ids.numel() == 0:
@@ -831,14 +1676,29 @@ class RepeatedRandomWorldTargetSequence:
         asset = env.scene[asset_cfg.name]
         new_ids = ids[~self._episode_initialized[ids]]
         if new_ids.numel() > 0:
-            self._gate_like[new_ids] = (
-                torch.rand(new_ids.numel(), device=env.device) < current_gate_like_fraction
-            )
+            if self._fixed_cohort_ids is None:
+                self._gate_like[new_ids] = (
+                    torch.rand(new_ids.numel(), device=env.device) < current_gate_like_fraction
+                )
+                cohort_ids = torch.where(
+                    self._gate_like[new_ids],
+                    GENERALIST_COHORT_RECOVERY_RETARGET_ANCHOR,
+                    GENERALIST_COHORT_GENERALIST_NAVIGATION,
+                )
+            else:
+                cohort_ids = self._fixed_cohort_ids[new_ids]
+                self._gate_like[new_ids] = cohort_ids == GENERALIST_COHORT_RECOVERY_RETARGET_ANCHOR
             self._episode_initialized[new_ids] = True
             if track_training_metrics:
-                generalist_episode_metrics_state(env)["gate_like"][new_ids] = self._gate_like[
-                    new_ids
-                ]
+                episode_state = generalist_episode_metrics_state(env)
+                episode_state["gate_like"][new_ids] = self._gate_like[new_ids]
+                episode_state["cohort_id"][new_ids] = cohort_ids
+                pending_attempts = episode_state["target_attempt_pending"][new_ids]
+                reclassify_generalist_target_attempt_cohort(
+                    env,
+                    new_ids,
+                    cohort_id=cohort_ids[pending_attempts],
+                )
         self._episode_elapsed_s[ids] += float(env.step_dt)
 
         gate_ids = ids[self._gate_like[ids]]
@@ -854,6 +1714,8 @@ class RepeatedRandomWorldTargetSequence:
                 asset_cfg=asset_cfg,
             )
             self._gate_pushed[push_ids] = True
+            if track_training_metrics:
+                generalist_episode_metrics_state(env)["push_received"][push_ids] = True
 
         retarget_ids = gate_ids[
             (self._episode_elapsed_s[gate_ids] >= gate_retarget_time_s)
@@ -877,13 +1739,25 @@ class RepeatedRandomWorldTargetSequence:
             state["target_yaw"][retarget_ids] = yaw_from_quaternion_wxyz(
                 asset.data.root_link_quat_w[retarget_ids]
             )
+            if track_training_metrics:
+                begin_generalist_target_attempt(
+                    env,
+                    retarget_ids,
+                    target_distance_m=distances,
+                    target_band=GENERALIST_TARGET_BAND_SHORT,
+                    cohort_id=GENERALIST_COHORT_GATE,
+                )
             self._gate_retargeted[retarget_ids] = True
             if track_training_metrics:
                 state = generalist_episode_metrics_state(env)
+                state["retargeted"][retarget_ids] = True
+                state["retarget_issued"][retarget_ids] = True
                 state["arrived"][retarget_ids] = False
-                state["recovery_completed"][retarget_ids] = False
+                state["current_target_arrived"][retarget_ids] = False
                 state["heading_error_at_arrival_rad"][retarget_ids] = 0.0
+                state["settled_stop_recorded_for_target"][retarget_ids] = False
                 state["sampled_target_band_counts"][retarget_ids, 0] += 1.0
+                self._settled_at_target_s[retarget_ids] = 0.0
                 self._gate_recovery_stable_time_s[retarget_ids] = 0.0
 
         if track_training_metrics:
@@ -902,13 +1776,16 @@ class RepeatedRandomWorldTargetSequence:
                     self._gate_recovery_stable_time_s[recovering_ids] >= 0.50
                 ]
                 state["recovery_completed"][recovered] = True
+                state["recovery_completed_before_retarget"][recovered] = True
 
             target_distance = torch.linalg.vector_norm(
                 asset.data.root_link_pos_w[ids, :2] - world_target_xy(env)[ids], dim=1
             )
-            newly_arrived = (target_distance <= GENERALIST_TARGET_ARRIVAL_DISTANCE_M) & ~state[
-                "arrived"
-            ][ids]
+            within_arrival = target_distance <= GENERALIST_TARGET_ARRIVAL_DISTANCE_M
+            if self._fixed_cohort_ids is not None:
+                active_target = ~self._gate_like[ids] | self._gate_retargeted[ids]
+                within_arrival &= active_target
+            newly_arrived = within_arrival & ~state["current_target_arrived"][ids]
             arrived_ids = ids[newly_arrived]
             if arrived_ids.numel() > 0:
                 current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[arrived_ids])
@@ -916,38 +1793,169 @@ class RepeatedRandomWorldTargetSequence:
                     world_target_yaw(env)[arrived_ids], current_yaw
                 ).abs()
                 state["heading_error_at_arrival_rad"][arrived_ids] = heading_error
-            state["arrived"][ids] |= target_distance <= GENERALIST_TARGET_ARRIVAL_DISTANCE_M
+                state["target_arrival_count"][arrived_ids] += 1.0
+                state["arrival_heading_error_sum_rad"][arrived_ids] += heading_error
+                state["arrival_heading_error_samples"][arrived_ids] += 1.0
+                record_generalist_target_arrival(env, arrived_ids)
+                second_target_ids = arrived_ids[
+                    self._gate_like[arrived_ids] & self._gate_retargeted[arrived_ids]
+                ]
+                if second_target_ids.numel() > 0:
+                    state["second_target_arrived"][second_target_ids] = True
+                    state["post_retarget_heading_error_sum_rad"][second_target_ids] += (
+                        heading_error[
+                            self._gate_like[arrived_ids] & self._gate_retargeted[arrived_ids]
+                        ]
+                    )
+                    state["post_retarget_heading_error_samples"][second_target_ids] += 1.0
+            state["current_target_arrived"][ids] |= within_arrival
+            state["arrived"][ids] |= within_arrival
+
+            done_ids = env.termination_manager.dones.nonzero(as_tuple=False).flatten()
+            if done_ids.numel() > 0:
+                terminated = env.termination_manager.terminated[done_ids]
+                timeouts = env.termination_manager.time_outs[done_ids]
+                fall_ids = done_ids[terminated]
+                timeout_ids = done_ids[~terminated & timeouts]
+                ordinary_end_ids = done_ids[~terminated & ~timeouts]
+                finalize_generalist_target_attempts(
+                    env, fall_ids, reason=GENERALIST_ATTEMPT_TERMINAL_FALL
+                )
+                finalize_generalist_target_attempts(
+                    env, timeout_ids, reason=GENERALIST_ATTEMPT_TERMINAL_TIMEOUT
+                )
+                finalize_generalist_target_attempts(
+                    env, ordinary_end_ids, reason=GENERALIST_ATTEMPT_TERMINAL_EPISODE_END
+                )
 
         if self._stratified_goal_mix and stratified_goal_mix:
             self._record_goal_mix_outcomes(
                 env,
-                minimum_episodes=minimum_episodes_per_stage,
+                minimum_attempts=minimum_attempts,
                 gate_recovery_lcb_threshold=gate_recovery_lcb_threshold,
                 target_arrival_lcb_threshold=target_arrival_lcb_threshold,
             )
 
         regular_ids = ids[~self._gate_like[ids]]
-        if regular_ids.numel() == 0:
+        measurement_ids = ids if track_training_metrics else regular_ids
+        if measurement_ids.numel() == 0:
             return
         distance = torch.linalg.vector_norm(
-            asset.data.root_link_pos_w[regular_ids, :2] - world_target_xy(env)[regular_ids], dim=1
+            asset.data.root_link_pos_w[measurement_ids, :2] - world_target_xy(env)[measurement_ids],
+            dim=1,
         )
-        settled = _is_settled_for_locomotion(env, asset, regular_ids)
+        settled = _is_settled_for_locomotion(env, asset, measurement_ids)
         at_target = (distance <= target_reached_distance_m) & settled
-        self._settled_at_target_s[regular_ids] = torch.where(
+        self._settled_at_target_s[measurement_ids] = torch.where(
             at_target,
-            self._settled_at_target_s[regular_ids] + float(env.step_dt),
-            torch.zeros_like(self._settled_at_target_s[regular_ids]),
+            self._settled_at_target_s[measurement_ids] + float(env.step_dt),
+            torch.zeros_like(self._settled_at_target_s[measurement_ids]),
         )
-        ready = regular_ids[self._settled_at_target_s[regular_ids] >= target_hold_s]
+        ready = measurement_ids[self._settled_at_target_s[measurement_ids] >= target_hold_s]
         if ready.numel() == 0:
+            return
+
+        if track_training_metrics:
+            state = generalist_episode_metrics_state(env)
+            new_stops = ready[~state["settled_stop_recorded_for_target"][ready]]
+            if new_stops.numel() > 0:
+                current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[new_stops])
+                heading_error = wrapped_angle_difference(
+                    world_target_yaw(env)[new_stops], current_yaw
+                ).abs()
+                final_target_error = torch.linalg.vector_norm(
+                    asset.data.root_link_pos_w[new_stops, :2] - world_target_xy(env)[new_stops],
+                    dim=1,
+                )
+                root_speed = torch.linalg.vector_norm(
+                    asset.data.root_link_lin_vel_b[new_stops], dim=1
+                )
+                angular_speed = torch.linalg.vector_norm(
+                    asset.data.root_link_ang_vel_b[new_stops], dim=1
+                )
+                record_generalist_target_settled_stop(
+                    env,
+                    new_stops,
+                    heading_error_rad=heading_error,
+                    final_target_error_m=final_target_error,
+                    root_speed_mps=root_speed,
+                    angular_speed_radps=angular_speed,
+                )
+                post_retarget_ids = new_stops[
+                    self._gate_like[new_stops] & self._gate_retargeted[new_stops]
+                ]
+                if post_retarget_ids.numel() > 0:
+                    state["post_retarget_settled_stop"][post_retarget_ids] = True
+                    state["post_retarget_settled_heading_error_sum_rad"][post_retarget_ids] += (
+                        heading_error[self._gate_like[new_stops] & self._gate_retargeted[new_stops]]
+                    )
+                    state["post_retarget_settled_heading_error_samples"][post_retarget_ids] += 1.0
+
+        regular_ready = ready[~self._gate_like[ready]]
+        if regular_ready.numel() == 0:
+            return
+
+        if self._fixed_cohort_ids is not None:
+            precision_ready = regular_ready[
+                self._fixed_cohort_ids[regular_ready] == GENERALIST_COHORT_PRECISION_ANCHOR
+            ]
+            navigation_ready = regular_ready[
+                self._fixed_cohort_ids[regular_ready] == GENERALIST_COHORT_GENERALIST_NAVIGATION
+            ]
+            if precision_ready.numel() > 0:
+                _set_bounded_random_world_targets(
+                    env,
+                    asset,
+                    precision_ready,
+                    min_distance_m=short_min_distance_m,
+                    max_distance_m=short_max_distance_m,
+                    arena_half_extent_m=arena_half_extent_m,
+                )
+                distances = torch.linalg.vector_norm(
+                    world_target_xy(env)[precision_ready]
+                    - asset.data.root_link_pos_w[precision_ready, :2],
+                    dim=1,
+                )
+                if track_training_metrics:
+                    state = generalist_episode_metrics_state(env)
+                    state["sampled_target_band_counts"][
+                        precision_ready, GENERALIST_TARGET_BAND_SHORT
+                    ] += 1.0
+                    begin_generalist_target_attempt(
+                        env,
+                        precision_ready,
+                        target_distance_m=distances,
+                        target_band=GENERALIST_TARGET_BAND_SHORT,
+                        cohort_id=GENERALIST_COHORT_PRECISION_ANCHOR,
+                    )
+            if navigation_ready.numel() > 0:
+                _set_stratified_random_world_targets(
+                    env,
+                    asset,
+                    navigation_ready,
+                    arena_half_extent_m=arena_half_extent_m,
+                    long_goal_fraction=long_goal_fraction,
+                    medium_goal_fraction=medium_goal_fraction,
+                    short_min_distance_m=short_min_distance_m,
+                    short_max_distance_m=short_max_distance_m,
+                    medium_min_distance_m=medium_min_distance_m,
+                    medium_max_distance_m=medium_max_distance_m,
+                    long_min_distance_m=long_min_distance_m,
+                    long_max_distance_m=long_max_distance_m,
+                    record_training_metrics=track_training_metrics,
+                )
+            self._settled_at_target_s[regular_ready] = 0.0
+            if track_training_metrics:
+                state = generalist_episode_metrics_state(env)
+                state["current_target_arrived"][regular_ready] = False
+                state["settled_stop_recorded_for_target"][regular_ready] = False
             return
 
         if stratified_goal_mix:
             _set_stratified_random_world_targets(
                 env,
                 asset,
-                ready,
+                regular_ready,
                 arena_half_extent_m=arena_half_extent_m,
                 long_goal_fraction=long_goal_fraction,
                 medium_goal_fraction=medium_goal_fraction,
@@ -963,18 +1971,34 @@ class RepeatedRandomWorldTargetSequence:
             _set_bounded_random_world_targets(
                 env,
                 asset,
-                ready,
+                regular_ready,
                 min_distance_m=min_target_distance_m,
                 max_distance_m=max_target_distance_m,
                 arena_half_extent_m=arena_half_extent_m,
             )
-        self._settled_at_target_s[ready] = 0.0
+            if track_training_metrics:
+                distances = torch.linalg.vector_norm(
+                    world_target_xy(env)[regular_ready]
+                    - asset.data.root_link_pos_w[regular_ready, :2],
+                    dim=1,
+                )
+                begin_generalist_target_attempt(
+                    env,
+                    regular_ready,
+                    target_distance_m=distances,
+                    target_band=_target_bands_for_distances(distances),
+                )
+        self._settled_at_target_s[regular_ready] = 0.0
+        if track_training_metrics:
+            state = generalist_episode_metrics_state(env)
+            state["current_target_arrived"][regular_ready] = False
+            state["settled_stop_recorded_for_target"][regular_ready] = False
 
     def _record_goal_mix_outcomes(
         self,
         env,
         *,
-        minimum_episodes: int,
+        minimum_attempts: int,
         gate_recovery_lcb_threshold: float,
         target_arrival_lcb_threshold: float,
     ) -> None:
@@ -982,16 +2006,24 @@ class RepeatedRandomWorldTargetSequence:
         if done_ids.numel() == 0:
             return
         metrics_state = generalist_episode_metrics_state(env)
+        done_ids = done_ids[~metrics_state["curriculum_outcome_recorded"][done_ids]]
+        if done_ids.numel() == 0:
+            return
+        metrics_state["curriculum_outcome_recorded"][done_ids] = True
         gate = self._gate_like[done_ids]
         regular = ~gate
+        if self._fixed_cohort_ids is not None:
+            regular = self._fixed_cohort_ids[done_ids] == GENERALIST_COHORT_GENERALIST_NAVIGATION
         distance = metrics_state["initial_target_distance_m"][done_ids]
         arrived = metrics_state["arrived"][done_ids]
         recovered = metrics_state["recovery_completed"][done_ids]
 
         gate_count = int(gate.sum().item())
         gate_recovery_count = int((gate & recovered).sum().item())
-        short = regular & (distance <= GENERALIST_SHORT_TARGET_MAX_DISTANCE_M)
-        long = regular & (distance > GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M)
+        # Keep the historical episode-level initial-target counters for existing
+        # dashboards, but never use them for competence promotion.
+        short_episodes = regular & (distance <= GENERALIST_SHORT_TARGET_MAX_DISTANCE_M)
+        long_episodes = regular & (distance > GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M)
         self._goal_mix_state["gate_episodes"] = (
             int(self._goal_mix_state["gate_episodes"]) + gate_count
         )
@@ -999,31 +2031,97 @@ class RepeatedRandomWorldTargetSequence:
             int(self._goal_mix_state["gate_recovery_successes"]) + gate_recovery_count
         )
         self._goal_mix_state["short_episodes"] = int(self._goal_mix_state["short_episodes"]) + int(
-            short.sum().item()
+            short_episodes.sum().item()
         )
         self._goal_mix_state["short_arrival_successes"] = int(
             self._goal_mix_state["short_arrival_successes"]
-        ) + int((short & arrived).sum().item())
+        ) + int((short_episodes & arrived).sum().item())
         self._goal_mix_state["long_episodes"] = int(self._goal_mix_state["long_episodes"]) + int(
-            long.sum().item()
+            long_episodes.sum().item()
         )
         self._goal_mix_state["long_arrival_successes"] = int(
             self._goal_mix_state["long_arrival_successes"]
-        ) + int((long & arrived).sum().item())
-        next_stage = advance_generalist_goal_mix_stage(
-            int(self._goal_mix_state["stage"]),
-            gate_recovery_successes=int(self._goal_mix_state["gate_recovery_successes"]),
-            gate_episodes=int(self._goal_mix_state["gate_episodes"]),
-            short_arrival_successes=int(self._goal_mix_state["short_arrival_successes"]),
-            short_episodes=int(self._goal_mix_state["short_episodes"]),
-            long_arrival_successes=int(self._goal_mix_state["long_arrival_successes"]),
-            long_episodes=int(self._goal_mix_state["long_episodes"]),
-            minimum_episodes=minimum_episodes,
-            gate_recovery_lcb_threshold=gate_recovery_lcb_threshold,
-            target_arrival_lcb_threshold=target_arrival_lcb_threshold,
+        ) + int((long_episodes & arrived).sum().item())
+
+        attempt_counts = metrics_state["target_attempt_count_by_cohort_band"][done_ids].sum(dim=0)
+        arrival_counts = metrics_state["arrival_completed_count_by_cohort_band"][done_ids].sum(
+            dim=0
         )
-        if next_stage != int(self._goal_mix_state["stage"]):
+        short_attempts = int(
+            attempt_counts[
+                GENERALIST_COHORT_GENERALIST_NAVIGATION,
+                GENERALIST_TARGET_BAND_SHORT,
+            ].item()
+        )
+        short_arrivals = int(
+            arrival_counts[
+                GENERALIST_COHORT_GENERALIST_NAVIGATION,
+                GENERALIST_TARGET_BAND_SHORT,
+            ].item()
+        )
+        long_attempts = int(
+            attempt_counts[
+                GENERALIST_COHORT_GENERALIST_NAVIGATION,
+                GENERALIST_TARGET_BAND_LONG,
+            ].item()
+        )
+        long_arrivals = int(
+            arrival_counts[
+                GENERALIST_COHORT_GENERALIST_NAVIGATION,
+                GENERALIST_TARGET_BAND_LONG,
+            ].item()
+        )
+        self._goal_mix_state["short_attempts"] += short_attempts
+        self._goal_mix_state["short_attempt_arrivals"] += short_arrivals
+        self._goal_mix_state["long_attempts"] += long_attempts
+        self._goal_mix_state["long_attempt_arrivals"] += long_arrivals
+
+        for key, value in (
+            ("window_gate_episodes", gate_count),
+            ("window_gate_recovery_successes", gate_recovery_count),
+            ("window_short_attempts", short_attempts),
+            ("window_short_arrivals", short_arrivals),
+            ("window_long_attempts", long_attempts),
+            ("window_long_arrivals", long_arrivals),
+        ):
+            self._goal_mix_state[key] = int(self._goal_mix_state[key]) + value
+
+        stage = int(self._goal_mix_state["stage"])
+        window_ready = (
+            int(self._goal_mix_state["window_gate_episodes"]) >= minimum_attempts
+            and int(self._goal_mix_state["window_short_attempts"]) >= minimum_attempts
+            and (
+                stage == 0 or int(self._goal_mix_state["window_long_attempts"]) >= minimum_attempts
+            )
+        )
+        if not window_ready:
+            return
+        next_stage, demotion_streak = update_generalist_goal_mix_stage(
+            stage,
+            gate_recovery_successes=int(self._goal_mix_state["window_gate_recovery_successes"]),
+            gate_episodes=int(self._goal_mix_state["window_gate_episodes"]),
+            short_arrival_successes=int(self._goal_mix_state["window_short_arrivals"]),
+            short_episodes=int(self._goal_mix_state["window_short_attempts"]),
+            long_arrival_successes=int(self._goal_mix_state["window_long_arrivals"]),
+            long_episodes=int(self._goal_mix_state["window_long_attempts"]),
+            minimum_attempts=minimum_attempts,
+            demotion_streak=int(self._goal_mix_state["demotion_streak"]),
+            promotion_gate_lcb_threshold=gate_recovery_lcb_threshold,
+            promotion_target_lcb_threshold=target_arrival_lcb_threshold,
+        )
+        self._goal_mix_state["demotion_streak"] = demotion_streak
+        for key in (
+            "window_gate_episodes",
+            "window_gate_recovery_successes",
+            "window_short_attempts",
+            "window_short_arrivals",
+            "window_long_attempts",
+            "window_long_arrivals",
+        ):
+            self._goal_mix_state[key] = 0
+        if next_stage != stage:
             self._goal_mix_state["stage"] = next_stage
+            self._goal_mix_state["demotion_streak"] = 0
             fractions = generalist_goal_mix_fractions(
                 next_stage,
                 medium_goal_fraction=float(self._goal_mix_state["medium_goal_fraction"]),
@@ -1349,7 +2447,22 @@ def _set_stratified_random_world_targets(
         state = generalist_episode_metrics_state(env)
         for band in range(3):
             state["sampled_target_band_counts"][ids, band] += (bands == band).float()
+    if record_training_metrics:
+        begin_generalist_target_attempt(env, ids, target_distance_m=distances, target_band=bands)
     return distances, bands
+
+
+def _target_bands_for_distances(distances: torch.Tensor) -> torch.Tensor:
+    """Classify legacy continuous target ranges into non-overlapping bands."""
+    return torch.where(
+        distances <= GENERALIST_SHORT_TARGET_MAX_DISTANCE_M,
+        GENERALIST_TARGET_BAND_SHORT,
+        torch.where(
+            distances <= GENERALIST_MEDIUM_TARGET_MAX_DISTANCE_M,
+            GENERALIST_TARGET_BAND_MEDIUM,
+            GENERALIST_TARGET_BAND_LONG,
+        ),
+    ).to(dtype=torch.long)
 
 
 def _set_nearby_world_targets(
@@ -1371,9 +2484,31 @@ __all__ = [
     "generalist_goal_mix_fractions",
     "sample_stratified_goal_distances",
     "advance_generalist_goal_mix_stage",
+    "update_generalist_goal_mix_stage",
     "generalist_goal_mix_state",
+    "generalist_fixed_cohort_ids",
     "generalist_episode_metrics_state",
     "reset_generalist_episode_metrics",
+    "begin_generalist_target_attempt",
+    "reclassify_generalist_target_attempt_cohort",
+    "record_generalist_target_arrival",
+    "record_generalist_target_settled_stop",
+    "finalize_generalist_target_attempts",
+    "GENERALIST_TARGET_BAND_SHORT",
+    "GENERALIST_TARGET_BAND_MEDIUM",
+    "GENERALIST_TARGET_BAND_LONG",
+    "GENERALIST_COHORT_REGULAR",
+    "GENERALIST_COHORT_GATE",
+    "GENERALIST_COHORT_PRECISION_ANCHOR",
+    "GENERALIST_COHORT_RECOVERY_RETARGET_ANCHOR",
+    "GENERALIST_COHORT_GENERALIST_NAVIGATION",
+    "GENERALIST_ATTEMPT_TERMINAL_PENDING",
+    "GENERALIST_ATTEMPT_TERMINAL_SETTLED",
+    "GENERALIST_ATTEMPT_TERMINAL_FALL",
+    "GENERALIST_ATTEMPT_TERMINAL_TIMEOUT",
+    "GENERALIST_ATTEMPT_TERMINAL_RESET",
+    "GENERALIST_ATTEMPT_TERMINAL_RETARGETED",
+    "GENERALIST_ATTEMPT_TERMINAL_EPISODE_END",
     "generalist_gate_recovery_stable",
     "initialize_random_world_target",
     "initialize_world_target",
