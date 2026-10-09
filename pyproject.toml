@@ -39,6 +39,7 @@ ascento-mcp = "ascento_mjlab.mcp_server:main"
 
 [dependency-groups]
 dev = [
+  "httpx2>=2.13.1",
   "pytest>=9.0.3",
   "ruff>=0.16.1",
 ]
