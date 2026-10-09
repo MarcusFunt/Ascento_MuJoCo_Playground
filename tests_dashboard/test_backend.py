@@ -1,5 +1,7 @@
 import importlib
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 from dashboard.supervisor_client import SupervisorUnavailable
@@ -271,6 +273,58 @@ def test_activity_reports_unknown_host_processes_when_supervisor_is_missing(monk
     assert payload["render"]["status"] == "unknown"
 
 
+def test_index_cache_uses_database_snapshot_before_artifact_refresh(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    cached_rows = [{"id": "db-run", "state": "running"}]
+    monkeypatch.setattr(module.DATABASE, "list_runs", lambda: cached_rows)
+    monkeypatch.setattr(
+        module,
+        "_build_indexed_summaries",
+        lambda: (_ for _ in ()).throw(AssertionError("cold request should use database cache")),
+    )
+
+    assert module._indexed_summaries() == cached_rows
+    assert module._INDEX_CACHE_SOURCE == "database"
+    assert module._INDEX_REFRESHING is True
+
+
+def test_index_snapshot_serves_stale_data_while_refresh_runs(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    old_rows = [{"id": "old"}]
+    refreshed = threading.Event()
+    module._INDEX_CACHE = (time.monotonic() - module._INDEX_CACHE_TTL_S - 1, old_rows)
+
+    def rebuild():
+        refreshed.set()
+        return [{"id": "new"}]
+
+    monkeypatch.setattr(module, "_build_indexed_summaries", rebuild)
+
+    assert module._indexed_summaries() == old_rows
+    assert refreshed.wait(timeout=2)
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        with module._INDEX_CACHE_LOCK:
+            if module._INDEX_CACHE and module._INDEX_CACHE[1] == [{"id": "new"}]:
+                break
+        time.sleep(0.01)
+    assert module._INDEX_CACHE[1] == [{"id": "new"}]
+
+
+def test_activity_snapshot_is_reused_until_its_cache_expires(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    calls = []
+    def build_snapshot():
+        calls.append(True)
+        return {"checked_at": 123.0, "trainer": {"status": "idle"}}
+    monkeypatch.setattr(module, "_build_activity_snapshot", build_snapshot)
+    module._ACTIVITY_CACHE = None
+    first = module.activity_snapshot()
+    second = module.activity_snapshot()
+    assert first == second
+    assert len(calls) == 1
+
+
 def test_assessments_api_is_read_only_and_returns_deterministic_findings(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
     monkeypatch.setattr(module, "_indexed_summaries", lambda: [])
@@ -285,6 +339,53 @@ def test_assessments_api_is_read_only_and_returns_deterministic_findings(monkeyp
     assert response.status_code == 200
     assert response.json()["read_only"] is True
     assert response.json()["assessments"] == []
+
+
+def test_assessment_response_reuses_activity_and_evaluation_snapshots(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    counts = {"activity": 0, "evaluations": 0}
+    monkeypatch.setattr(module, "_indexed_summaries", lambda: [])
+    monkeypatch.setattr(module, "_system_components", lambda **_kwargs: {})
+    monkeypatch.setattr(module, "activity_snapshot", lambda: counts.__setitem__("activity", counts["activity"] + 1) or {})
+    monkeypatch.setattr(module, "runtime_revision_report", lambda: {})
+    monkeypatch.setattr(module.DATABASE, "status", lambda: {"enabled": False, "available": False})
+    cached_rows = [{"id": "cached-evaluation"}]
+    module._EVALUATION_CACHE = (time.monotonic(), cached_rows)
+    def evaluations():
+        counts["evaluations"] += 1
+        return list(cached_rows)
+    monkeypatch.setattr(module, "_evaluation_summaries", evaluations)
+    client = TestClient(module.app)
+    first = client.get("/api/assessments")
+    second = client.get("/api/assessments")
+    assert first.status_code == second.status_code == 200
+    assert counts == {"activity": 1, "evaluations": 1}
+
+
+def test_cold_evaluation_snapshot_refreshes_outside_the_request(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    rows = [{"id": "background-evaluation"}]
+
+    def blocked_discovery(*_args, **_kwargs):
+        started.set()
+        assert release.wait(timeout=3)
+        return rows
+
+    monkeypatch.setattr(module, "discover_evaluations", blocked_discovery)
+    response = TestClient(module.app).get("/api/evaluations")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+    assert started.wait(timeout=1)
+    release.set()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        if module._evaluation_summaries() == rows:
+            break
+        time.sleep(0.01)
+    assert module._evaluation_summaries() == rows
 
 
 def test_evaluation_registry_routes_are_read_only_and_preserve_incomplete_status(monkeypatch, tmp_path):
@@ -303,6 +404,10 @@ def test_evaluation_registry_routes_are_read_only_and_preserve_incomplete_status
     )
     monkeypatch.setattr(module, "EVALUATION_ROOT", evaluation_root)
     monkeypatch.setattr(module, "EVALUATION_SUITE_ROOT", suite_root)
+    module._EVALUATION_CACHE = (
+        time.monotonic(),
+        module.discover_evaluations(evaluation_root, limit=5000),
+    )
     client = TestClient(module.app)
 
     suite_response = client.get("/api/evaluation-suites")
@@ -328,6 +433,10 @@ def test_evaluation_registry_paginates_and_supports_etag_revalidation(monkeypatc
         encoding="utf-8",
     )
     monkeypatch.setattr(module, "EVALUATION_ROOT", evaluation_root)
+    module._EVALUATION_CACHE = (
+        time.monotonic(),
+        module.discover_evaluations(evaluation_root, limit=5000),
+    )
     client = TestClient(module.app)
 
     first_page = client.get("/api/evaluations?limit=1&offset=0")

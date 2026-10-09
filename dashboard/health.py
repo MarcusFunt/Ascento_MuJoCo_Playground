@@ -751,6 +751,30 @@ def summarize_dashboard_run(
     return base
 
 
+def summarize_dashboard_progress(
+    run_dir: Path,
+    root: Path,
+    *,
+    stale_after_seconds: float = 90.0,
+) -> dict[str, Any]:
+    """Build a compact live summary from bounded JSONL/log tails only."""
+    summary = summarize_dashboard_run(
+        run_dir,
+        root,
+        stale_after_seconds=stale_after_seconds,
+        detailed=False,
+        include_telemetry=False,
+        include_errors=False,
+        include_artifacts=False,
+    )
+    records = monitor.load_jsonl(run_dir / "telemetry.jsonl", limit=32)
+    if not records:
+        records = monitor.load_log_records(run_dir, limit=32)
+    decorated = decorate_records(records, run_dir)
+    summary["telemetry"] = decorated[-1] if decorated else None
+    return summary
+
+
 def list_dashboard_summaries(
     root: Path, *, stale_after_seconds: float = 90.0
 ) -> list[dict[str, Any]]:

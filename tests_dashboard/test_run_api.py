@@ -62,6 +62,81 @@ def test_checkpoint_compatibility_uses_only_stable_checkpoints_and_reports_contr
     assert unstable.status_code == 404
 
 
+def test_live_progress_endpoint_uses_compact_index_projection(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    class CompactRunService:
+        def progress(self, _run_id):
+            raise AssertionError("live progress must not build the detailed response")
+        def progress_index(self, run_id):
+            return {"id": run_id, "state": "running", "telemetry": {"iteration": 23}}
+    module.RUN_SERVICE = CompactRunService()
+    response = TestClient(module.app).get("/api/runs/run-compact/progress")
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": "run-compact",
+        "state": "running",
+        "telemetry": {"iteration": 23},
+    }
+    assert "experiment_manifest" not in response.json()
+
+
+def test_progress_endpoint_resolves_indexed_artifact_without_tree_discovery(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    run_dir = tmp_path / "indexed-run"
+    run_dir.mkdir()
+    monkeypatch.setattr(module.DATABASE, "run_artifact", lambda _run_id: "indexed-run")
+    monkeypatch.setattr(
+        module,
+        "summarize_dashboard_progress",
+        lambda path, _root, **_kwargs: {"id": "hashed-id", "state": "running", "path": str(path)},
+    )
+    monkeypatch.setattr(
+        module.RUN_SERVICE,
+        "annotate_index",
+        lambda summary, _path: {**summary, "id": "run-1"},
+    )
+    monkeypatch.setattr(
+        module.RUN_SERVICE,
+        "progress_index",
+        lambda _run_id: (_ for _ in ()).throw(AssertionError("filesystem discovery should be skipped")),
+    )
+
+    response = TestClient(module.app).get("/api/runs/run-1/progress")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "run-1"
+    assert response.json()["path"] == str(run_dir)
+
+
+def test_indexed_progress_reads_bounded_jsonl_without_tensorboard_history(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    run_dir = tmp_path / "indexed-run"
+    run_dir.mkdir()
+    (run_dir / "telemetry.jsonl").write_text(
+        '{"completed_steps": 42, "metrics": {"Train/mean_reward": 1.25}}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module.DATABASE, "run_artifact", lambda _run_id: "indexed-run")
+    monkeypatch.setattr(
+        module.RUN_SERVICE,
+        "annotate_index",
+        lambda summary, _path: {**summary, "id": "run-1"},
+    )
+    monkeypatch.setattr(
+        module,
+        "load_training_records",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("progress polls must not scan TensorBoard history")
+        ),
+    )
+
+    response = TestClient(module.app).get("/api/runs/run-1/progress")
+
+    assert response.status_code == 200
+    assert response.json()["telemetry"]["iteration"] == 42
+    assert response.json()["telemetry"]["canonical_metrics"]["reward"] == 1.25
+
+
 def test_create_request_preserves_lineage_and_training_args(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
     captured = {}

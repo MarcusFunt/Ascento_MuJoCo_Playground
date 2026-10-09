@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import math
@@ -49,6 +50,7 @@ from dashboard.health import (
     list_dashboard_summaries,
     load_dashboard_records,
     process_status,
+    summarize_dashboard_progress,
 )
 from dashboard.monitor import load_training_records, tail_lines, training_log_path
 from dashboard.run_service import RunService
@@ -84,18 +86,28 @@ DATABASE = DashboardDatabase(CONFIG.database_url, CONFIG.repo_root)
 
 # Artifact discovery walks a mounted training directory.  Keeping the annotated
 # list briefly avoids making every UI poll repeat that full filesystem scan.
-_SUMMARY_CACHE_TTL_S = 25.0
+_SUMMARY_CACHE_TTL_S = 90.0
 _SUMMARY_CACHE_LOCK = threading.Lock()
 _SUMMARY_CACHE: tuple[float, list[dict]] | None = None
-_INDEX_CACHE_TTL_S = 10.0
+_INDEX_CACHE_TTL_S = 30.0
 _INDEX_CACHE_LOCK = threading.Lock()
 _INDEX_CACHE: tuple[float, list[dict]] | None = None
-_OVERVIEW_SERIES_CACHE_TTL_S = 10.0
+_INDEX_CACHE_SOURCE: str | None = None
+_OVERVIEW_SERIES_CACHE_TTL_S = 30.0
 _OVERVIEW_SERIES_CACHE_LOCK = threading.Lock()
 _OVERVIEW_SERIES_CACHE: dict[str, tuple[float, list[dict]]] = {}
-_EVALUATION_CACHE_TTL_S = 10.0
+_EVALUATION_CACHE_TTL_S = 60.0
 _EVALUATION_CACHE_LOCK = threading.Lock()
 _EVALUATION_CACHE: tuple[float, list[dict]] | None = None
+_EVALUATION_REFRESHING = False
+_ACTIVITY_CACHE_TTL_S = 15.0
+_ACTIVITY_CACHE_LOCK = threading.Lock()
+_ACTIVITY_CACHE: tuple[float, dict] | None = None
+_INDEX_REFRESHING = False
+_SUMMARY_REFRESHING = False
+_ASSESSMENTS_CACHE_TTL_S = 30.0
+_ASSESSMENTS_CACHE_LOCK = threading.Lock()
+_ASSESSMENTS_CACHE: tuple[float, dict] | None = None
 
 @asynccontextmanager
 async def dashboard_lifespan(_: FastAPI):
@@ -335,23 +347,61 @@ def _blender_asset_url(path: Path, root: Path) -> str | None:
 
 
 def _invalidate_summary_cache() -> None:
-    global _SUMMARY_CACHE, _INDEX_CACHE
+    global _SUMMARY_CACHE, _INDEX_CACHE, _INDEX_CACHE_SOURCE, _ACTIVITY_CACHE, _ASSESSMENTS_CACHE
     with _SUMMARY_CACHE_LOCK:
         _SUMMARY_CACHE = None
     with _INDEX_CACHE_LOCK:
         _INDEX_CACHE = None
+        _INDEX_CACHE_SOURCE = None
+    with _ACTIVITY_CACHE_LOCK:
+        _ACTIVITY_CACHE = None
+    with _ASSESSMENTS_CACHE_LOCK:
+        _ASSESSMENTS_CACHE = None
+
+
+def _refresh_evaluation_cache() -> None:
+    global _EVALUATION_CACHE, _EVALUATION_REFRESHING, _ASSESSMENTS_CACHE
+    try:
+        rows = discover_evaluations(EVALUATION_ROOT, limit=5000)
+    except Exception:
+        rows = None
+    with _EVALUATION_CACHE_LOCK:
+        if rows is not None:
+            _EVALUATION_CACHE = (time.monotonic(), rows)
+        _EVALUATION_REFRESHING = False
+    if rows is not None:
+        # An assessments response may have been assembled while the first
+        # evaluation snapshot was still loading. Let the next poll include it.
+        with _ASSESSMENTS_CACHE_LOCK:
+            _ASSESSMENTS_CACHE = None
+
+
+def _start_evaluation_refresh_locked() -> None:
+    global _EVALUATION_REFRESHING
+    if _EVALUATION_REFRESHING:
+        return
+    _EVALUATION_REFRESHING = True
+    threading.Thread(
+        target=_refresh_evaluation_cache,
+        daemon=True,
+        name="dashboard-evaluation-refresh",
+    ).start()
 
 
 def _evaluation_summaries() -> list[dict]:
     global _EVALUATION_CACHE
-    now = time.monotonic()
     with _EVALUATION_CACHE_LOCK:
-        if _EVALUATION_CACHE is not None and now - _EVALUATION_CACHE[0] < _EVALUATION_CACHE_TTL_S:
-            return list(_EVALUATION_CACHE[1])
-    rows = discover_evaluations(EVALUATION_ROOT, limit=5000)
-    with _EVALUATION_CACHE_LOCK:
-        _EVALUATION_CACHE = (now, rows)
-    return list(rows)
+        now = time.monotonic()
+        if _EVALUATION_CACHE is not None:
+            cached_at, cached_rows = _EVALUATION_CACHE
+            if now - cached_at >= _EVALUATION_CACHE_TTL_S:
+                _start_evaluation_refresh_locked()
+            return list(cached_rows)
+        # A cold request must not synchronously walk the evaluation tree. Return
+        # an empty snapshot while a background thread builds the first cache.
+        _EVALUATION_CACHE = (now, [])
+        _start_evaluation_refresh_locked()
+        return []
 
 
 def _evaluation_etag(value: dict) -> str:
@@ -407,14 +457,7 @@ def _compact_run(summary: dict) -> dict:
     }
 
 
-def _indexed_summaries() -> list[dict]:
-    global _INDEX_CACHE
-    with _INDEX_CACHE_LOCK:
-        if _INDEX_CACHE is not None:
-            cached_at, rows = _INDEX_CACHE
-            if time.monotonic() - cached_at < _INDEX_CACHE_TTL_S:
-                return list(rows)
-
+def _build_indexed_summaries() -> list[dict]:
     summaries = list_dashboard_summaries(
         ARTIFACT_ROOT,
         stale_after_seconds=CONFIG.stale_after_seconds,
@@ -434,10 +477,53 @@ def _indexed_summaries() -> list[dict]:
                 pass
         rows.append(row)
         DATABASE.sync_run(row)
+    return rows
 
+
+def _refresh_index_cache() -> None:
+    global _INDEX_CACHE, _INDEX_CACHE_SOURCE, _INDEX_REFRESHING
+    try:
+        rows = _build_indexed_summaries()
+    except Exception:
+        rows = None
     with _INDEX_CACHE_LOCK:
+        if rows is not None:
+            _INDEX_CACHE = (time.monotonic(), rows)
+            _INDEX_CACHE_SOURCE = "filesystem"
+        _INDEX_REFRESHING = False
+
+
+def _indexed_summaries() -> list[dict]:
+    global _INDEX_CACHE, _INDEX_CACHE_SOURCE, _INDEX_REFRESHING
+    with _INDEX_CACHE_LOCK:
+        now = time.monotonic()
+        if _INDEX_CACHE is not None:
+            cached_at, rows = _INDEX_CACHE
+            if now - cached_at < _INDEX_CACHE_TTL_S:
+                return list(rows)
+            if not _INDEX_REFRESHING:
+                _INDEX_REFRESHING = True
+                threading.Thread(
+                    target=_refresh_index_cache,
+                    daemon=True,
+                    name="dashboard-run-index-refresh",
+                ).start()
+            return list(rows)
+        rows = DATABASE.list_runs()
+        if rows is not None:
+            _INDEX_CACHE = (time.monotonic(), rows)
+            _INDEX_CACHE_SOURCE = "database"
+            _INDEX_REFRESHING = True
+            threading.Thread(
+                target=_refresh_index_cache,
+                daemon=True,
+                name="dashboard-run-index-refresh",
+            ).start()
+            return list(rows)
+        rows = _build_indexed_summaries()
         _INDEX_CACHE = (time.monotonic(), rows)
-    return list(rows)
+        _INDEX_CACHE_SOURCE = "filesystem"
+        return list(rows)
 
 
 def _overview_series(run_id: str, max_points: int = 120) -> list[dict]:
@@ -509,16 +595,7 @@ def _cached_summary_count() -> int | None:
         return len(summaries)
 
 
-def _annotated_summaries() -> list[dict]:
-    global _SUMMARY_CACHE
-    with _SUMMARY_CACHE_LOCK:
-        if _SUMMARY_CACHE is not None:
-            cached_at, summaries = _SUMMARY_CACHE
-            if time.monotonic() - cached_at < _SUMMARY_CACHE_TTL_S:
-                return list(summaries)
-
-    # Keep the lock out of the filesystem walk so a health request is never
-    # held behind a slow network or mounted-drive scan.
+def _build_annotated_summaries() -> list[dict]:
     summaries = list_dashboard_summaries(
         ARTIFACT_ROOT,
         stale_after_seconds=CONFIG.stale_after_seconds,
@@ -528,10 +605,40 @@ def _annotated_summaries() -> list[dict]:
         ref = refs.get(summary.get("id"))
         if ref is not None:
             RUN_SERVICE.annotate(summary, ref.path)
+    return summaries
 
+
+def _refresh_summary_cache() -> None:
+    global _SUMMARY_CACHE, _SUMMARY_REFRESHING
+    try:
+        summaries = _build_annotated_summaries()
+    except Exception:
+        summaries = None
     with _SUMMARY_CACHE_LOCK:
+        if summaries is not None:
+            _SUMMARY_CACHE = (time.monotonic(), summaries)
+        _SUMMARY_REFRESHING = False
+
+
+def _annotated_summaries() -> list[dict]:
+    global _SUMMARY_CACHE, _SUMMARY_REFRESHING
+    with _SUMMARY_CACHE_LOCK:
+        now = time.monotonic()
+        if _SUMMARY_CACHE is not None:
+            cached_at, summaries = _SUMMARY_CACHE
+            if now - cached_at < _SUMMARY_CACHE_TTL_S:
+                return list(summaries)
+            if not _SUMMARY_REFRESHING:
+                _SUMMARY_REFRESHING = True
+                threading.Thread(
+                    target=_refresh_summary_cache,
+                    daemon=True,
+                    name="dashboard-run-summary-refresh",
+                ).start()
+            return list(summaries)
+        summaries = _build_annotated_summaries()
         _SUMMARY_CACHE = (time.monotonic(), summaries)
-    return list(summaries)
+        return list(summaries)
 
 
 @app.get("/api/health")
@@ -751,11 +858,10 @@ def _supervised_activity_runs(active_runs: list[dict]) -> list[dict]:
     return results
 
 
-@app.get("/api/activity")
-def activity_snapshot():
+def _build_activity_snapshot():
     """Return bounded activity with per-source verification and freshness."""
     checked_at = time.time()
-    indexed_rows = _annotated_summaries()
+    indexed_rows = _indexed_summaries()
     active_states = {"starting", "running", "stopping"}
     indexed_active = [
         {
@@ -853,6 +959,18 @@ def activity_snapshot():
     }
 
 
+@app.get("/api/activity")
+def activity_snapshot():
+    global _ACTIVITY_CACHE
+    with _ACTIVITY_CACHE_LOCK:
+        now = time.monotonic()
+        if _ACTIVITY_CACHE is not None and now - _ACTIVITY_CACHE[0] < _ACTIVITY_CACHE_TTL_S:
+            return copy.deepcopy(_ACTIVITY_CACHE[1])
+        snapshot = _build_activity_snapshot()
+        _ACTIVITY_CACHE = (time.monotonic(), snapshot)
+        return copy.deepcopy(snapshot)
+
+
 @app.get("/api/evaluation-suites")
 def evaluation_suites():
     return {
@@ -862,8 +980,7 @@ def evaluation_suites():
     }
 
 
-@app.get("/api/assessments")
-def assessments():
+def _build_assessments_snapshot():
     """Return bounded, deterministic read-only operational and evidence findings."""
     checked_at = time.time()
     rows = _indexed_summaries()
@@ -872,19 +989,22 @@ def assessments():
     checkpoint: dict[str, Any] | None = None
     if latest and latest.get("id"):
         run_id = str(latest["id"])
-        try:
-            run = RUN_SERVICE.progress(run_id)
-            checkpoint_rows = VIEWER_SERVICE.checkpoints(run_id).get("checkpoints") or []
-            stable_rows = [item for item in checkpoint_rows if item.get("stable") is True]
-            if stable_rows:
-                checkpoint = checkpoint_evidence(
-                    run_id=run_id,
-                    run_dir=RUN_SERVICE.resolve(run_id).path,
-                    stable_checkpoints=stable_rows,
-                    evaluation_root=EVALUATION_ROOT,
-                )
-        except (KeyError, OSError, ValueError, RuntimeError):
-            checkpoint = None
+        if _INDEX_CACHE_SOURCE == "database":
+            run = latest
+        else:
+            try:
+                run = RUN_SERVICE.progress_index(run_id)
+                checkpoint_rows = VIEWER_SERVICE.checkpoints(run_id).get("checkpoints") or []
+                stable_rows = [item for item in checkpoint_rows if item.get("stable") is True]
+                if stable_rows:
+                    checkpoint = checkpoint_evidence(
+                        run_id=run_id,
+                        run_dir=RUN_SERVICE.resolve(run_id).path,
+                        stable_checkpoints=stable_rows,
+                        evaluation_root=EVALUATION_ROOT,
+                    )
+            except (KeyError, OSError, ValueError, RuntimeError):
+                checkpoint = None
     evaluation_rows = _evaluation_summaries()[:250]
     components = _system_components(checked_at=checked_at)
     return {
@@ -901,6 +1021,18 @@ def assessments():
             evaluations=evaluation_rows,
         ),
     }
+
+
+@app.get("/api/assessments")
+def assessments():
+    global _ASSESSMENTS_CACHE
+    with _ASSESSMENTS_CACHE_LOCK:
+        now = time.monotonic()
+        if _ASSESSMENTS_CACHE is not None and now - _ASSESSMENTS_CACHE[0] < _ASSESSMENTS_CACHE_TTL_S:
+            return copy.deepcopy(_ASSESSMENTS_CACHE[1])
+        snapshot = _build_assessments_snapshot()
+        _ASSESSMENTS_CACHE = (time.monotonic(), snapshot)
+        return copy.deepcopy(snapshot)
 
 
 @app.get("/api/experiments")
@@ -1163,14 +1295,20 @@ def overview():
         }
 
     try:
-        detail, curriculum = _curriculum_snapshot(str(active["id"]))
-        current = _overview_run(detail)
-        DATABASE.sync_run(current, curriculum)
+        if _INDEX_CACHE_SOURCE == "database":
+            current = active
+            curriculum = active.get("curriculum")
+            series = []
+        else:
+            detail, curriculum = _curriculum_snapshot(str(active["id"]))
+            current = _overview_run(detail)
+            DATABASE.sync_run(current, curriculum)
+            series = _overview_series(str(active["id"]))
         return {
             "active_run": current,
             "recent_run": rows[0] if rows else None,
             "curriculum": curriculum,
-            "series": _overview_series(str(active["id"])),
+            "series": series,
             "events": DATABASE.recent_events(run_id=str(active["id"]), limit=12),
             "counts": counts,
             "database": DATABASE.status(),
@@ -1257,9 +1395,25 @@ def run_curriculum(run_id: str):
 
 @app.get("/api/runs/{run_id}/progress")
 def run_progress(run_id: str):
-    """Return the latest live snapshot without scanning detailed run history."""
+    """Return compact live telemetry using the indexed artifact path when available."""
     try:
-        return RUN_SERVICE.progress(run_id)
+        artifact_name = DATABASE.run_artifact(run_id)
+        if artifact_name:
+            relative_path = Path(artifact_name)
+            if not relative_path.is_absolute():
+                run_dir = (ARTIFACT_ROOT / relative_path).resolve()
+                try:
+                    run_dir.relative_to(ARTIFACT_ROOT.resolve())
+                except ValueError:
+                    run_dir = None
+                if run_dir is not None and run_dir.is_dir():
+                    summary = summarize_dashboard_progress(
+                        run_dir,
+                        ARTIFACT_ROOT,
+                        stale_after_seconds=CONFIG.stale_after_seconds,
+                    )
+                    return RUN_SERVICE.annotate_index(summary, run_dir)
+        return RUN_SERVICE.progress_index(run_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="training run not found") from error
 

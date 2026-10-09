@@ -36,14 +36,14 @@ export function AppShell() {
   const overview = useQuery({
     queryKey: ['overview'],
     queryFn: api.overview,
-    refetchInterval: 5_000,
+    refetchInterval: 15_000,
     staleTime: 2_000,
   })
   const active = overview.data?.active_run
   const health = useQuery({
     queryKey: ['health'],
     queryFn: api.health,
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   })
   const systemHealth = health.data
   const unhealthyComponents = Object.entries(systemHealth?.components || {})

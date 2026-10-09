@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import threading
 import time
@@ -52,7 +53,7 @@ _TENSORBOARD_RECORD_CACHE: dict[
 _TENSORBOARD_LOCK = threading.Lock()
 _DISCOVERY_CACHE: dict[Path, tuple[float, list["RunRef"]]] = {}
 _DISCOVERY_LOCK = threading.Lock()
-_DISCOVERY_CACHE_TTL_S = 2.0
+_DISCOVERY_CACHE_TTL_S = 120.0
 
 
 @dataclass(frozen=True)
@@ -84,22 +85,55 @@ def load_json(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _json_object(line: str) -> dict[str, Any] | None:
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def load_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
-    records: list[dict[str, Any]] = []
+    if limit is not None and limit <= 0:
+        return []
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                try:
-                    value = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(value, dict):
-                    records.append(value)
+        if limit is None:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                lines = handle
+                return [
+                    value
+                    for line in lines
+                    if isinstance((value := _json_object(line)), dict)
+                ]
+
+        # Progress views need only recent samples. Read backwards in chunks so a
+        # multi-gigabyte telemetry file does not get parsed for every dashboard
+        # poll. Continue farther back if malformed/partial lines reduce the
+        # number of valid records in the current tail.
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            position = handle.tell()
+            chunks = b""
+            while position > 0:
+                start = max(0, position - 64 * 1024)
+                handle.seek(start)
+                chunks = handle.read(position - start) + chunks
+                position = start
+                lines = chunks.splitlines()
+                if position > 0 and lines:
+                    lines = lines[1:]  # first line may start before the read window
+                records = []
+                for line in lines:
+                    value = _json_object(line.decode("utf-8", errors="replace"))
+                    if isinstance(value, dict):
+                        records.append(value)
+                if len(records) >= limit or position == 0:
+                    return records[-limit:]
     except OSError:
         return []
-    return records[-limit:] if limit is not None else records
+    return []
 
 
 def _training_limit(run_dir: Path) -> int | None:
@@ -249,9 +283,9 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
 def load_training_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
     """Read the densest available history, preserving the full run span."""
     candidates = [
-        load_jsonl(run_dir / "telemetry.jsonl", limit=None),
-        load_log_records(run_dir, limit=None),
-        load_tensorboard_records(run_dir, limit=None),
+        load_jsonl(run_dir / "telemetry.jsonl", limit=limit),
+        load_log_records(run_dir, limit=limit),
+        load_tensorboard_records(run_dir, limit=limit),
     ]
     records = max(candidates, key=len, default=[])
     return records[-limit:] if limit is not None else records
@@ -356,14 +390,16 @@ def discover_runs(root: Path) -> list[RunRef]:
             return list(cached[1])
 
         candidates: set[Path] = set()
-        if any((root / marker).exists() for marker in RUN_MARKERS):
-            candidates.add(root)
-        for marker in RUN_MARKERS:
-            for path in root.rglob(marker):
-                candidates.add(path.parent.resolve())
-        for pattern in ("events.out.tfevents.*", "model_*.pt"):
-            for path in root.rglob(pattern):
-                candidates.add(path.parent.resolve())
+        marker_names = set(RUN_MARKERS)
+        for directory, dirnames, filenames in os.walk(root):
+            names = (*dirnames, *filenames)
+            if any(
+                name in marker_names
+                or name.startswith("events.out.tfevents.")
+                or (name.startswith("model_") and name.endswith(".pt"))
+                for name in names
+            ):
+                candidates.add(Path(directory).resolve())
         refs = []
         for path in candidates:
             if not _inside(path, root):

@@ -15,7 +15,12 @@ from typing import Any
 from uuid import uuid4
 
 from dashboard.config import REPO_ROOT
-from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
+from dashboard.health import (
+    discover_dashboard_runs,
+    run_status_path,
+    summarize_dashboard_progress,
+    summarize_dashboard_run,
+)
 from dashboard.monitor import invalidate_discovery_cache
 from dashboard.provenance import working_tree_state
 from dashboard.runtime_policy import apply_training_device, runtime_identity, training_device
@@ -182,13 +187,10 @@ class RunService:
     def progress_index(self, run_id: str) -> dict[str, Any]:
         """Return a cheap live snapshot without full compatibility contracts."""
         ref = self.resolve(run_id)
-        summary = summarize_dashboard_run(
+        summary = summarize_dashboard_progress(
             ref.path,
             self.artifact_root,
             stale_after_seconds=self.stale_after_seconds,
-            detailed=False,
-            include_errors=False,
-            include_artifacts=False,
         )
         return self.annotate_index(summary, ref.path)
 

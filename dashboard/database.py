@@ -312,6 +312,82 @@ class DashboardDatabase:
         )
         return True
 
+    def run_artifact(self, run_id: str) -> str | None:
+        """Return the indexed artifact path without scanning the artifact tree."""
+        if not self._ensure_available():
+            return None
+        try:
+            with self._session() as session:
+                record = session.get(RunIndex, run_id)
+                return record.artifact_name if record is not None else None
+        except SQLAlchemyError as error:
+            self._mark_unavailable(error)
+            return None
+
+    def list_runs(self, *, limit: int = 5000) -> list[dict[str, Any]] | None:
+        """Read the last indexed run snapshot without walking artifact mounts."""
+        if not self._ensure_available():
+            return None
+        try:
+            with self._session() as session:
+                records = session.scalars(
+                    select(RunIndex)
+                    .order_by(RunIndex.updated_at.desc())
+                    .limit(max(1, min(int(limit), 5000)))
+                ).all()
+            now = time.time()
+            rows = []
+            for record in records:
+                freshness = (
+                    max(0.0, now - record.modified_at)
+                    if record.modified_at is not None
+                    else None
+                )
+                rows.append(
+                    {
+                        "id": record.id,
+                        "name": record.artifact_name,
+                        "display_name": record.display_name,
+                        "task": record.task,
+                        "stage": record.stage,
+                        "state": record.state,
+                        "stale": (
+                            record.state in {"starting", "running"}
+                            and freshness is not None
+                            and freshness > 90.0
+                        ),
+                        "freshness_seconds": freshness,
+                        "modified_at": record.modified_at,
+                        "updated_at": record.updated_at,
+                        "tags": [],
+                        "purpose": "",
+                        "lineage": {},
+                        "repository_version": {
+                            "status": record.repository_status,
+                            "is_outdated": record.repository_status == "outdated",
+                            "run_commit": record.run_commit,
+                            "current_commit": None,
+                        },
+                        "iteration": record.iteration,
+                        "total_iterations": record.total_iterations,
+                        "percent_complete": record.percent_complete,
+                        "eta_seconds": None,
+                        "throughput": None,
+                        "reward": record.reward,
+                        "episode_length": record.episode_length,
+                        "kl": record.kl,
+                        "entropy": record.entropy,
+                        "ppo_loss": None,
+                        "clip_fraction": None,
+                        "invalid_update": None,
+                        "curriculum": record.curriculum,
+                    }
+                )
+            return rows
+        except SQLAlchemyError as error:
+            self._mark_unavailable(error)
+            return None
+
     def sync_run(
         self,
         row: dict[str, Any],

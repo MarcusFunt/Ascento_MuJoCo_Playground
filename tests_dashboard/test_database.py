@@ -38,6 +38,36 @@ def test_database_migrates_and_records_curriculum_transitions(tmp_path):
     database.dispose()
 
 
+def test_database_lists_compact_run_snapshots_for_fast_startup(tmp_path):
+    database = _database(tmp_path)
+    database.sync_run(
+        {
+            "id": "run-cached",
+            "display_name": "Cached run",
+            "name": "artifact/run-cached",
+            "task": "Ascento-Balance-Flat",
+            "stage": "balance",
+            "state": "running",
+            "iteration": 12,
+            "total_iterations": 100,
+            "percent_complete": 12.0,
+            "modified_at": 1000.0,
+            "repository_version": {"status": "current", "run_commit": "abc"},
+        },
+        {"kind": "horizon", "stage": 2},
+    )
+
+    rows = database.list_runs()
+
+    assert database.run_artifact("run-cached") == "artifact/run-cached"
+    assert len(rows) == 1
+    assert rows[0]["id"] == "run-cached"
+    assert rows[0]["iteration"] == 12
+    assert rows[0]["repository_version"]["run_commit"] == "abc"
+    assert rows[0]["curriculum"] == {"kind": "horizon", "stage": 2}
+    database.dispose()
+
+
 def test_database_records_run_state_transition(tmp_path):
     database = _database(tmp_path)
     row = {

@@ -1,7 +1,9 @@
 import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
+from dashboard import monitor
 from dashboard.health import (
     _pid_namespace,
     decorate_records,
@@ -11,7 +13,7 @@ from dashboard.health import (
     process_status,
     summarize_dashboard_run,
 )
-from dashboard.monitor import load_log_records, load_tensorboard_records, tail_lines
+from dashboard.monitor import load_jsonl, load_log_records, load_tensorboard_records, tail_lines
 
 
 def test_tail_lines_reads_the_requested_suffix_without_changing_line_shape(tmp_path):
@@ -19,6 +21,67 @@ def test_tail_lines_reads_the_requested_suffix_without_changing_line_shape(tmp_p
     log.write_text("first\nsecond\nthird\nfourth", encoding="utf-8")
 
     assert tail_lines(log, 2) == ["third\n", "fourth"]
+
+
+def test_load_jsonl_reads_only_the_requested_tail(tmp_path):
+    path = tmp_path / "telemetry.jsonl"
+    path.write_text(
+        "".join(json.dumps({"iteration": index, "padding": "x" * 40}) + "\n" for index in range(10_000)),
+        encoding="utf-8",
+    )
+    records = load_jsonl(path, limit=3)
+    assert [record["iteration"] for record in records] == [9_997, 9_998, 9_999]
+
+
+def test_load_jsonl_bounds_bytes_read_for_a_small_tail(monkeypatch, tmp_path):
+    path = tmp_path / "large-telemetry.jsonl"
+    path.write_text(
+        "".join(json.dumps({"iteration": index, "padding": "x" * 100}) + "\n" for index in range(20_000)),
+        encoding="utf-8",
+    )
+    original_open = Path.open
+    bytes_read = [0]
+
+    class CountingFile:
+        def __init__(self, handle):
+            self.handle = handle
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+        def read(self, size=-1):
+            data = self.handle.read(size)
+            bytes_read[0] += len(data)
+            return data
+
+    def tracked_open(candidate, *args, **kwargs):
+        handle = original_open(candidate, *args, **kwargs)
+        return CountingFile(handle) if candidate == path else handle
+
+    monkeypatch.setattr(Path, "open", tracked_open)
+    records = load_jsonl(path, limit=4)
+
+    assert [record["iteration"] for record in records] == [19_996, 19_997, 19_998, 19_999]
+    assert bytes_read[0] <= 64 * 1024
+
+
+def test_load_training_records_passes_the_limit_to_each_source(monkeypatch, tmp_path):
+    from dashboard import monitor
+    calls = []
+    def record_call(name):
+        def wrapped(_run_dir, *, limit):
+            calls.append((name, limit))
+            return [{"source": name}]
+        return wrapped
+    monkeypatch.setattr(monitor, "load_jsonl", record_call("jsonl"))
+    monkeypatch.setattr(monitor, "load_log_records", record_call("log"))
+    monkeypatch.setattr(monitor, "load_tensorboard_records", record_call("tensorboard"))
+    result = monitor.load_training_records(tmp_path, limit=17)
+    assert calls == [("jsonl", 17), ("log", 17), ("tensorboard", 17)]
+    assert result == [{"source": "jsonl"}]
 
 
 def test_log_records_supply_recent_rsl_rl_metrics_without_tensorboard(tmp_path):
@@ -174,6 +237,29 @@ def test_canonical_metrics_and_non_finite_detection(tmp_path):
     assert record["metrics"]["bad_metric"] is None
     assert record["has_non_finite"] is True
     assert record["canonical_metrics"]["invalid_update"] == 1
+
+
+
+def test_run_discovery_walks_artifact_tree_once(tmp_path, monkeypatch):
+    run_dir = tmp_path / "experiment" / "run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "telemetry.jsonl").write_text("", encoding="utf-8")
+    monitor.invalidate_discovery_cache(tmp_path)
+    original_walk = monitor.os.walk
+    calls = 0
+
+    def counted_walk(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        yield from original_walk(*args, **kwargs)
+
+    monkeypatch.setattr(monitor.os, "walk", counted_walk)
+
+    refs = monitor.discover_runs(tmp_path)
+
+    assert len(refs) == 1
+    assert refs[0].path == run_dir.resolve()
+    assert calls == 1
 
 
 def test_nested_launcher_run_is_discovered_once_and_inherits_metadata(tmp_path):

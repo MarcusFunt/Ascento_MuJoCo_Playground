@@ -18,25 +18,25 @@ export function OverviewPage() {
   const overview = useQuery({
     queryKey: ['overview'],
     queryFn: api.overview,
-    refetchInterval: 5_000,
-    staleTime: 2_000,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
   })
-  const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 15_000 })
-  const activity = useQuery({ queryKey: ['activity'], queryFn: api.activity, refetchInterval: 15_000 })
-  const assessments = useQuery({ queryKey: ['assessments'], queryFn: api.assessments, refetchInterval: 15_000 })
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 30_000 })
+  const activity = useQuery({ queryKey: ['activity'], queryFn: api.activity, refetchInterval: 30_000 })
+  const assessments = useQuery({ queryKey: ['assessments'], queryFn: api.assessments, refetchInterval: 30_000 })
   const overviewRunId = overview.data?.active_run?.id || overview.data?.recent_run?.id
   const checkpointEvidence = useQuery({
     queryKey: ['checkpoint-evidence', overviewRunId],
     queryFn: () => api.checkpointEvidence(overviewRunId!),
     enabled: Boolean(overviewRunId),
-    staleTime: 30_000,
-    refetchInterval: overview.data?.active_run ? 30_000 : false,
+    staleTime: 60_000,
+    refetchInterval: overview.data?.active_run ? 60_000 : false,
   })
   const evaluations = useQuery({
     queryKey: ['evaluations', 'overview-latest'],
     queryFn: () => api.evaluations(),
-    staleTime: 30_000,
-    refetchInterval: 30_000,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
   })
 
   const data = overview.data
