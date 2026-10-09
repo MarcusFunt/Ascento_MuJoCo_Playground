@@ -120,11 +120,11 @@ The first implementation task reconciles the prior report with the exact checkou
 - Consumes: all source and dependency fixes from Tasks 1–4.
 - Produces: a reproducible warning-as-error verification gate for the complete test suite.
 
-- [ ] Run `uv lock --check` and `uv run --extra dashboard --extra cpu --group dev pytest -q -W error`; expect all tests in the reconciled baseline to pass with zero warnings.
-- [ ] Run `uv run --extra dashboard --extra cpu --group dev ruff check .` and the dashboard migration/configuration test command from Task 1.
-- [ ] Run the existing simulator CPU smoke and GPU smoke where CUDA is available; record the selected dependency versions and test environment in the change summary.
-- [ ] Add `-W error` to the backend and dashboard-backend pytest commands in `.github/workflows/dashboard-ci.yml` so CI keeps warning regressions from returning.
-- [ ] Review the final warning summary and verify no broad warning filter, ignored warning category, or untracked environment-only patch was used.
+- [x] Run `uv lock --check` and `uv run --extra dashboard --extra cpu --group dev pytest -q -W error`; expect all tests in the reconciled baseline to pass with zero warnings.
+- [x] Run `uv run --extra dashboard --extra cpu --group dev ruff check .` and the dashboard migration/configuration test command from Task 1.
+- [x] Run the existing simulator CPU smoke and GPU smoke where CUDA is available; record the selected dependency versions and test environment in the change summary.
+- [x] Add `-W error` to the backend and dashboard-backend pytest commands in `.github/workflows/dashboard-ci.yml` so CI keeps warning regressions from returning.
+- [x] Review the final warning summary and verify no broad warning filter, ignored warning category, or untracked environment-only patch was used.
 
 ## Completion Criteria
 
@@ -140,3 +140,6 @@ The first implementation task reconciles the prior report with the exact checkou
 
 
 **Task 4 result:** The warning tests first failed for the upstream Warp setter and TorchScript decorators. Upstream mjlab 1.6.0 still uses wp.config.quiet; Warp's public replacement is config.log_level. Torch 2.11.0 emits a DeprecationWarning at @torch.jit.script, while the 2.9.1 CPU and cu128 builds pass the warning-as-error import tests. The lock therefore caps CPU/CUDA Torch at <2.10, and the local mjlab initializer overlay is pinned to mjlab==1.6.0, keeps the installed asset root and entry-point load, and can be removed when upstream ships the equivalent Warp fix.
+
+
+**Task 5 verification results:** uv lock --check passed; the full CPU test suite passed with warnings as errors (535 passed, 5 skipped); ruff check . passed; the waypoint and database warning-focused tests passed; CPU simulator tests passed (37); CUDA smoke tests passed on the RTX 3060 with Torch 2.9.1+cu128 (10 passed). Both CI workflows now promote warnings to errors. No warning filters or category suppressions were added.

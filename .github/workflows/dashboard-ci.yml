@@ -20,6 +20,7 @@ on:
       - 'src/ascento_mjlab/cli.py'
       - 'src/ascento_mjlab/mcp_server.py'
       - 'src/ascento_mjlab/operations.py'
+      - 'src/mjlab/**'
       - 'benchmarks/**'
       - 'tests_mjlab/**'
       - 'tests_dashboard/**'
@@ -52,6 +53,7 @@ on:
       - 'src/ascento_mjlab/cli.py'
       - 'src/ascento_mjlab/mcp_server.py'
       - 'src/ascento_mjlab/operations.py'
+      - 'src/mjlab/**'
       - 'benchmarks/**'
       - 'tests_mjlab/**'
       - 'tests_dashboard/**'
@@ -79,7 +81,7 @@ jobs:
         with:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      - run: uv run --frozen --extra cpu python -m pytest -q tests_mjlab
+      - run: uv run --frozen --extra cpu --group dev python -m pytest -q -W error tests_mjlab
 
   dashboard-backend:
     runs-on: ubuntu-latest
@@ -91,13 +93,13 @@ jobs:
         with:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      - run: uv run --frozen --extra cpu --extra dashboard ruff check .
+      - run: uv run --frozen --extra cpu --extra dashboard --group dev ruff check .
       - run: bash -n scripts/run_dashboard.sh scripts/maintain.sh scripts/install_supervisor.sh scripts/setup_tailscale.sh scripts/ascento_mcp_server.sh
       - run: bash scripts/maintain.sh --help
       - run: bash scripts/install_supervisor.sh --help
       - run: bash scripts/setup_tailscale.sh --help
       - run: python -m py_compile scripts/host_supervisor.py dashboard/supervisor_client.py
-      - run: uv run --frozen --extra cpu --extra dashboard python -m pytest -q tests_dashboard
+      - run: uv run --frozen --extra cpu --extra dashboard --group dev python -m pytest -q -W error tests_dashboard
 
   maintenance-config:
     runs-on: ubuntu-latest

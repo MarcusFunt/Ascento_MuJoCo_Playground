@@ -12,4 +12,4 @@ jobs:
         with:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      - run: uv run --frozen --extra cu128 --extra dashboard python -m pytest -q tests_mjlab
+      - run: uv run --frozen --extra cu128 --extra dashboard --group dev python -m pytest -q -W error tests_mjlab
