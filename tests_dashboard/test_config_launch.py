@@ -359,6 +359,16 @@ def test_compose_bakes_clean_build_status_without_runtime_override():
     assert "\n      ASCENTO_REPOSITORY_DIRTY:" not in compose
 
 
+def test_dashboard_packages_and_mounts_suite_and_experiment_definitions_read_only():
+    dockerfile = (launch.REPO_ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
+    compose = (launch.REPO_ROOT / "docker" / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "COPY benchmarks ./benchmarks" in dockerfile
+    assert "COPY docs/experiments ./docs/experiments" in dockerfile
+    assert "../benchmarks:/workspace/benchmarks:ro" in compose
+    assert "../docs/experiments:/workspace/docs/experiments:ro" in compose
+
+
 def test_startup_validation_reports_bad_artifact_root(tmp_path):
     bad_root = tmp_path / "artifact-file"
     bad_root.write_text("not a directory", encoding="utf-8")

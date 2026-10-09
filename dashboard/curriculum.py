@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 HORIZON_SCHEDULE_S = (20.0, 60.0, 120.0, 300.0)
@@ -22,7 +23,8 @@ def _number(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
     try:
-        return float(value)
+        number = float(value)
+        return number if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
 
@@ -34,6 +36,163 @@ def _integer(value: Any) -> int | None:
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
+
+
+_GENERALIST_COHORTS = (
+    ("precision_anchor", "Precision anchor"),
+    ("recovery_retarget_anchor", "Recovery and retarget anchor"),
+    ("generalist_navigation", "Generalist navigation"),
+)
+_GENERALIST_BANDS = ("short", "medium", "long")
+
+
+def _generalist_curriculum(telemetry: dict[str, Any], task: str) -> dict[str, Any]:
+    """Normalize task metrics while preserving their sample grain and source."""
+    raw_metrics = telemetry.get("metrics")
+    if not isinstance(raw_metrics, dict):
+        raw_metrics = telemetry.get("canonical_metrics")
+    raw_metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
+    metrics: dict[str, Any] = {}
+    for name, value in raw_metrics.items():
+        # TensorBoard readers may preserve the ``Episode/`` namespace.
+        metrics[str(name).rsplit("/", 1)[-1]] = value
+
+    def metric(name: str) -> float | None:
+        return _number(metrics.get(name))
+
+    def count(name: str) -> int | None:
+        value = metric(name)
+        return max(0, int(value)) if value is not None else None
+
+    stage_value = count("generalist_curriculum_goal_mix_stage")
+    stage = min(2, stage_value) if stage_value is not None else None
+    fractions = {
+        "short": metric("generalist_curriculum_short_goal_fraction"),
+        "medium": metric("generalist_curriculum_medium_goal_fraction"),
+        "long": metric("generalist_curriculum_long_goal_fraction"),
+    }
+    gates = [
+        {
+            "id": "gate_recovery",
+            "label": "Recovery on gate-like episodes",
+            "estimate": metric("generalist_curriculum_stage_gate_recovery_lcb"),
+            "threshold": 0.85,
+            "successes": count("generalist_curriculum_window_gate_recovery_successes"),
+            "samples": count("generalist_curriculum_window_gate_episodes"),
+            "minimum_samples": 64,
+            "grain": "gate-like episodes",
+        },
+        {
+            "id": "short_arrival",
+            "label": "Short target arrival",
+            "estimate": metric("generalist_curriculum_stage_short_attempt_arrival_lcb"),
+            "threshold": 0.50,
+            "successes": count("generalist_curriculum_window_short_arrivals"),
+            "samples": count("generalist_curriculum_window_short_attempts"),
+            "minimum_samples": 64,
+            "grain": "target attempts",
+        },
+        {
+            "id": "long_arrival",
+            "label": "Long target arrival",
+            "estimate": metric("generalist_curriculum_stage_long_attempt_arrival_lcb"),
+            "threshold": 0.50,
+            "successes": count("generalist_curriculum_window_long_arrivals"),
+            "samples": count("generalist_curriculum_window_long_attempts"),
+            "minimum_samples": 64,
+            "grain": "target attempts",
+        },
+    ]
+    for gate in gates:
+        samples = gate["samples"]
+        gate["coverage"] = (
+            min(1.0, samples / gate["minimum_samples"]) if samples is not None else None
+        )
+        gate["state"] = (
+            "waiting"
+            if gate["estimate"] is None or samples is None or samples < gate["minimum_samples"]
+            else "pass"
+            if gate["estimate"] >= gate["threshold"]
+            else "below_threshold"
+        )
+
+    cohorts = []
+    for cohort_id, label in _GENERALIST_COHORTS:
+        prefix = f"generalist_cohort_{cohort_id}_"
+        episode_count = count(prefix + "episode_count")
+        arrivals = count(prefix + "arrival_count")
+        cohorts.append(
+            {
+                "id": cohort_id,
+                "label": label,
+                "episode_count": episode_count,
+                "arrival_count": arrivals,
+                "arrival_rate": arrivals / episode_count
+                if arrivals is not None and episode_count
+                else None,
+                "recovery_count": count(prefix + "recovery_count"),
+                "settled_stop_count": count(prefix + "settled_stop_count"),
+                "fall_count": count(prefix + "fall_count"),
+                "timeout_count": count(prefix + "timeout_count"),
+                "grain": "episodes",
+            }
+        )
+
+    attempt_bands = []
+    for band in _GENERALIST_BANDS:
+        prefix = f"generalist_attempt_generalist_navigation_{band}_"
+        attempts = count(prefix + "target_attempt_count")
+        arrivals = count(prefix + "arrival_completed_count")
+        settled = count(prefix + "settled_stop_completed_count")
+        attempt_bands.append(
+            {
+                "id": band,
+                "label": f"{band.title()} targets",
+                "attempts": attempts,
+                "arrivals": arrivals,
+                "arrival_rate": arrivals / attempts if arrivals is not None and attempts else None,
+                "settled_stops": settled,
+                "settled_stop_rate": settled / attempts if settled is not None and attempts else None,
+                "heading_valid_at_settle": count(prefix + "heading_valid_at_settle_count"),
+                "fall_interruptions": count(prefix + "interrupted_by_fall_count"),
+                "timeout_interruptions": count(prefix + "interrupted_by_timeout_count"),
+                "mean_final_target_error_m": metric(prefix + "final_target_error_mean_m"),
+                "p95_final_target_error_m": metric(prefix + "final_target_error_p95_m"),
+                "mean_time_to_arrival_s": metric(prefix + "time_to_arrival_mean_s"),
+                "p95_time_to_arrival_s": metric(prefix + "time_to_arrival_p95_s"),
+                "mean_time_to_settle_s": metric(prefix + "time_to_settle_mean_s"),
+                "p95_time_to_settle_s": metric(prefix + "time_to_settle_p95_s"),
+                "mean_heading_error_at_settle_rad": metric(prefix + "heading_error_at_settle_mean_rad"),
+                "grain": "target attempts",
+            }
+        )
+
+    return {
+        "kind": "generalist",
+        "label": "Generalist navigation curriculum",
+        "task": task,
+        "stage": stage,
+        "stage_count": 3,
+        "progress": metric("generalist_curriculum_progress"),
+        "target_distance_m": {
+            "minimum": metric("generalist_curriculum_scheduled_target_min_distance_m"),
+            "maximum": metric("generalist_curriculum_scheduled_target_max_distance_m"),
+        },
+        "goal_fractions": fractions,
+        "gate_like_fraction": metric("generalist_curriculum_scheduled_gate_like_fraction"),
+        "demotion_streak": count("generalist_curriculum_demotion_streak"),
+        "gates": gates,
+        "cohorts": cohorts,
+        "attempt_bands": attempt_bands,
+        "telemetry": {
+            "iteration": _integer(telemetry.get("iteration")),
+            "wall_time": _number(telemetry.get("wall_time")),
+            "source": "latest TensorBoard episode metrics",
+            "window_label": "latest emitted curriculum window; counters retain their task-defined grain",
+        },
+        "has_metrics": bool(metrics),
+        "note": "Episode outcomes and target-attempt outcomes use separate denominators. Missing values mean not measured.",
+    }
 
 
 def _recovery_difficulty(
@@ -158,6 +317,9 @@ def curriculum_for_run(detail: dict[str, Any] | None) -> dict[str, Any] | None:
                 {"label": "Stop", "detail": "Settle at the target"},
             ],
         }
+
+    if task == "Ascento-Generalist-Locomotion-Flat":
+        return _generalist_curriculum(telemetry, str(task))
 
     return {
         "kind": "static",

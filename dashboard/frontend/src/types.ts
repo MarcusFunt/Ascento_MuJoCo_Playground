@@ -92,7 +92,66 @@ export type StaticCurriculum = {
   note?: string
 }
 
-export type Curriculum = HorizonCurriculum | SequenceCurriculum | StaticCurriculum
+export type GeneralistCurriculum = {
+  kind: 'generalist'
+  label: string
+  task?: string
+  stage?: number | null
+  stage_count: number
+  progress?: number | null
+  target_distance_m: { minimum?: number | null; maximum?: number | null }
+  goal_fractions: { short?: number | null; medium?: number | null; long?: number | null }
+  gate_like_fraction?: number | null
+  demotion_streak?: number | null
+  gates: Array<{
+    id: string
+    label: string
+    estimate?: number | null
+    threshold: number
+    successes?: number | null
+    samples?: number | null
+    minimum_samples: number
+    grain: string
+    state: 'waiting' | 'pass' | 'below_threshold'
+  }>
+  cohorts: Array<{
+    id: string
+    label: string
+    episode_count?: number | null
+    arrival_count?: number | null
+    arrival_rate?: number | null
+    recovery_count?: number | null
+    settled_stop_count?: number | null
+    fall_count?: number | null
+    timeout_count?: number | null
+    grain: string
+  }>
+  attempt_bands: Array<{
+    id: string
+    label: string
+    attempts?: number | null
+    arrivals?: number | null
+    arrival_rate?: number | null
+    settled_stops?: number | null
+    settled_stop_rate?: number | null
+    heading_valid_at_settle?: number | null
+    fall_interruptions?: number | null
+    timeout_interruptions?: number | null
+    mean_final_target_error_m?: number | null
+    p95_final_target_error_m?: number | null
+    mean_time_to_arrival_s?: number | null
+    p95_time_to_arrival_s?: number | null
+    mean_time_to_settle_s?: number | null
+    p95_time_to_settle_s?: number | null
+    mean_heading_error_at_settle_rad?: number | null
+    grain: string
+  }>
+  telemetry: { iteration?: number | null; wall_time?: number | null; source: string; window_label: string }
+  has_metrics: boolean
+  note: string
+}
+
+export type Curriculum = HorizonCurriculum | SequenceCurriculum | GeneralistCurriculum | StaticCurriculum
 
 export type OverviewSeriesPoint = {
   iteration?: number | null
@@ -180,6 +239,16 @@ export type Checkpoint = {
   stable?: boolean
 }
 
+export type CheckpointCompatibility = {
+  run_id: string
+  task: string
+  checkpoint: string
+  checkpoint_sha256: string
+  status: 'COMPATIBLE' | 'INCOMPATIBLE' | 'UNVERIFIABLE'
+  compatible: boolean
+  reason: string
+}
+
 export type PolicyLayerStats = {
   module_index: number
   input_size: number
@@ -232,15 +301,17 @@ export type Waypoint = {
 }
 
 export type WaypointCommand = {
-  operation: 'set' | 'queue' | 'hold' | 'resume' | 'cancel'
+  operation: 'set' | 'queue' | 'hold' | 'resume' | 'cancel' | 'speed'
   x_m?: number
   y_m?: number
   yaw_rad?: number | null
+  speed_mps?: number
 }
 
 export type WaypointState = {
   available: true
   frame: 'sim_world'
+  origin: { x_m: number; y_m: number }
   state: 'holding' | 'driving' | 'paused' | 'arrived'
   robot: {
     x_m: number
@@ -260,8 +331,18 @@ export type WaypointState = {
   last_command: {
     request_id?: string | null
     operation?: WaypointCommand['operation']
-    state?: 'applied' | 'rejected'
+    state?: 'accepted' | 'rejected'
     error?: string
+  } | null
+  limits: { arena_half_extent_m: number; max_segment_m: number; max_queued: number }
+  arrival?: { distance_m: number; heading_rad: number; speed_m_s: number; yaw_rate_rad_s: number; dwell_s: number }
+  speed_command?: {
+    requested_mps: number
+    applied_mps: number
+    measured_mps: number
+    max_speed_mps: number
+    max_slew_rate_mps_per_s: number
+    manual_override: boolean
   } | null
 }
 
@@ -406,9 +487,107 @@ export type SystemStatus = {
   repository?: Record<string, any>
   update?: Record<string, any>
   tailscale?: Record<string, any>
-  active_runs?: Array<Record<string, any>>
+  active_runs?: Array<Record<string, any>> | null
   update_blockers?: string[]
   can_update?: boolean
+}
+
+export type ServiceHealth = {
+  status: 'healthy' | 'degraded' | 'unavailable' | 'optional' | 'unknown'
+  message?: string
+  checked_at?: number
+}
+
+export type HealthSnapshot = {
+  ok: boolean
+  live: boolean
+  ready: boolean
+  status: 'healthy' | 'degraded' | 'unavailable'
+  checked_at: number
+  artifact_root?: string
+  components: Record<string, ServiceHealth>
+  database?: { enabled: boolean; available: boolean; backend?: string | null; error?: string | null }
+  problems?: string[]
+}
+
+export type RuntimePreflight = {
+  status: 'ready' | 'blocked'
+  allowed: boolean
+  task: { id: string; label: string | null }
+  requested_device: string
+  runtime: Record<string, unknown> & { device?: string; source_commit?: string; source_branch?: string }
+  blockers: string[]
+}
+
+export type ActivitySnapshot = {
+  checked_at: number
+  fresh_for_seconds: number
+  trainer: { status: string; verified: boolean; message?: string; active_runs?: Array<Record<string, any>> | null; indexed_active_runs?: Array<Record<string, any>> }
+  evaluator: { status: string; verified: boolean; message?: string }
+  viewer: { status: string; verified: boolean; message?: string; items?: Array<Record<string, any>> | null }
+  render: { status: string; verified: boolean; message?: string }
+  gpu: { available: boolean; observed_at: number; gpus?: Array<Record<string, any>>; error?: string }
+  index: { status: string; backend?: string | null; available: boolean; last_successful_sync_at?: number | null; source_conflicts?: number | null; indexed_run_count: number; source: string }
+}
+
+export type DashboardAssessment = {
+  id: string
+  rule_id: string
+  severity: 'critical' | 'warning' | 'info'
+  headline: string
+  explanation: string
+  subject_type: string
+  subject_id?: string | null
+  recommended_action: string
+  evidence_refs: Array<{ label: string; href: string }>
+  observed_at: number
+  freshness_seconds: number
+  source: string
+}
+
+export type EvaluationSummary = {
+  evaluation_id: string
+  suite_id?: string
+  task?: string
+  checkpoint?: string
+  checkpoint_sha256?: string
+  suite_sha256?: string
+  resolved_scenarios_sha256?: string
+  repository_commit?: string
+  scenario_count?: number
+  status: 'PASS' | 'FAIL' | 'INCOMPLETE' | 'INVALID' | 'DIAGNOSTIC_ONLY'
+  validity: 'valid' | 'incomplete' | 'invalid'
+  evidence_class: 'quantitative' | 'diagnostic_only'
+  hard_gates_passed: number
+  hard_gates_total: number
+  hard_gates_failed: number
+  hard_gates_unavailable?: number
+  finished_at_utc?: string
+  integrity_error?: string | null
+}
+
+export type EvaluationDetail = {
+  evaluation: EvaluationSummary
+  manifest?: Record<string, any> | null
+  suite?: Record<string, any> | null
+  summary?: Record<string, any> | null
+  gate?: { status?: string; reason?: string; gates?: Array<Record<string, any>> } | null
+  consistency?: { passed?: boolean; checks?: Array<Record<string, any>> } | null
+  artifact_errors?: Record<string, string>
+}
+
+export type CheckpointEvidence = {
+  checkpoint_id: string
+  run_id: string
+  relative_path: string
+  iteration?: number | null
+  stable: boolean
+  sha256: string
+  size_bytes: number
+  modified_at: number
+  selection_status: 'selected' | 'not_selected' | 'not_recorded'
+  visual_review_status: 'not_recorded'
+  evaluations: Array<{ evaluation_id: string; suite_id?: string; status: string; evidence_class: string; finished_at_utc?: string }>
 }
 
 export type BlenderRenderOutput = {

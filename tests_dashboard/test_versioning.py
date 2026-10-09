@@ -6,6 +6,7 @@ from dashboard.versioning import (
     classify_run_version,
     current_repository_version,
     run_repository_provenance,
+    runtime_revision_report,
 )
 from scripts.stamp_run_provenance import stamp_missing_runs
 
@@ -110,3 +111,34 @@ def test_maintenance_stamps_only_legacy_runs_without_git_metadata(tmp_path):
     assert inferred["branch"] == "main"
     assert inferred["inferred"] is True
     assert not (exact / "repository_provenance.json").exists()
+
+
+def test_runtime_revision_report_separates_mounted_source_and_image(monkeypatch, tmp_path):
+    manifest = tmp_path / "repository-version.json"
+    manifest.write_text(
+        json.dumps({"commit": "image-commit", "branch": "main", "compute": "cu128"}),
+        encoding="utf-8",
+    )
+    values = {
+        ("rev-parse", "HEAD"): "checkout-commit",
+        ("branch", "--show-current"): "main",
+        ("rev-parse", "origin/main"): "checkout-commit",
+        ("status", "--porcelain", "--untracked-files=all"): "",
+    }
+    monkeypatch.setattr("dashboard.versioning._git", lambda *args: values[args])
+    monkeypatch.setenv("ASCENTO_REPOSITORY_COMMIT", "image-commit")
+    monkeypatch.setenv("ASCENTO_REPOSITORY_BRANCH", "main")
+    monkeypatch.setenv("ASCENTO_REPOSITORY_DIRTY", "0")
+    monkeypatch.setenv("ASCENTO_COMPUTE_EXTRA", "cu128")
+    monkeypatch.setenv("ASCENTO_CANONICAL_VERSION_FILE", str(manifest))
+    current_repository_version.cache_clear()
+
+    report = runtime_revision_report()
+
+    assert report["checkout"]["commit"] == "checkout-commit"
+    assert report["packaged_image"]["commit"] == "image-commit"
+    assert report["reported_api"]["commit"] == "image-commit"
+    assert report["comparisons"]["checkout_matches_origin_main"] is True
+    assert report["comparisons"]["checkout_matches_image"] is False
+    assert report["comparisons"]["image_matches_manifest"] is True
+    current_repository_version.cache_clear()

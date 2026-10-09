@@ -1202,6 +1202,8 @@ def run_viewer(
         WaypointController(base_env)
         if task in {
             "Ascento-Locomotion-Flat",
+            "Ascento-Locomotion-Speed-Flat",
+            "Ascento-Generalist-Locomotion-Flat",
             "Ascento-Locomotion-Gate-Hold-Flat",
             "Ascento-Locomotion-Gate-Hold-Control-Flat",
             "Ascento-Locomotion-Gate-Hold-Turn-12-Flat",

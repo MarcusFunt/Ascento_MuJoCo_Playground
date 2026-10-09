@@ -77,6 +77,56 @@ def current_repository_version() -> dict[str, Any]:
     return {"commit": commit, "branch": branch, "source": source or "unknown"}
 
 
+def runtime_revision_report() -> dict[str, Any]:
+    """Separate the mounted checkout from the image/build revision at runtime."""
+    checkout_commit = _git("rev-parse", "HEAD")
+    checkout_branch = _git("branch", "--show-current")
+    origin_main = _git("rev-parse", "origin/main")
+    dirty_status = _git("status", "--porcelain", "--untracked-files=all")
+
+    build = {
+        "commit": os.environ.get("ASCENTO_REPOSITORY_COMMIT") or None,
+        "branch": os.environ.get("ASCENTO_REPOSITORY_BRANCH") or None,
+        "dirty": os.environ.get("ASCENTO_REPOSITORY_DIRTY") or None,
+        "compute": os.environ.get("ASCENTO_COMPUTE_EXTRA") or None,
+    }
+    manifest_path = Path(
+        os.environ.get("ASCENTO_CANONICAL_VERSION_FILE", "/etc/ascento/repository-version.json")
+    )
+    manifest = _load_json(manifest_path) or {}
+    build["manifest_path"] = str(manifest_path)
+    build["manifest_commit"] = manifest.get("commit")
+    build["manifest_branch"] = manifest.get("branch")
+
+    checkout = {
+        "root": str(REPO_ROOT.resolve()),
+        "commit": checkout_commit,
+        "branch": checkout_branch,
+        "origin_main": origin_main,
+        "dirty": bool(dirty_status) if dirty_status is not None else None,
+        "source": "git" if checkout_commit else "unknown",
+    }
+    reported_api = current_repository_version()
+    return {
+        "checkout": checkout,
+        "packaged_image": build,
+        "reported_api": reported_api,
+        "comparisons": {
+            "checkout_matches_origin_main": (
+                checkout_commit == origin_main if checkout_commit and origin_main else None
+            ),
+            "checkout_matches_image": (
+                checkout_commit == build["commit"] if checkout_commit and build["commit"] else None
+            ),
+            "image_matches_manifest": (
+                build["commit"] == build["manifest_commit"]
+                if build["commit"] and build["manifest_commit"]
+                else None
+            ),
+        },
+    }
+
+
 def run_repository_provenance(run_dir: Path, root: Path) -> dict[str, Any]:
     """Read exact or maintenance-inferred repository provenance for one run."""
     status_path = _parent_file(run_dir, root, "run_status.json")

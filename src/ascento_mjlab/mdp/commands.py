@@ -123,6 +123,22 @@ class AscentoTargetSpeedCommand(CommandTerm):
         self._target_speed[int(env_id), 0] = self._validate_speed(speed_mps)
         self._manual_override[int(env_id)] = True
 
+    def state_snapshot(self, *, env_id: int = 0) -> dict[str, float | bool]:
+        """Expose requested, slew-limited and measured speed for read-only telemetry."""
+        if not 0 <= int(env_id) < self.num_envs:
+            raise IndexError("environment index is outside the speed command batch")
+        robot = self._env.scene[self.cfg.entity_name]
+        return {
+            "requested_mps": float(self._target_speed[env_id, 0].item()),
+            "applied_mps": float(self._command[env_id, 0].item()),
+            "measured_mps": float(
+                torch.linalg.vector_norm(robot.data.root_link_lin_vel_w[env_id, :2]).item()
+            ),
+            "max_speed_mps": float(self.cfg.max_speed_mps),
+            "max_slew_rate_mps_per_s": float(self.cfg.max_speed_slew_rate_mps_per_s),
+            "manual_override": bool(self._manual_override[env_id].item()),
+        }
+
     def _update_metrics(self) -> None:
         if self._speed_display is None or time.monotonic() - self._last_display_update < 0.2:
             return

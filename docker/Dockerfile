@@ -43,6 +43,8 @@ COPY pyproject.toml uv.lock README.md ./
 COPY alembic.ini ./
 COPY src ./src
 COPY dashboard ./dashboard
+COPY benchmarks ./benchmarks
+COPY docs/experiments ./docs/experiments
 COPY tests_mjlab ./tests_mjlab
 COPY tests_dashboard ./tests_dashboard
 COPY scripts ./scripts

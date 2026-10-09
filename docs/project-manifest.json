@@ -279,6 +279,16 @@
       "purpose": "Host interface for Docker-published dashboard traffic."
     },
     {
+      "name": "ASCENTO_CONTROL_TOKEN",
+      "default": "unset",
+      "purpose": "Secret of at least 32 characters required to unlock dashboard mutations; never commit it."
+    },
+    {
+      "name": "ASCENTO_DASHBOARD_ALLOWED_ORIGINS",
+      "default": "same-origin only",
+      "purpose": "Comma-separated exact browser origins allowed for control requests behind a reverse proxy."
+    },
+    {
       "name": "ASCENTO_SUPERVISOR_SOCKET",
       "default": "/run/ascento-supervisor/supervisor.sock",
       "purpose": "Restricted host-supervisor Unix socket location."
@@ -469,6 +479,21 @@
           "method": "GET",
           "path": "/api/runs/{run_id}/logs/stream",
           "operation": "read_stream"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{run_id}/checkpoints",
+          "operation": "read"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{run_id}/checkpoint-compatibility",
+          "operation": "read"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/{run_id}/checkpoint-evidence",
+          "operation": "read"
         }
       ]
     }

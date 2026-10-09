@@ -22,6 +22,7 @@ class UnprotectedRequest:
 
 def test_system_status_surfaces_supervisor_repository_and_tailnet(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(module, "_require_control_session", lambda _request: None)
 
     class FakeSupervisor:
         def status(self, *, refresh=False):
@@ -68,7 +69,7 @@ def test_system_status_degrades_cleanly_when_supervisor_is_missing(monkeypatch, 
     assert "socket missing" in result["error"]
 
 
-def test_system_update_requires_control_header(monkeypatch, tmp_path):
+def test_system_update_rejects_request_without_same_origin(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
 
     class FakeSupervisor:
@@ -80,10 +81,12 @@ def test_system_update_requires_control_header(monkeypatch, tmp_path):
         module.system_update(UnprotectedRequest())
 
     assert error.value.status_code == 403
+    assert "Origin" in error.value.detail
 
 
 def test_system_update_maps_supervisor_rejection_to_conflict(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(module, "_require_control_session", lambda _request: None)
 
     class BlockedSupervisor:
         def update(self):
@@ -99,6 +102,7 @@ def test_system_update_maps_supervisor_rejection_to_conflict(monkeypatch, tmp_pa
 
 def test_system_update_maps_missing_supervisor_to_service_unavailable(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(module, "_require_control_session", lambda _request: None)
 
     class MissingSupervisor:
         def update(self):

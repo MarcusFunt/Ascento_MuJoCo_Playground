@@ -96,3 +96,64 @@ def test_locomotion_curriculum_describes_training_sequence():
         "Target",
         "Stop",
     ]
+
+
+def test_generalist_curriculum_uses_episode_and_attempt_denominators_separately():
+    curriculum = curriculum_for_run(
+        {
+            "run_info": {"task": "Ascento-Generalist-Locomotion-Flat"},
+            "telemetry": {
+                "iteration": 1200,
+                "wall_time": 1234.5,
+                "metrics": {
+                    "Episode/generalist_curriculum_goal_mix_stage": 1,
+                    "Episode/generalist_curriculum_progress": 0.5,
+                    "Episode/generalist_curriculum_long_goal_fraction": 0.25,
+                    "Episode/generalist_curriculum_stage_gate_recovery_lcb": 0.86,
+                    "Episode/generalist_curriculum_window_gate_recovery_successes": 59,
+                    "Episode/generalist_curriculum_window_gate_episodes": 64,
+                    "Episode/generalist_curriculum_stage_short_attempt_arrival_lcb": 0.52,
+                    "Episode/generalist_curriculum_window_short_arrivals": 40,
+                    "Episode/generalist_curriculum_window_short_attempts": 80,
+                    "Episode/generalist_curriculum_stage_long_attempt_arrival_lcb": 0.2,
+                    "Episode/generalist_curriculum_window_long_arrivals": 8,
+                    "Episode/generalist_curriculum_window_long_attempts": 64,
+                    "Episode/generalist_cohort_generalist_navigation_episode_count": 100,
+                    "Episode/generalist_cohort_generalist_navigation_arrival_count": 40,
+                    "Episode/generalist_cohort_generalist_navigation_fall_count": 5,
+                    "Episode/generalist_attempt_generalist_navigation_short_target_attempt_count": 50,
+                    "Episode/generalist_attempt_generalist_navigation_short_arrival_completed_count": 20,
+                    "Episode/generalist_attempt_generalist_navigation_short_settled_stop_completed_count": 12,
+                    "Episode/generalist_attempt_generalist_navigation_short_final_target_error_p95_m": 0.07,
+                },
+            },
+        }
+    )
+
+    assert curriculum["kind"] == "generalist"
+    assert curriculum["stage"] == 1
+    assert curriculum["goal_fractions"]["long"] == 0.25
+    assert curriculum["gates"][0]["samples"] == 64
+    assert curriculum["gates"][0]["successes"] == 59
+    assert curriculum["gates"][0]["state"] == "pass"
+    navigation = next(row for row in curriculum["cohorts"] if row["id"] == "generalist_navigation")
+    assert navigation["episode_count"] == 100
+    assert navigation["arrival_rate"] == 0.4
+    short = curriculum["attempt_bands"][0]
+    assert short["attempts"] == 50
+    assert short["arrivals"] == 20
+    assert short["arrival_rate"] == 0.4
+    assert short["settled_stop_rate"] == 0.24
+    assert short["p95_final_target_error_m"] == 0.07
+
+
+def test_generalist_missing_telemetry_is_waiting_not_zero():
+    curriculum = curriculum_for_run(
+        {"run_info": {"task": "Ascento-Generalist-Locomotion-Flat"}}
+    )
+
+    assert curriculum["kind"] == "generalist"
+    assert curriculum["stage"] is None
+    assert curriculum["has_metrics"] is False
+    assert all(gate["state"] == "waiting" for gate in curriculum["gates"])
+    assert curriculum["cohorts"][0]["episode_count"] is None

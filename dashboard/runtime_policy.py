@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -70,7 +71,11 @@ def apply_training_device(arguments: list[str], device: str) -> list[str]:
 
 def _normalized_device(value: str, probe: Callable[[], bool]) -> str:
     if value == "auto":
-        return "cuda:0" if probe() else "cpu"
+        value = "cuda:0" if probe() else "cpu"
+    if value not in {"cpu", "cuda"} and re.fullmatch(r"cuda:\d+", value) is None:
+        raise RuntimePolicyError(
+            f"unsupported compute device {value!r}; choose cpu, cuda, cuda:N, or auto"
+        )
     return value
 
 
@@ -237,7 +242,8 @@ def runtime_identity(
 
                 result["gpu_name"] = torch.cuda.get_device_name(device)
                 result["torch_cuda_version"] = torch.version.cuda
-            except (ImportError, RuntimeError, ValueError, TypeError, AssertionError):
-                result["gpu_name"] = None
-                result["torch_cuda_version"] = None
+            except (ImportError, RuntimeError, ValueError, TypeError, AssertionError) as error:
+                raise RuntimePolicyError(
+                    f"CUDA device {device} is unavailable in the selected Python runtime: {error}"
+                ) from error
     return result

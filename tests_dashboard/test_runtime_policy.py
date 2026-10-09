@@ -74,6 +74,21 @@ def test_native_runtime_fails_before_a_cuda_launch_without_cuda(monkeypatch, tmp
         )
 
 
+def test_runtime_rejects_unrecognized_compute_device(monkeypatch, tmp_path):
+    canonical = tmp_path / "canonical"
+    canonical.mkdir()
+    _host_git(monkeypatch, canonical)
+
+    with pytest.raises(RuntimePolicyError, match="unsupported compute device"):
+        runtime_identity(
+            canonical,
+            canonical_root=canonical,
+            env={},
+            requested_device="mps",
+            cuda_probe=lambda: True,
+        )
+
+
 def test_docker_runtime_requires_image_revision_to_match_canonical_manifest(monkeypatch, tmp_path):
     canonical = tmp_path / "canonical"
     version_file = tmp_path / "repository-version.json"

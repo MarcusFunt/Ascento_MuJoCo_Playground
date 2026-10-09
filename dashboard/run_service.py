@@ -98,6 +98,7 @@ class RunService:
                 metadata.get("tags") if isinstance(metadata.get("tags"), list) else []
             ),
             "purpose": metadata.get("purpose") or "",
+            "experiment_id": metadata.get("experiment_id"),
             "parent_run_id": metadata.get("parent_run_id"),
             "parent_checkpoint": metadata.get("parent_checkpoint"),
             "max_speed_mps": metadata.get("max_speed_mps"),
@@ -302,6 +303,7 @@ class RunService:
                     "notes": str(request.get("notes") or "").strip(),
                     "tags": _clean_tags(request.get("tags")),
                     "purpose": str(request.get("purpose") or "").strip(),
+                    "experiment_id": str(request.get("experiment_id") or "").strip() or None,
                     "parent_run_id": str(parent_run_id) if parent_run_id else None,
                     "parent_checkpoint": str(request.get("parent_checkpoint") or "").strip(),
                     "max_speed_mps": max_speed_mps,

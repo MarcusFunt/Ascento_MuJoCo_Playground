@@ -23,7 +23,7 @@ from ascento_mjlab.mdp.events import (
     yaw_from_quaternion_wxyz,
 )
 
-WAYPOINT_OPERATIONS = frozenset({"set", "queue", "hold", "resume", "cancel"})
+WAYPOINT_OPERATIONS = frozenset({"set", "queue", "hold", "resume", "cancel", "speed"})
 
 
 def normalize_waypoint_command(payload: dict[str, Any]) -> dict[str, Any]:
@@ -32,8 +32,14 @@ def normalize_waypoint_command(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("waypoint command must be an object")
     operation = payload.get("operation")
     if operation not in WAYPOINT_OPERATIONS:
-        raise ValueError("operation must be set, queue, hold, resume, or cancel")
+        raise ValueError("operation must be set, queue, hold, resume, cancel, or speed")
     result: dict[str, Any] = {"operation": operation}
+    if operation == "speed":
+        value = payload.get("speed_mps")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            raise ValueError("speed_mps must be a finite number of metres per second")
+        result["speed_mps"] = float(value)
+        return result
     if operation in {"set", "queue"}:
         for name in ("x_m", "y_m"):
             value = payload.get(name)
@@ -93,6 +99,12 @@ class WaypointController:
         self.arrival_yaw_rate_rad_s = float(arrival_yaw_rate_rad_s)
         self.arrival_dwell_s = float(arrival_dwell_s)
         self.max_queued = int(max_queued)
+        command_manager = getattr(env, "command_manager", None)
+        get_term = getattr(command_manager, "get_term", None)
+        try:
+            self.speed_command = get_term("speed") if callable(get_term) else None
+        except (KeyError, ValueError):
+            self.speed_command = None
         self.active: Waypoint | None = None
         self.queued: deque[Waypoint] = deque()
         self.paused = False
@@ -191,6 +203,14 @@ class WaypointController:
                 if len(self.queued) >= self.max_queued:
                     raise ValueError(f"route already has {self.max_queued} queued waypoints")
                 self.queued.append(waypoint)
+        elif operation == "speed":
+            if self.speed_command is None:
+                raise ValueError("speed command is unsupported for this viewer task")
+            value = command["speed_mps"]
+            cap = float(self.speed_command.cfg.max_speed_mps)
+            if value < 0.0 or value > cap:
+                raise ValueError(f"speed must be within [0, {cap:g}] m/s")
+            self.speed_command.set_manual_speed_mps(value, env_id=0)
         elif operation == "hold":
             self.paused = True
             self.dwell_s = 0.0
@@ -216,7 +236,7 @@ class WaypointController:
             "request_id": request_id,
             "source": source,
             "operation": operation,
-            "state": "applied",
+            "state": "accepted",
             "at": time.time(),
         }
         return self.snapshot()
@@ -287,7 +307,7 @@ class WaypointController:
             "arrived" if self.arrived else
             "driving"
         )
-        return {
+        snapshot = {
             "available": True,
             "frame": "sim_world",
             "state": state,
@@ -313,3 +333,10 @@ class WaypointController:
             "last_command": self.last_command,
             "updated_at": time.time(),
         }
+        if self.speed_command is not None:
+            speed_state = self.speed_command.state_snapshot(env_id=0)
+            speed_state["measured_mps"] = robot["speed_m_s"]
+            snapshot["speed_command"] = speed_state
+        origin = self.env.scene.env_origins[0, :2]
+        snapshot["origin"] = {"x_m": float(origin[0].item()), "y_m": float(origin[1].item())}
+        return snapshot

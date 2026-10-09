@@ -32,6 +32,8 @@ services:
       - ../dashboard:/workspace/dashboard:ro
       - ../scripts:/workspace/scripts:ro
       - ../config:/workspace/config:ro
+      - ../benchmarks:/workspace/benchmarks:ro
+      - ../docs/experiments:/workspace/docs/experiments:ro
       - ../logs:/workspace/logs
       - ../checkpoints:/workspace/checkpoints
       - ../captures:/workspace/captures
@@ -72,6 +74,8 @@ services:
       - ../dashboard:/workspace/dashboard:ro
       - ../scripts:/workspace/scripts:ro
       - ../config:/workspace/config:ro
+      - ../benchmarks:/workspace/benchmarks:ro
+      - ../docs/experiments:/workspace/docs/experiments:ro
       # Run management writes launcher metadata, logs and checkpoints beneath
       # the shared artifact root. Other repository artifacts stay read-only.
       - ../logs:/workspace/logs
@@ -93,6 +97,7 @@ services:
       ASCENTO_CANONICAL_SOURCE_ROOT: ${ASCENTO_CANONICAL_SOURCE_ROOT:-/root/Ascento_MuJoCo_Playground}
       ASCENTO_CANONICAL_VERSION_FILE: /etc/ascento/repository-version.json
       ASCENTO_COMPUTE_EXTRA: ${ASCENTO_COMPUTE_EXTRA:-cpu}
+      ASCENTO_CONTROL_TOKEN: ${ASCENTO_CONTROL_TOKEN:-}
     restart: unless-stopped
 
 

@@ -1,5 +1,5 @@
 import { Check, LockKeyhole } from 'lucide-react'
-import type { Curriculum, HorizonCurriculum, RecoveryDifficulty } from '../types'
+import type { Curriculum, GeneralistCurriculum, HorizonCurriculum, RecoveryDifficulty } from '../types'
 import { fmtNumber, fmtRatioPercent } from '../lib/utils'
 import { Progress } from './ui/progress'
 
@@ -161,6 +161,78 @@ function HorizonRail({ curriculum }: { curriculum: HorizonCurriculum }) {
   )
 }
 
+function GeneralistRail({ curriculum, compact }: { curriculum: GeneralistCurriculum; compact: boolean }) {
+  const stage = curriculum.stage
+  const fraction = (value?: number | null) => value === null || value === undefined ? '—' : fmtRatioPercent(value)
+  return (
+    <div className={compact ? 'mt-4' : 'mt-6'}>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="text-sm text-secondary">
+          {stage === null || stage === undefined ? 'Waiting for curriculum telemetry' : `Goal-mix stage ${stage + 1} of ${curriculum.stage_count}`}
+          <span className="mx-2 text-muted">·</span>
+          short {fraction(curriculum.goal_fractions.short)} / medium {fraction(curriculum.goal_fractions.medium)} / long {fraction(curriculum.goal_fractions.long)}
+        </div>
+        <div className="text-xs text-muted">Gate-like episodes {fraction(curriculum.gate_like_fraction)}</div>
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-2" aria-label="Generalist curriculum stage">
+        {[0, 1, 2].map((index) => {
+          const state = stage === null || stage === undefined ? 'waiting' : index < stage ? 'complete' : index === stage ? 'current' : 'upcoming'
+          const longGoal = index === 0 ? 0.10 : index === 1 ? 0.25 : 0.40
+          return <div key={index} className={`rounded-md border px-3 py-2 text-center text-xs ${state === 'current' ? 'border-foreground bg-foreground/10 text-foreground' : state === 'complete' ? 'border-success/40 text-success' : 'border-border text-muted'}`}><strong className="block">Stage {index + 1}</strong><span className="mt-0.5 block">long goal share {fmtRatioPercent(longGoal)}</span><span className="mt-0.5 block uppercase tracking-wide">{state}</span></div>
+        })}
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-3">
+        {curriculum.gates.map((gate) => (
+          <article key={gate.id} className="rounded-lg border border-border bg-background/35 p-3">
+            <div className="text-xs font-semibold text-secondary">{gate.label}</div>
+            <div className="mt-2 flex items-baseline justify-between gap-2">
+              <strong className="numeric text-lg">{fraction(gate.estimate)}</strong>
+              <span className={gate.state === 'pass' ? 'text-xs text-success' : gate.state === 'below_threshold' ? 'text-xs text-warning' : 'text-xs text-muted'}>{gate.state === 'pass' ? 'meets gate' : gate.state === 'below_threshold' ? 'below gate' : 'waiting'}</span>
+            </div>
+            <div className="mt-1 text-[11px] text-muted">Wilson LCB ≥ {fraction(gate.threshold)} · {gate.samples ?? '—'} / {gate.minimum_samples} {gate.grain}</div>
+            {gate.successes !== null && gate.successes !== undefined ? <div className="mt-1 text-[11px] text-muted">{gate.successes} observed successes in the latest emitted window</div> : null}
+          </article>
+        ))}
+      </div>
+
+      <div className="mt-5">
+        <h3 className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Fixed-cohort episode outcomes</h3>
+        <div className="mt-2 grid gap-2 md:grid-cols-3">
+          {curriculum.cohorts.map((cohort) => <article key={cohort.id} className="rounded-lg border border-border bg-background/35 p-3">
+            <div className="text-sm font-semibold">{cohort.label}</div>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-secondary">
+              <span>Episodes</span><strong className="numeric text-right">{cohort.episode_count ?? '—'}</strong>
+              <span>Episode arrivals</span><strong className="numeric text-right">{cohort.arrival_count ?? '—'}{cohort.arrival_rate === null || cohort.arrival_rate === undefined ? '' : ` · ${fraction(cohort.arrival_rate)}`}</strong>
+              <span>Recovery / settled</span><strong className="numeric text-right">{cohort.recovery_count ?? '—'} / {cohort.settled_stop_count ?? '—'}</strong>
+              <span>Falls / timeouts</span><strong className="numeric text-right">{cohort.fall_count ?? '—'} / {cohort.timeout_count ?? '—'}</strong>
+            </div>
+            <div className="mt-2 text-[10px] text-muted">Episode-level counters</div>
+          </article>)}
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <h3 className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Navigation target-attempt outcomes · generalist cohort</h3>
+        <div className="mt-2 grid gap-2 xl:grid-cols-3">
+          {curriculum.attempt_bands.map((band) => <article key={band.id} className="rounded-lg border border-border bg-background/35 p-3">
+            <div className="flex items-baseline justify-between gap-2"><strong className="text-sm">{band.label}</strong><span className="text-xs text-muted">{band.attempts ?? '—'} attempts</span></div>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+              <span className="text-muted">Arrived</span><strong className="numeric text-right">{band.arrivals ?? '—'} · {fraction(band.arrival_rate)}</strong>
+              <span className="text-muted">Settled stops</span><strong className="numeric text-right">{band.settled_stops ?? '—'} · {fraction(band.settled_stop_rate)}</strong>
+              <span className="text-muted">Final target error (mean / p95)</span><strong className="numeric text-right">{fmtNumber(band.mean_final_target_error_m, 3)} / {fmtNumber(band.p95_final_target_error_m, 3)} m</strong>
+              <span className="text-muted">Arrival time (mean / p95)</span><strong className="numeric text-right">{fmtNumber(band.mean_time_to_arrival_s, 2)} / {fmtNumber(band.p95_time_to_arrival_s, 2)} s</strong>
+              <span className="text-muted">Heading-valid / interruptions</span><strong className="numeric text-right">{band.heading_valid_at_settle ?? '—'} / {band.fall_interruptions ?? '—'} fall · {band.timeout_interruptions ?? '—'} timeout</strong>
+            </div>
+            <div className="mt-2 text-[10px] text-muted">Target-attempt denominators; missing distributions are not zero.</div>
+          </article>)}
+        </div>
+      </div>
+      {curriculum.telemetry.iteration !== null && curriculum.telemetry.iteration !== undefined ? <p className="mt-4 text-[11px] text-muted">{curriculum.telemetry.source} · iteration {fmtNumber(curriculum.telemetry.iteration, 0)} · {curriculum.telemetry.window_label}</p> : <p className="mt-4 text-xs text-muted">{curriculum.note}</p>}
+    </div>
+  )
+}
+
 export function CurriculumRail({
   curriculum,
   compact = false,
@@ -190,6 +262,9 @@ export function CurriculumRail({
             <div className="numeric text-lg font-semibold">{curriculum.stage} / {curriculum.stage_count}</div>
           </div>
         ) : null}
+        {curriculum.kind === 'generalist' && curriculum.stage !== null && curriculum.stage !== undefined ? (
+          <div className="text-right"><span className="text-xs text-muted">Stage</span><div className="numeric text-lg font-semibold">{curriculum.stage + 1} / {curriculum.stage_count}</div></div>
+        ) : null}
       </div>
 
       {curriculum.kind === 'horizon' ? (
@@ -210,6 +285,8 @@ export function CurriculumRail({
           {curriculum.note ? <p className="mt-4 text-xs text-muted">{curriculum.note}</p> : null}
         </>
       ) : null}
+
+      {curriculum.kind === 'generalist' ? <GeneralistRail curriculum={curriculum} compact={compact} /> : null}
 
       {curriculum.kind === 'static' ? (
         <p className="mt-5 text-sm leading-relaxed text-secondary">{curriculum.note}</p>

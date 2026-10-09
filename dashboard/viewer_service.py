@@ -30,6 +30,17 @@ from dashboard.policy_architecture import inspect_policy_checkpoint
 from dashboard.run_service import RunService
 
 _FORCE_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
+WAYPOINT_TASKS = frozenset(
+    {
+        "Ascento-Locomotion-Flat",
+        "Ascento-Locomotion-Speed-Flat",
+        "Ascento-Generalist-Locomotion-Flat",
+        "Ascento-Locomotion-Gate-Hold-Flat",
+        "Ascento-Locomotion-Gate-Hold-Control-Flat",
+        "Ascento-Locomotion-Gate-Hold-Turn-12-Flat",
+        "Ascento-Locomotion-Gate-Hold-Turn-25-Flat",
+    }
+)
 
 
 class ViewerBusyError(RuntimeError):
@@ -305,10 +316,7 @@ class ViewerService:
         """Return the viewer's measured route state and robot pose."""
         with self._lock:
             viewer = self._require(viewer_id)
-            if viewer.task not in {
-                "Ascento-Locomotion-Flat",
-                "Ascento-Locomotion-Gate-Hold-Flat",
-            }:
+            if viewer.task not in WAYPOINT_TASKS:
                 return {
                     "available": False,
                     "message": "Waypoint control is available for locomotion viewers.",
@@ -329,10 +337,7 @@ class ViewerService:
             self._refresh_locked(viewer)
             if viewer.state != "running":
                 raise ViewerBusyError("viewer is not running")
-            if viewer.task not in {
-                "Ascento-Locomotion-Flat",
-                "Ascento-Locomotion-Gate-Hold-Flat",
-            }:
+            if viewer.task not in WAYPOINT_TASKS:
                 raise ValueError("waypoint control requires a locomotion viewer")
             request_id = IntrospectionIPC(viewer.introspection_dir).queue_waypoint_command(
                 command, source="dashboard"

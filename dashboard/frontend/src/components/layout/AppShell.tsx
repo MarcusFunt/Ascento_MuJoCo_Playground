@@ -5,6 +5,10 @@ import {
   ChartNoAxesCombined,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
+  Eye,
+  FlaskConical,
+  Film,
   Gauge,
   ListTree,
   Settings,
@@ -13,9 +17,14 @@ import { api } from '../../api'
 import { cn } from '../../lib/utils'
 import { StateBadge } from '../StateBadge'
 import { CommandPalette } from '../CommandPalette'
+import { ControlAccess } from '../ControlAccess'
 
 const navigation = [
   { label: 'Overview', to: '/' as const, icon: Gauge },
+  { label: 'Experiments', to: '/experiments' as const, icon: FlaskConical },
+  { label: 'Evaluations', to: '/evaluations' as const, icon: ClipboardCheck },
+  { label: 'Visualizer', to: '/visualizer' as const, icon: Eye },
+  { label: 'Captures', to: '/captures' as const, icon: Film },
   { label: 'Runs', to: '/runs' as const, icon: ListTree },
   { label: 'Analyze', to: '/analyze' as const, icon: ChartNoAxesCombined },
   { label: 'System', to: '/system' as const, icon: Settings },
@@ -31,6 +40,20 @@ export function AppShell() {
     staleTime: 2_000,
   })
   const active = overview.data?.active_run
+  const health = useQuery({
+    queryKey: ['health'],
+    queryFn: api.health,
+    refetchInterval: 15_000,
+  })
+  const systemHealth = health.data
+  const unhealthyComponents = Object.entries(systemHealth?.components || {})
+    .filter(([, component]) => component.status === 'degraded' || component.status === 'unavailable')
+    .map(([name]) => name)
+  const healthTone = systemHealth?.status === 'healthy'
+    ? 'border-success/25 bg-success/5 text-success'
+    : systemHealth?.status === 'unavailable'
+      ? 'border-danger/40 bg-danger/10 text-danger'
+      : 'border-warning/35 bg-warning/5 text-warning'
 
   const toggle = () => {
     setCollapsed((value) => {
@@ -96,20 +119,37 @@ export function AppShell() {
                 <span className="hidden min-w-0 truncate text-sm font-semibold sm:block">{active.display_name}</span>
               </Link>
             ) : (
-              <span className="text-sm text-muted">No active training</span>
+              <span className="text-sm text-muted">
+                {systemHealth?.components?.supervisor?.status === 'unavailable'
+                  ? 'No indexed active run · host state unverified'
+                  : systemHealth
+                    ? 'No active training'
+                    : 'Checking training state…'}
+              </span>
             )}
           </div>
           <div className="flex items-center gap-2">
             <nav className="flex lg:hidden">
-              {navigation.slice(0, 3).map((item) => (
+              {navigation.slice(0, 4).map((item) => (
                 <Link key={item.to} to={item.to} className="control-focus rounded-lg p-2 text-muted hover:bg-hover hover:text-foreground" aria-label={item.label}>
                   <item.icon size={18} />
                 </Link>
               ))}
             </nav>
+            <ControlAccess />
             <CommandPalette />
           </div>
         </header>
+        <div className={`flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 text-xs sm:px-6 lg:px-8 ${healthTone}`} role="status" aria-live="polite">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <strong className="uppercase tracking-[0.08em]">
+              {health.isError ? 'Health check unavailable' : systemHealth?.status || 'Checking service health'}
+            </strong>
+            {unhealthyComponents.length ? <span>Needs attention: {unhealthyComponents.join(', ')}</span> : null}
+            {systemHealth?.status === 'healthy' ? <span>Dashboard services are healthy</span> : null}
+          </div>
+          <Link to="/system" className="control-focus rounded font-semibold underline underline-offset-2">System details</Link>
+        </div>
         <main className="mx-auto w-full max-w-[1680px] px-4 py-7 sm:px-6 lg:px-8 lg:py-9">
           <Suspense fallback={<div className="h-[420px] animate-pulse rounded-xl border border-border bg-panel" />}>
             <Outlet />

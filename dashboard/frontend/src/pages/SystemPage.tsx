@@ -10,6 +10,7 @@ export function SystemPage() {
   const queryClient = useQueryClient()
   const status = useQuery({ queryKey: ['system'], queryFn: () => api.system(true), refetchInterval: 10_000 })
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 15_000 })
+  const runtime = useQuery({ queryKey: ['runtime-identity'], queryFn: api.runtimeIdentity, refetchInterval: 30_000 })
   const update = useMutation({
     mutationFn: api.updateSystem,
     onSuccess: async () => {
@@ -21,11 +22,12 @@ export function SystemPage() {
   const repository = value.repository || {}
   const tailscale = value.tailscale || {}
   const updateState = value.update || {}
-  const activeRuns = value.active_runs || []
+  const activeRuns = value.active_runs
   const blockers = value.update_blockers || []
   const incoming = Array.isArray(repository.incoming_commits) ? repository.incoming_commits : []
   const updateRunning = updateState.status === 'running'
   const updateAvailable = Boolean(repository.update_available)
+  const tailscaleStatus = tailscale.status || (tailscale.connected === true ? 'healthy' : tailscale.connected === false ? 'degraded' : 'unknown')
 
   return (
     <>
@@ -71,10 +73,10 @@ export function SystemPage() {
           {repository.remote_error ? <Warning>{String(repository.remote_error)}</Warning> : null}
         </SystemCard>
 
-        <SystemCard title="Tailnet access" icon={tailscale.connected ? <ShieldCheck size={16} /> : <Unplug size={16} />}>
+        <SystemCard title="Tailnet access" icon={tailscale.connected === true ? <ShieldCheck size={16} /> : <Unplug size={16} />}>
           <div className="mb-4">
-            <Badge className={tailscale.connected ? 'border-success/40 bg-success/10 text-success' : 'border-warning/40 bg-warning/10 text-warning'}>
-              {tailscale.connected ? 'Connected' : tailscale.enabled ? 'Disconnected' : 'Not enrolled'}
+            <Badge className={tailscaleStatus === 'healthy' ? 'border-success/40 bg-success/10 text-success' : 'border-warning/40 bg-warning/10 text-warning'}>
+              {tailscaleStatus === 'healthy' ? 'Connected' : tailscaleStatus === 'degraded' ? 'Disconnected' : 'Unknown'}
             </Badge>
           </div>
           <KeyValue rows={[
@@ -87,12 +89,32 @@ export function SystemPage() {
 
         <SystemCard title="Dashboard index" icon={<ShieldCheck size={16} />}>
           <KeyValue rows={[
-            ['API', health.data?.ok ? 'healthy' : health.data ? 'degraded' : 'checking'],
+            ['Overall service', health.data?.status || (health.isError ? 'unavailable' : 'checking')],
+            ['API readiness', health.data?.ready ? 'ready' : health.data ? 'unavailable' : 'checking'],
             ['Database', health.data?.database?.available ? 'connected' : health.data?.database?.enabled ? 'filesystem fallback' : 'optional'],
+            ['Host supervisor', health.data?.components?.supervisor?.status || 'checking'],
             ['Backend', health.data?.database?.backend || '—'],
             ['Artifact root', health.data?.artifact_root || '—'],
           ]} />
           {health.data?.database?.error ? <Warning>{String(health.data.database.error)}</Warning> : null}
+        </SystemCard>
+
+        <SystemCard title="Runtime source and deployment" icon={<RefreshCw size={16} />}>
+          <KeyValue rows={[
+            ['Mounted source', runtime.data?.checkout?.root],
+            ['Source branch / HEAD', `${runtime.data?.checkout?.branch || '—'} / ${shortCommit(runtime.data?.checkout?.commit)}`],
+            ['Source origin/main', shortCommit(runtime.data?.checkout?.origin_main)],
+            ['Source working tree', runtime.data?.checkout?.dirty === false ? 'clean' : runtime.data?.checkout?.dirty === true ? 'dirty' : 'unknown'],
+            ['Packaged image', shortCommit(runtime.data?.packaged_image?.commit)],
+            ['Reported API build', shortCommit(runtime.data?.reported_api?.commit)],
+            ['Image branch / compute', `${runtime.data?.packaged_image?.branch || '—'} / ${runtime.data?.packaged_image?.compute || '—'}`],
+            ['Build manifest', shortCommit(runtime.data?.packaged_image?.manifest_commit)],
+            ['Latest indexed run', runtime.data?.latest_indexed_run?.name || 'none indexed'],
+            ['Latest run source', shortCommit(runtime.data?.latest_indexed_run?.commit)],
+          ]} />
+          {runtime.isError ? <Warning>Runtime identity could not be read: {runtime.error.message}</Warning> : null}
+          {runtime.data?.comparisons?.checkout_matches_image === false ? <Warning>The mounted source revision and packaged image revision differ. Managed launches remain blocked until they match.</Warning> : null}
+          {runtime.data?.comparisons?.checkout_matches_origin_main === false ? <Warning>The mounted source checkout does not match origin/main.</Warning> : null}
         </SystemCard>
 
         <SystemCard title="Last update" icon={<UploadCloud size={16} />}>
@@ -114,7 +136,13 @@ export function SystemPage() {
         </section>
       ) : null}
 
-      {activeRuns.length ? (
+      {activeRuns === null ? (
+        <section className="mt-6 rounded-xl border border-warning/30 bg-warning/5 p-6" role="status">
+          <div className="text-xs font-bold uppercase tracking-[0.1em] text-warning">Active-run status unknown</div>
+          <p className="mt-2 text-sm text-secondary">The host supervisor is unavailable, so the dashboard cannot verify whether training, evaluation, viewer or render processes are active.</p>
+          {value.error ? <p className="mt-2 break-words text-xs text-muted">{String(value.error)}</p> : null}
+        </section>
+      ) : Array.isArray(activeRuns) && activeRuns.length ? (
         <section className="mt-6 rounded-xl border border-border bg-panel p-6">
           <div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Active runs</div>
           <p className="mt-2 text-sm text-muted">Repository updates remain disabled while training is active so a rebuild cannot terminate a run.</p>

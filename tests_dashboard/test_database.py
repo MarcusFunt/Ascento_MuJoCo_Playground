@@ -1,12 +1,15 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from dashboard.config import REPO_ROOT
-from dashboard.database import DashboardDatabase
+from dashboard.database import CheckpointIndex, DashboardDatabase, RunIndex
+from sqlalchemy import select
 
 
 def _database(tmp_path):
     path = (tmp_path / "dashboard.db").as_posix()
     database = DashboardDatabase(f"sqlite:///{path}", REPO_ROOT)
     database.initialize(attempts=1, retry_delay_s=0)
-    assert database.available is True
+    assert database.available is True, database.error
     return database
 
 
@@ -67,4 +70,92 @@ def test_disabled_database_is_a_noop(tmp_path):
         "available": False,
         "backend": None,
         "error": None,
+        "source_conflicts": None,
+        "last_successful_sync_at": None,
     }
+
+
+def test_concurrent_run_sync_is_idempotent(tmp_path):
+    database = _database(tmp_path)
+    row = {
+        "id": "concurrent-run",
+        "display_name": "Concurrent run",
+        "name": "artifact/concurrent-run",
+        "state": "running",
+        "repository_version": {},
+    }
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: database.sync_run(row), range(32)))
+
+    assert database.available is True, database.error
+    with database._session() as session:
+        records = session.scalars(
+            select(RunIndex).where(RunIndex.id == "concurrent-run")
+        ).all()
+    assert len(records) == 1
+    assert database.recent_events(run_id="concurrent-run") == []
+    database.dispose()
+
+
+def test_concurrent_checkpoint_sync_is_idempotent(tmp_path):
+    database = _database(tmp_path)
+    checkpoint = {"relative_path": "model_100.pt", "iteration": 100, "stable": True}
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: database.sync_checkpoints("run-1", [checkpoint]), range(32)))
+
+    assert database.available is True, database.error
+    with database._session() as session:
+        records = session.scalars(
+            select(CheckpointIndex).where(CheckpointIndex.id == "run-1:model_100.pt")
+        ).all()
+    assert len(records) == 1
+    database.dispose()
+
+
+def test_run_id_with_different_artifact_path_is_reported(tmp_path):
+    database = _database(tmp_path)
+    original = {
+        "id": "colliding-run",
+        "display_name": "Original",
+        "name": "source-a/colliding-run",
+        "state": "finished",
+        "repository_version": {},
+    }
+    conflicting = {
+        **original,
+        "display_name": "Conflicting source",
+        "name": "source-b/colliding-run",
+    }
+
+    assert database.sync_run(original) is True
+    assert database.sync_run(conflicting) is False
+    assert database.sync_run(conflicting) is False
+
+    with database._session() as session:
+        record = session.get(RunIndex, "colliding-run")
+    assert record.artifact_name == "source-a/colliding-run"
+    conflicts = [
+        event for event in database.recent_events(run_id="colliding-run")
+        if event["type"] == "run_source_conflict"
+    ]
+    assert len(conflicts) == 1
+    assert conflicts[0]["payload"] == {
+        "stored_artifact": "source-a/colliding-run",
+        "incoming_artifact": "source-b/colliding-run",
+    }
+    assert database.status()["source_conflicts"] == 1
+    database.dispose()
+
+
+def test_database_reconnects_after_transient_failure(tmp_path):
+    database = _database(tmp_path)
+    database._mark_unavailable(RuntimeError("temporary connection reset"))
+    database._next_retry_at = 0
+
+    status = database.status()
+
+    assert status["available"] is True
+    assert status["error"] is None
+    database.dispose()

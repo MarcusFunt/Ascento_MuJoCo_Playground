@@ -2,6 +2,9 @@ import importlib
 import json
 from types import SimpleNamespace
 
+from dashboard.supervisor_client import SupervisorUnavailable
+from fastapi.testclient import TestClient
+
 
 def _load_app(monkeypatch, artifact_root):
     monkeypatch.setenv("ASCENTO_ARTIFACT_ROOT", str(artifact_root))
@@ -16,6 +19,17 @@ def test_dashboard_backend_registers_health_and_config_routes(monkeypatch, tmp_p
     assert module.app.title == "Ascento Control"
     paths = {route.path for route in module.app.routes}
     assert "/api/health" in paths
+    assert "/api/health/live" in paths
+    assert "/api/health/ready" in paths
+    assert "/api/system/components" in paths
+    assert "/api/activity" in paths
+    assert "/api/assessments" in paths
+    assert "/api/evaluation-suites" in paths
+    assert "/api/evaluations" in paths
+    assert "/api/experiments" in paths
+    assert "/api/runs/{run_id}/checkpoint-evidence" in paths
+    assert "/api/runtime/preflight" in paths
+    assert "/api/runtime/identity" in paths
     assert "/api/config" in paths
     assert "/api/runs/{run_id}/summary.json" in paths
     assert "/api/overview" in paths
@@ -24,7 +38,8 @@ def test_dashboard_backend_registers_health_and_config_routes(monkeypatch, tmp_p
     assert "/api/runs/{run_id}/curriculum" in paths
 
     health = module.health()
-    assert health["ok"] is True
+    assert health["ready"] is True
+    assert health["status"] in {"healthy", "degraded"}
     assert health["artifact_root"] == str(tmp_path.resolve())
     assert health["config"]["artifact_root"] == str(tmp_path.resolve())
     assert module.configuration()["stale_after_seconds"] > 0
@@ -38,7 +53,7 @@ def test_dashboard_starts_before_read_only_artifact_root_exists(monkeypatch, tmp
     health = module.health()
 
     assert artifact_root.exists() is False
-    assert health["ok"] is True
+    assert health["ready"] is True
     assert health["run_count"] == 0
     assert health["problems"] == []
     assert any("does not exist yet" in warning for warning in health["warnings"])
@@ -55,8 +70,325 @@ def test_health_does_not_trigger_an_expensive_run_summary_scan(monkeypatch, tmp_
 
     health = module.health()
 
-    assert health["ok"] is True
+    assert health["ready"] is True
     assert health["run_count"] is None
+
+
+def test_health_separates_liveness_readiness_and_degraded_dependencies(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        module.DATABASE,
+        "status",
+        lambda: {
+            "enabled": True,
+            "available": False,
+            "backend": "postgresql",
+            "error": "connection refused",
+            "source_conflicts": None,
+            "last_successful_sync_at": None,
+        },
+    )
+
+    class MissingSupervisor:
+        def status(self, *, refresh=False):
+            raise SupervisorUnavailable("socket missing")
+
+    module.SUPERVISOR = MissingSupervisor()
+    client = TestClient(module.app)
+
+    live = client.get("/api/health/live")
+    health = client.get("/api/health")
+    ready = client.get("/api/health/ready")
+
+    assert live.status_code == 200
+    assert live.json()["live"] is True
+    assert health.status_code == 200
+    assert health.json()["status"] == "degraded"
+    assert health.json()["ok"] is False
+    assert health.json()["ready"] is True
+    assert health.json()["components"]["database"]["status"] == "degraded"
+    assert health.json()["components"]["supervisor"]["status"] == "unavailable"
+    assert ready.status_code == 200
+
+
+def test_readiness_fails_when_required_artifacts_are_unavailable(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(module, "_artifact_health", lambda: ["artifact root is not readable"])
+
+    response = TestClient(module.app).get("/api/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["ready"] is False
+    assert response.json()["status"] == "unavailable"
+
+
+def test_missing_supervisor_does_not_claim_idle_or_tailscale_disconnected(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+
+    class MissingSupervisor:
+        def status(self, *, refresh=False):
+            raise SupervisorUnavailable("socket missing")
+
+    module.SUPERVISOR = MissingSupervisor()
+    response = TestClient(module.app).get("/api/system")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["connected"] is False
+    assert payload["active_runs"] is None
+    assert payload["tailscale"] == {
+        "status": "unknown",
+        "enabled": None,
+        "connected": None,
+        "error": "cannot verify without the host supervisor",
+    }
+    assert "host supervisor is unavailable" in payload["update_blockers"]
+
+
+def test_system_components_reports_optional_and_unavailable_services(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.DATABASE, "status", lambda: {"enabled": False, "available": False})
+
+    class MissingSupervisor:
+        def status(self, *, refresh=False):
+            raise SupervisorUnavailable("socket missing")
+
+    module.SUPERVISOR = MissingSupervisor()
+    payload = TestClient(module.app).get("/api/system/components").json()
+
+    assert payload["components"]["api"]["status"] == "healthy"
+    assert payload["components"]["database"]["status"] == "optional"
+    assert payload["components"]["supervisor"]["status"] == "unavailable"
+    assert payload["components"]["tailscale"]["status"] == "unknown"
+
+
+def test_runtime_preflight_is_read_only_and_uses_managed_runtime_policy(monkeypatch, tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    module = _load_app(monkeypatch, artifact_root)
+    observed = {}
+
+    def runtime_identity(root, *, requested_device):
+        observed["root"] = root
+        observed["device"] = requested_device
+        return {
+            "runtime_kind": "canonical-wsl-checkout",
+            "source_checkout_root": "/root/Ascento_MuJoCo_Playground",
+            "execution_root": "/root/Ascento_MuJoCo_Playground",
+            "source_commit": "abc123",
+            "source_branch": "main",
+            "source_dirty": False,
+            "compute_backend": "cu128",
+            "device": "cuda:0",
+        }
+
+    monkeypatch.setattr(module, "runtime_identity", runtime_identity)
+    response = TestClient(module.app).get(
+        "/api/runtime/preflight?task=Ascento-Locomotion-Flat&device=cuda:0"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["allowed"] is True
+    assert response.json()["runtime"]["device"] == "cuda:0"
+    assert observed == {"root": module.CONFIG.repo_root, "device": "cuda:0"}
+    assert not artifact_root.exists()
+
+
+def test_runtime_preflight_explains_policy_blockers(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        module,
+        "runtime_identity",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            module.RuntimePolicyError("canonical checkout is dirty")
+        ),
+    )
+
+    response = TestClient(module.app).get("/api/runtime/preflight?task=Ascento-Balance-Flat")
+
+    assert response.status_code == 200
+    assert response.json()["allowed"] is False
+    assert response.json()["blockers"] == ["canonical checkout is dirty"]
+
+
+def test_runtime_identity_keeps_checkout_image_and_run_revisions_separate(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        module,
+        "runtime_revision_report",
+        lambda: {
+            "checkout": {"commit": "source-commit"},
+            "packaged_image": {"commit": "image-commit"},
+            "reported_api": {"commit": "api-commit"},
+            "comparisons": {"checkout_matches_image": False},
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "_indexed_summaries",
+        lambda: [
+            {
+                "id": "run-1",
+                "name": "latest run",
+                "state": "finished",
+                "repository_version": {"run_commit": "run-commit", "status": "outdated"},
+            }
+        ],
+    )
+
+    response = TestClient(module.app).get("/api/runtime/identity")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["checkout"]["commit"] == "source-commit"
+    assert payload["packaged_image"]["commit"] == "image-commit"
+    assert payload["reported_api"]["commit"] == "api-commit"
+    assert payload["latest_indexed_run"]["commit"] == "run-commit"
+    assert payload["comparisons"]["checkout_matches_image"] is False
+
+
+def test_activity_reports_unknown_host_processes_when_supervisor_is_missing(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+
+    class MissingSupervisor:
+        def status(self, *, refresh=False):
+            raise SupervisorUnavailable("socket missing")
+
+    module.SUPERVISOR = MissingSupervisor()
+    monkeypatch.setattr(module, "_annotated_summaries", lambda: [])
+    monkeypatch.setattr(module.VIEWER_SERVICE, "list", lambda: {"viewers": []})
+    monkeypatch.setattr(module, "gpu_snapshot", lambda: {"available": False, "gpus": []})
+
+    response = TestClient(module.app).get("/api/activity")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trainer"]["status"] == "unknown"
+    assert payload["trainer"]["verified"] is False
+    assert payload["trainer"]["active_runs"] is None
+    assert payload["evaluator"]["status"] == "unknown"
+    assert payload["viewer"]["status"] == "idle"
+    assert payload["viewer"]["verified"] is True
+    assert payload["render"]["status"] == "unknown"
+
+
+def test_assessments_api_is_read_only_and_returns_deterministic_findings(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(module, "_indexed_summaries", lambda: [])
+    monkeypatch.setattr(module, "_system_components", lambda **_kwargs: {})
+    monkeypatch.setattr(module, "activity_snapshot", lambda: {})
+    monkeypatch.setattr(module, "runtime_revision_report", lambda: {})
+    monkeypatch.setattr(module.DATABASE, "status", lambda: {"enabled": False, "available": False})
+    monkeypatch.setattr(module, "discover_evaluations", lambda *_args, **_kwargs: [])
+
+    response = TestClient(module.app).get("/api/assessments")
+
+    assert response.status_code == 200
+    assert response.json()["read_only"] is True
+    assert response.json()["assessments"] == []
+
+
+def test_evaluation_registry_routes_are_read_only_and_preserve_incomplete_status(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    evaluation_root = tmp_path / "evaluations"
+    partial = evaluation_root / "partial"
+    partial.mkdir(parents=True)
+    (partial / "suite.json").write_text(
+        '{"suite_id":"dev_v1","task":"Ascento-Balance-Flat","gates":[{"hard":true}]}',
+        encoding="utf-8",
+    )
+    suite_root = tmp_path / "suites"
+    suite_root.mkdir()
+    (suite_root / "dev_v1.toml").write_text(
+        'suite_id = "dev_v1"\ntask = "Ascento-Balance-Flat"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(module, "EVALUATION_ROOT", evaluation_root)
+    monkeypatch.setattr(module, "EVALUATION_SUITE_ROOT", suite_root)
+    client = TestClient(module.app)
+
+    suite_response = client.get("/api/evaluation-suites")
+    list_response = client.get("/api/evaluations?status=INCOMPLETE")
+    detail_response = client.get("/api/evaluations/partial")
+    gates_response = client.get("/api/evaluations/partial/gates")
+
+    assert suite_response.json()["evaluation_launch_available"] is False
+    assert suite_response.json()["suites"][0]["suite_id"] == "dev_v1"
+    assert list_response.json()["total"] == 1
+    assert list_response.json()["evaluations"][0]["status"] == "INCOMPLETE"
+    assert detail_response.json()["evaluation"]["status"] == "INCOMPLETE"
+    assert gates_response.json()["status"] == "INCOMPLETE"
+
+
+def test_evaluation_registry_paginates_and_supports_etag_revalidation(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    evaluation_root = tmp_path / "evaluations"
+    partial = evaluation_root / "partial"
+    partial.mkdir(parents=True)
+    (partial / "suite.json").write_text(
+        '{"suite_id":"dev_v1","task":"Ascento-Balance-Flat","gates":[{"hard":true}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "EVALUATION_ROOT", evaluation_root)
+    client = TestClient(module.app)
+
+    first_page = client.get("/api/evaluations?limit=1&offset=0")
+    cached_page = client.get(
+        "/api/evaluations?limit=1&offset=0",
+        headers={"If-None-Match": first_page.headers["etag"]},
+    )
+    second_page = client.get("/api/evaluations?limit=1&offset=1")
+
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 1
+    assert len(first_page.json()["evaluations"]) == 1
+    assert cached_page.status_code == 304
+    assert second_page.status_code == 200
+    assert second_page.json()["total"] == 1
+    assert second_page.json()["evaluations"] == []
+    assert second_page.headers["etag"] != first_page.headers["etag"]
+
+
+def test_checkpoint_evidence_api_hashes_the_selected_stable_file(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "model_200.pt").write_bytes(b"policy")
+    monkeypatch.setattr(module.RUN_SERVICE, "resolve", lambda _run_id: SimpleNamespace(path=run_dir))
+    monkeypatch.setattr(
+        module.VIEWER_SERVICE,
+        "checkpoints",
+        lambda _run_id: {"checkpoints": [{"relative_path": "model_200.pt", "iteration": 200, "stable": True}]},
+    )
+
+    response = TestClient(module.app).get("/api/runs/run-1/checkpoint-evidence")
+
+    assert response.status_code == 200
+    assert response.json()["relative_path"] == "model_200.pt"
+    assert response.json()["selection_status"] == "not_recorded"
+
+
+def test_experiment_registry_uses_explicit_run_metadata_only(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    experiment_root = tmp_path / "experiments"
+    experiment_root.mkdir()
+    (experiment_root / "program.json").write_text(
+        json.dumps({"plan_id": "program-1", "status": "declared"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(module, "EXPERIMENT_ROOT", experiment_root)
+    monkeypatch.setattr(
+        module,
+        "_annotated_summaries",
+        lambda: [
+            {"id": "linked", "metadata": {"experiment_id": "program-1"}},
+            {"id": "unlinked", "metadata": {"display_name": "program-1-like-name"}},
+        ],
+    )
+
+    response = TestClient(module.app).get("/api/experiments")
+
+    assert response.status_code == 200
+    program = response.json()["programs"][0]
+    assert [item["run"]["id"] for item in program["linked_runs"]] == ["linked"]
+    assert [item["id"] for item in program["unlinked_runs"]] == ["unlinked"]
 
 
 def test_run_summary_download_is_json_safe(monkeypatch, tmp_path):
