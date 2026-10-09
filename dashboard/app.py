@@ -9,6 +9,7 @@ import math
 import os
 import threading
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote, urlsplit
@@ -96,7 +97,23 @@ _EVALUATION_CACHE_TTL_S = 10.0
 _EVALUATION_CACHE_LOCK = threading.Lock()
 _EVALUATION_CACHE: tuple[float, list[dict]] | None = None
 
-app = FastAPI(title="Ascento Control", version="3.0")
+@asynccontextmanager
+async def dashboard_lifespan(_: FastAPI):
+    try:
+        DATABASE.initialize()
+        if DATABASE.enabled and DATABASE.error:
+            warning = f"Dashboard database unavailable; using filesystem fallback: {DATABASE.error}"
+            if warning not in STARTUP_WARNINGS:
+                STARTUP_WARNINGS.append(warning)
+        yield
+    finally:
+        try:
+            VIEWER_SERVICE.stop_all()
+        finally:
+            DATABASE.dispose()
+
+
+app = FastAPI(title="Ascento Control", version="3.0", lifespan=dashboard_lifespan)
 
 
 class RunCreateRequest(BaseModel):
@@ -1758,18 +1775,3 @@ def frontend_route(path: str):
     if index_path.is_file():
         return FileResponse(index_path)
     raise HTTPException(status_code=404, detail="Dashboard frontend is not built yet")
-
-
-@app.on_event("startup")
-def initialize_dashboard_database() -> None:
-    DATABASE.initialize()
-    if DATABASE.enabled and DATABASE.error:
-        warning = f"Dashboard database unavailable; using filesystem fallback: {DATABASE.error}"
-        if warning not in STARTUP_WARNINGS:
-            STARTUP_WARNINGS.append(warning)
-
-
-@app.on_event("shutdown")
-def stop_managed_viewers() -> None:
-    VIEWER_SERVICE.stop_all()
-    DATABASE.dispose()
