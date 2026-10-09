@@ -6,10 +6,13 @@ import math
 import threading
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import torch
 from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
-from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
+
+if TYPE_CHECKING:
+    from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 
 
 @dataclass(kw_only=True)
@@ -263,6 +266,14 @@ class AscentoMotionCommand(CommandTerm):
         else:
             self._command[env_ids, 3] = self._jump_pulse[env_ids].float()
             self._pulse_is_new[env_ids] = False
+
+
+def __getattr__(name: str):
+    if name == "UniformVelocityCommandCfg":
+        from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
+
+        return UniformVelocityCommandCfg
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
