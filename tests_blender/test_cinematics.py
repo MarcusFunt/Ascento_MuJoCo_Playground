@@ -16,6 +16,32 @@ import import_motion  # noqa: E402
 
 
 class CinematicCameraTests(unittest.TestCase):
+  def test_cycles_reports_and_honors_explicit_cpu_rendering(self):
+    import bpy
+
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    scene = bpy.context.scene
+
+    details = import_motion._configure_cycles(scene, bpy, "cpu")
+
+    self.assertEqual(scene.render.engine, "CYCLES")
+    self.assertEqual(scene.cycles.device, "CPU")
+    self.assertEqual(details["requested"], "cpu")
+    self.assertEqual(details["selected"], "CPU")
+    self.assertEqual(details["gpu_devices"], [])
+
+  def test_cycles_auto_mode_records_the_selected_device(self):
+    import bpy
+
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    scene = bpy.context.scene
+
+    details = import_motion._configure_cycles(scene, bpy, "auto")
+
+    self.assertIn(details["selected"], {"CPU", "GPU"})
+    self.assertEqual(scene.cycles.device, details["selected"])
+    self.assertEqual(details["requested"], "auto")
+
   def test_range_suffixed_ffmpeg_output_is_renamed_to_requested_mp4(self):
     with tempfile.TemporaryDirectory(prefix="ascento_video_output_test_") as temp_dir:
       output = Path(temp_dir) / "render.mp4"

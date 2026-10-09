@@ -18,6 +18,7 @@ from dashboard.config import REPO_ROOT
 from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
 from dashboard.monitor import invalidate_discovery_cache
 from dashboard.provenance import working_tree_state
+from dashboard.runtime_policy import apply_training_device, runtime_identity, training_device
 from dashboard.task_catalog import horizon_task_ids, speed_task_ids, task_ids
 from dashboard.versioning import annotate_run_summary, classify_run_version
 
@@ -103,6 +104,7 @@ class RunService:
             "created_at": metadata.get("created_at"),
             "updated_at": metadata.get("updated_at"),
             "schema_version": int(metadata.get("schema_version") or 1),
+            "runtime": metadata.get("runtime") or {},
         }
 
     def resolve(self, run_id: str):
@@ -272,6 +274,10 @@ class RunService:
             raise ValueError(
                 "working tree is dirty; rerun with --allow-dirty-provenance to archive it explicitly"
             )
+        requested_device = training_device(training_args)
+        runtime = runtime_identity(REPO_ROOT, requested_device=requested_device)
+        resolved_device = str(runtime["device"])
+        training_args = apply_training_device(training_args, resolved_device)
 
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         if not os.access(self.artifact_root, os.W_OK | os.X_OK):
@@ -299,6 +305,7 @@ class RunService:
                     "parent_run_id": str(parent_run_id) if parent_run_id else None,
                     "parent_checkpoint": str(request.get("parent_checkpoint") or "").strip(),
                     "max_speed_mps": max_speed_mps,
+                    "runtime": runtime,
                     "speed_command_training_schedule": (
                         {
                             "max_speed_mps": max_speed_mps,
@@ -325,6 +332,8 @@ class RunService:
                     "display_name": display_name,
                     "max_speed_mps": max_speed_mps,
                     "started_at": started_at,
+                    "device": resolved_device,
+                    "runtime": runtime,
                 },
             )
         except OSError as error:

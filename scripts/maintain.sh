@@ -30,8 +30,8 @@ Bootstrap or update Ascento_MuJoCo_Playground to an exact repository state.
 Existing logs/checkpoints/captures are preserved.
 
 Options:
-  --install-dir PATH       checkout location (default: current checkout or ~/Ascento_MuJoCo_Playground)
-  --branch NAME            branch to install/update (default: main)
+  --install-dir PATH       must be /root/Ascento_MuJoCo_Playground
+  --branch main            only the canonical main branch is supported
   --compute auto|cu128|cpu compute backend (default: auto)
   --skip-system-install    do not install missing OS/Docker/NVIDIA tooling
   --skip-docker-build      sync source dependencies but do not rebuild containers
@@ -199,6 +199,9 @@ OLD_COMMIT="${ASCENTO_PREUPDATE_COMMIT:-}"
 OLD_BRANCH="${ASCENTO_PREUPDATE_BRANCH:-}"
 prepare_checkout() {
   INSTALL_DIR="$(realpath -m "$INSTALL_DIR")"
+  [[ "$INSTALL_DIR" == "/root/Ascento_MuJoCo_Playground" ]] \
+    || die "The only supported source checkout is /root/Ascento_MuJoCo_Playground; refusing $INSTALL_DIR."
+  [[ "$BRANCH" == "main" ]] || die "Maintenance only updates the canonical main branch."
   if [[ -d "$INSTALL_DIR/.git" ]]; then
     log "Updating existing checkout: $INSTALL_DIR"
     local checkout_commit checkout_branch
@@ -259,10 +262,12 @@ reexec_updated_maintainer() {
 }
 
 sync_python_dependencies() {
-  log "Synchronizing exact Python environment"
+  log "Synchronizing the external runtime environment"
   local py
   py="$(uv python find 3.12)"
-  local args=(sync --frozen --python "$py" --all-groups)
+  export UV_PROJECT_ENVIRONMENT="${ASCENTO_RUNTIME_ENV:-$HOME/.cache/ascento-mjlab/$COMPUTE}"
+  mkdir -p "$(dirname "$UV_PROJECT_ENVIRONMENT")"
+  local args=(sync --project "$INSTALL_DIR" --frozen --python "$py" --all-groups)
   while IFS= read -r extra; do
     [[ -n "$extra" ]] || continue
     [[ "$extra" == "cpu" || "$extra" == "cu128" ]] && continue
@@ -276,7 +281,7 @@ for name in (data.get('project', {}).get('optional-dependencies', {}) or {}):
 PY
 )
   args+=(--extra "$COMPUTE")
-  (cd "$INSTALL_DIR" && uv "${args[@]}")
+  uv "${args[@]}"
 }
 
 stamp_legacy_runs() {
@@ -286,7 +291,7 @@ stamp_legacy_runs() {
   log "Backfilling repository provenance for legacy runs without commit metadata"
   local args=(--root "$root" --commit "$OLD_COMMIT")
   [[ -n "$OLD_BRANCH" ]] && args+=(--branch "$OLD_BRANCH")
-  "$INSTALL_DIR/.venv/bin/python" "$INSTALL_DIR/scripts/stamp_run_provenance.py" "${args[@]}"
+  "$UV_PROJECT_ENVIRONMENT/bin/python" "$INSTALL_DIR/scripts/stamp_run_provenance.py" "${args[@]}"
 }
 
 build_frontend() {
@@ -314,16 +319,21 @@ write_maintenance_state() {
   local dirty
   dirty="$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=all)"
   [[ -z "$dirty" ]] || die "Refusing to bake repository provenance from a dirty or untracked source tree."
+  local runtime_environment
+  runtime_environment="${UV_PROJECT_ENVIRONMENT:-${ASCENTO_RUNTIME_ENV:-$HOME/.cache/ascento-mjlab/$COMPUTE}}"
   cat >"$state/repository-version.json" <<EOF
 {
   "commit": "$commit",
   "branch": "$branch",
   "compute": "$COMPUTE",
+  "runtime_environment": "$runtime_environment",
   "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
   cat >"$state/compose.env" <<EOF
 ASCENTO_COMPUTE_EXTRA=$COMPUTE
+ASCENTO_CANONICAL_SOURCE_ROOT=$INSTALL_DIR
+ASCENTO_RUNTIME_KIND=packaged-docker
 ASCENTO_REPOSITORY_COMMIT=$commit
 ASCENTO_REPOSITORY_BRANCH=$branch
 ASCENTO_REPOSITORY_DIRTY=0
@@ -354,7 +364,7 @@ build_containers() {
 
 verify_installation() {
   log "Running maintenance verification"
-  (cd "$INSTALL_DIR" && .venv/bin/python -m pytest -q tests_dashboard)
+  (cd "$INSTALL_DIR" && "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest -q tests_dashboard)
   if (( BUILD_DOCKER )); then
     compose_files
     docker_exec compose --env-file "$INSTALL_DIR/.maintenance/compose.env" "${COMPOSE_FILES[@]}" config >/dev/null

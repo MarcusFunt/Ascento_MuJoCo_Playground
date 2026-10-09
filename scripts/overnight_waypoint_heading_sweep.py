@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-CLI = ROOT / ".venv" / "bin" / "ascento"
+CLI = ROOT / "scripts" / "ascento-gpu"
 PARENT_CHECKPOINT = ROOT / "logs/rsl_rl/20261006_195013_waypoint-hold-ablation-treatment-300i-seed73_6f8890c9/ascento_locomotion_flat/2026-10-06_19-50-24/model_299.pt"
 SWEEP_ROOT = ROOT / "checkpoints/overnight_waypoint_heading_sweep"
 EVALUATION_ROOT = ROOT / "evaluations"
@@ -61,6 +61,10 @@ def log(message: str) -> None:
 
 class Sweep:
     def __init__(self) -> None:
+        if os.environ.get("ASCENTO_GPU_BOOTSTRAPPED") != "1":
+            raise RuntimeError(
+                "launch this sweep with scripts/ascento-gpu python scripts/overnight_waypoint_heading_sweep.py"
+            )
         self.started = time.monotonic()
         self.deadline = self.started + WALL_BUDGET_SECONDS
         self.env = os.environ.copy()

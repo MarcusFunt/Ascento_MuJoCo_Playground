@@ -13,6 +13,8 @@ param(
   [string] $WslRepository = "",
   [string] $Checkpoint = "",
   [string[]] $CameraShots = @("low_front", "side_follow", "orbit"),
+  [ValidateSet("auto", "gpu", "cpu")]
+  [string] $RenderDevice = "auto",
   [int] $Resolution = 1280,
   [double] $Fps = 0,
   [switch] $CinematicDof,
@@ -39,10 +41,29 @@ if ([string]::IsNullOrWhiteSpace($WslRepository)) {
   }
 }
 
-$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$importer = Join-Path $repoRoot "tools\blender\import_motion.py"
-if (-not (Test-Path -LiteralPath $importer -PathType Leaf)) {
-  throw "Blender importer not found in this checkout: $importer"
+$canonicalWslPath = "\\wsl.localhost\Ubuntu\root\Ascento_MuJoCo_Playground"
+if ([System.IO.Path]::GetFullPath($WslRepository).TrimEnd([char]92) -ne $canonicalWslPath) {
+  throw "Blender renders must use the canonical WSL checkout: $canonicalWslPath"
+}
+$canonicalState = & wsl.exe --exec bash -lc 'cd /root/Ascento_MuJoCo_Playground && branch=$(git branch --show-current) && head=$(git rev-parse HEAD) && remote=$(git rev-parse origin/main) && if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then dirty=dirty; else dirty=clean; fi && printf "%s\n%s\n%s\n%s\n" "$branch" "$head" "$remote" "$dirty"'
+if ($LASTEXITCODE -ne 0 -or $canonicalState.Count -lt 4) {
+  throw "Could not verify the canonical WSL checkout before rendering."
+}
+if ($canonicalState[0] -ne "main" -or $canonicalState[1] -ne $canonicalState[2] -or $canonicalState[3] -ne "clean") {
+  throw "Blender rendering requires a clean WSL main checkout at origin/main."
+}
+$wslImporter = Join-Path $WslRepository "tools\blender\import_motion.py"
+$wslLauncher = Join-Path $WslRepository "scripts\render_blender.ps1"
+if (-not (Test-Path -LiteralPath $wslImporter -PathType Leaf)) {
+  throw "Blender importer not found in the canonical checkout: $wslImporter"
+}
+if (-not (Test-Path -LiteralPath $wslLauncher -PathType Leaf)) {
+  throw "Blender launcher not found in the canonical checkout: $wslLauncher"
+}
+$localLauncherText = [System.IO.File]::ReadAllText($PSCommandPath).Replace("`r`n", "`n")
+$canonicalLauncherText = [System.IO.File]::ReadAllText($wslLauncher).Replace("`r`n", "`n")
+if ($localLauncherText -cne $canonicalLauncherText) {
+  throw "This Windows launcher is stale. Synchronize the Windows mirror with origin/main and run it again."
 }
 $capturePath = (Resolve-Path -LiteralPath $Capture).ProviderPath
 $descriptionPath = (Resolve-Path -LiteralPath $Description).ProviderPath
@@ -74,13 +95,14 @@ $framesPath = Join-Path $outputDirectory "frames"
 
 $blenderArgs = @(
   "--background",
-  "--python", $importer,
+  "--python", $wslImporter,
   "--",
   "--capture", $capturePath,
   "--description", $descriptionPath,
   "--output", $scenePath,
   "--video-output", $videoPath,
-  "--resolution", $Resolution.ToString()
+  "--resolution", $Resolution.ToString(),
+  "--render-device", $RenderDevice
 )
 if ($CameraShots.Count -gt 0) {
   $blenderArgs += "--camera-shots"
@@ -99,7 +121,7 @@ if ($null -ne $checkpointPath) {
   $blenderArgs += @("--checkpoint", $checkpointPath)
 }
 
-Write-Host "Importer checkout: $repoRoot"
+Write-Host "Canonical importer checkout: $WslRepository"
 Write-Host "Dashboard-visible output: $outputDirectory"
 & $blenderCommand.Source @blenderArgs
 if ($LASTEXITCODE -ne 0) {

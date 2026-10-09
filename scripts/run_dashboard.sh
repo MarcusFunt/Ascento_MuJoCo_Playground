@@ -2,6 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CANONICAL_ROOT="/root/Ascento_MuJoCo_Playground"
+if [[ "$ROOT" != "$CANONICAL_ROOT" ]]; then
+  echo "ERROR: use the canonical WSL checkout at $CANONICAL_ROOT; found $ROOT" >&2
+  exit 1
+fi
 DIST="${ASCENTO_DASHBOARD_DIST:-$ROOT/dashboard/frontend/dist}"
 
 if ! command -v uv >/dev/null 2>&1; then

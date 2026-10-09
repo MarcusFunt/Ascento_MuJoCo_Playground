@@ -11,4 +11,7 @@ def test_supervisor_uses_a_short_systemd_runtime_socket_path():
     assert "RuntimeDirectory=ascento-supervisor" in installer
     assert "RuntimeDirectoryMode=0770" in installer
     assert "/run/ascento-supervisor:/run/ascento-supervisor" in compose
+    assert compose.count("../.git:/workspace/.git:ro") == 2
+    assert compose.count("../src:/workspace/src:ro") == 2
+    assert compose.count('GIT_OPTIONAL_LOCKS: "0"') == 2
     assert len("/run/ascento-supervisor/supervisor.sock".encode()) < 108

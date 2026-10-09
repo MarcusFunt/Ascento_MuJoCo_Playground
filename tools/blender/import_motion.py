@@ -917,12 +917,71 @@ def _make_camera_and_lights(bpy: Any, scene: Any, center: tuple[float, float, fl
   scene.camera = camera
 
 
-def _configure_cycles(scene: Any) -> None:
+def _configure_cycles(
+  scene: Any,
+  bpy_module: Any | None = None,
+  render_device: str = "auto",
+) -> dict[str, Any]:
+  if render_device not in {"auto", "gpu", "cpu"}:
+    raise ValueError(f"unsupported Cycles render device: {render_device}")
   scene.render.engine = "CYCLES"
   scene.cycles.samples = 32
   scene.cycles.preview_samples = 16
   scene.cycles.use_denoising = True
   scene.cycles.use_preview_denoising = True
+
+  if bpy_module is None:
+    import bpy as bpy_module
+
+  cycles_preferences = bpy_module.context.preferences.addons.get("cycles")
+  cycles_preferences = getattr(cycles_preferences, "preferences", None)
+  gpu_devices = []
+  selected_type = None
+  if render_device != "cpu" and cycles_preferences is not None:
+    available_types = ("OPTIX", "CUDA", "HIP", "ONEAPI", "METAL")
+    current_type = getattr(cycles_preferences, "compute_device_type", None)
+    candidates = tuple(dict.fromkeys(
+      ([current_type] if current_type and current_type != "NONE" else []) + list(available_types)
+    ))
+    for device_type in candidates:
+      try:
+        cycles_preferences.compute_device_type = device_type
+        cycles_preferences.get_devices()
+      except (AttributeError, RuntimeError, TypeError, ValueError):
+        continue
+      gpu_devices = [
+        device for device in getattr(cycles_preferences, "devices", ())
+        if str(getattr(device, "type", "")).upper() != "CPU"
+      ]
+      if gpu_devices:
+        selected_type = device_type
+        break
+
+  if render_device == "gpu" and not gpu_devices:
+    raise RuntimeError("GPU rendering was requested, but Blender found no supported Cycles GPU")
+  selected_device = "GPU" if gpu_devices and render_device != "cpu" else "CPU"
+  scene.cycles.device = selected_device
+
+  if cycles_preferences is not None:
+    for device in getattr(cycles_preferences, "devices", ()):
+      device.use = (
+        str(getattr(device, "type", "")).upper() != "CPU"
+        if selected_device == "GPU"
+        else str(getattr(device, "type", "")).upper() == "CPU"
+      )
+
+  return {
+    "requested": render_device,
+    "selected": selected_device,
+    "compute_device_type": selected_type if selected_device == "GPU" else None,
+    "gpu_devices": [
+      {
+        "name": str(getattr(device, "name", "unknown")),
+        "type": str(getattr(device, "type", "unknown")),
+      }
+      for device in gpu_devices
+    ] if selected_device == "GPU" else [],
+  }
 
 
 def _camera_shot_ranges(
@@ -1492,8 +1551,9 @@ def _configure_render(
   scale: float,
   resolution: int,
   cinematic: bool = False,
+  render_device: str = "auto",
 ):
-  _configure_cycles(scene)
+  device_info = _configure_cycles(scene, bpy, render_device)
   scene.render.resolution_x = resolution
   scene.render.resolution_y = round(resolution * 9 / 16) if cinematic else resolution
   scene.render.resolution_percentage = 100
@@ -1517,6 +1577,7 @@ def _configure_render(
     background.inputs["Strength"].default_value = 0.45 if cinematic else 0.7
   if not cinematic:
     _make_camera_and_lights(bpy, scene, center, scale)
+  return device_info
 
 
 def _add_event_markers(scene: Any, capture: dict[str, np.ndarray], times: np.ndarray, fps: float, start_frame: int) -> None:
@@ -1671,7 +1732,16 @@ def run(args: argparse.Namespace) -> None:
       float(root_pos[:, 2].mean() - 0.12),
     )
     cinematic = bool(args.camera_shots)
-    _configure_render(bpy, scene, camera_center, camera_scale, args.resolution, cinematic=cinematic)
+    render_device_info = _configure_render(
+      bpy,
+      scene,
+      camera_center,
+      camera_scale,
+      args.resolution,
+      cinematic=cinematic,
+      render_device=args.render_device,
+    )
+    scene["ascento_render_device"] = json.dumps(render_device_info, sort_keys=True)
     _make_warehouse_stage(
       bpy,
       scene,
@@ -1745,6 +1815,7 @@ def run(args: argparse.Namespace) -> None:
       "render": {
         "engine": scene.render.engine,
         "device": getattr(getattr(scene, "cycles", None), "device", None),
+        "device_info": render_device_info,
         "resolution": {
           "width": round(scene.render.resolution_x * scene.render.resolution_percentage / 100),
           "height": round(scene.render.resolution_y * scene.render.resolution_percentage / 100),
@@ -1858,6 +1929,7 @@ def _parse_args() -> argparse.Namespace:
     action="store_true",
     help="Opt into depth of field, focused on the animated robot bounds",
   )
+  parser.add_argument("--render-device", choices=("auto", "gpu", "cpu"), default="auto", help="Cycles device selection (default: use an available GPU)")
   parser.add_argument("--resolution", type=int, default=720, help="Render width in pixels (default: 720; cinematic shots use 16:9)")
   args = parser.parse_args(arguments)
   if args.resolution < 16:

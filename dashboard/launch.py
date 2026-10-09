@@ -23,6 +23,7 @@ from ascento_mjlab.plant_contract import current_plant_contract
 from ascento_mjlab.task_contract import current_task_contract_for_task
 from dashboard.config import REPO_ROOT, load_config
 from dashboard.provenance import working_tree_state, write_dirty_source_bundle
+from dashboard.runtime_policy import apply_training_device, runtime_identity, training_device
 
 TRAINING_RUNTIME_RE = re.compile(
     r"Training with:\s*device=([^,\s]+),\s*seed=([^,\s]+),\s*rank=(\d+)"
@@ -368,6 +369,7 @@ def _write_experiment_manifest(
     sim_timestep: int | float | str | None,
     device: str | None,
     source_provenance: dict[str, Any],
+    runtime: dict[str, Any],
 ) -> None:
     env_count = _training_arg_value(training_args, "--env.scene.num-envs", "--num-envs")
     manifest = {
@@ -395,6 +397,7 @@ def _write_experiment_manifest(
         "packages": _package_versions(),
         "git": git,
         "source_provenance": source_provenance,
+        "runtime": runtime,
         "checkpoint": {
             "path": None,
             "sha256": None,
@@ -506,6 +509,11 @@ def main() -> int:
         training_args = training_args[1:]
     if "--output" in training_args:
         parser.error("do not pass --output; dashboard.launch assigns an isolated run directory")
+    try:
+        runtime = runtime_identity(REPO_ROOT, requested_device=training_device(training_args))
+    except ValueError as error:
+        parser.error(str(error))
+    training_args = apply_training_device(training_args, str(runtime["device"]))
 
     stage = (
         args.task.removeprefix("Ascento-").removesuffix("-Flat").lower().replace("-", "_")
@@ -562,12 +570,7 @@ def main() -> int:
     ]
 
     seed = _number(_training_arg(training_args, "--seed", "--agent.seed"))
-    device = _training_arg(
-        training_args,
-        "--device",
-        "--env.device",
-        "--agent.device",
-    )
+    device = str(runtime["device"])
     sim_timestep = _number(
         _training_arg(
             training_args,
@@ -594,6 +597,7 @@ def main() -> int:
         parent_run_id=args.parent_run_id,
         parent_checkpoint=args.parent_checkpoint,
         plant_contract=current_plant_contract(),
+        runtime=runtime,
     )
 
     # The API starts launchers in a new session so their process group can be
@@ -621,6 +625,7 @@ def main() -> int:
         git=git,
         git_commit=git.get("commit"),
         git_branch=git.get("branch"),
+        runtime=runtime,
         launcher_pid=os.getpid(),
         process_group=process_group,
         pid_namespace=_pid_namespace(),
@@ -639,6 +644,7 @@ def main() -> int:
         sim_timestep=sim_timestep,
         device=device,
         source_provenance=source_provenance,
+        runtime=runtime,
     )
 
     exit_code = 127

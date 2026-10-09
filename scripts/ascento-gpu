@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+CANONICAL_ROOT="/root/Ascento_MuJoCo_Playground"
+RUNTIME_ENV="${ASCENTO_RUNTIME_ENV:-$HOME/.cache/ascento-mjlab/cu128}"
+
+fail() { echo "ERROR: $*" >&2; exit 1; }
+
+[[ "$(uname -s)" == "Linux" ]] || fail "GPU workloads must run in Linux/WSL."
+[[ "$ROOT" == "$CANONICAL_ROOT" ]] || fail "Use the single canonical WSL checkout at $CANONICAL_ROOT; found $ROOT."
+[[ -d "$ROOT/.git" ]] || fail "The canonical runtime must be a Git checkout."
+[[ "$(git -C "$ROOT" branch --show-current)" == "main" ]] || fail "GPU workloads require branch main."
+[[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=all)" ]] || fail "Commit or preserve source changes before launching a managed GPU workload."
+if [[ "${ASCENTO_GPU_BOOTSTRAPPED:-0}" != "1" ]]; then
+  git -C "$ROOT" fetch --quiet origin main || fail "Could not verify origin/main."
+fi
+[[ "$(git -C "$ROOT" rev-parse HEAD)" == "$(git -C "$ROOT" rev-parse origin/main)" ]] || fail "Synchronize the canonical checkout to origin/main before launching."
+command -v uv >/dev/null 2>&1 || fail "uv is required."
+command -v nvidia-smi >/dev/null 2>&1 || fail "nvidia-smi is unavailable in this WSL session."
+nvidia-smi >/dev/null 2>&1 || fail "The NVIDIA GPU is not available."
+
+export UV_PROJECT_ENVIRONMENT="$RUNTIME_ENV"
+EXTRAS=(--extra cu128 --extra dashboard --extra mcp --extra introspection)
+if [[ "${ASCENTO_GPU_BOOTSTRAPPED:-0}" != "1" ]]; then
+  uv sync --project "$ROOT" --frozen --python 3.12 --all-groups "${EXTRAS[@]}"
+fi
+export ASCENTO_GPU_BOOTSTRAPPED=1
+"$RUNTIME_ENV/bin/python" -c 'import torch; assert torch.cuda.is_available(), "CUDA PyTorch is unavailable"; print(f"GPU runtime: torch={torch.__version__}, cuda={torch.version.cuda}, device={torch.cuda.get_device_name(0)}")'
+[[ $# -gt 0 ]] || {
+  echo "Usage: scripts/ascento-gpu COMMAND [ARG ...]" >&2
+  echo "Example: scripts/ascento-gpu ascento run start --task Ascento-Balance-Flat ..." >&2
+  exit 2
+}
+exec uv run --project "$ROOT" --frozen "${EXTRAS[@]}" -- "$@"

@@ -300,8 +300,8 @@
     },
     {
       "name": "ASCENTO_INSTALL_DIR",
-      "default": "current checkout or ~/Ascento_MuJoCo_Playground",
-      "purpose": "Maintenance-script checkout location."
+      "default": "/root/Ascento_MuJoCo_Playground",
+      "purpose": "Fixed canonical WSL checkout location; alternate checkouts are refused."
     },
     {
       "name": "ASCENTO_REPOSITORY_COMMIT",
@@ -367,6 +367,11 @@
       "name": "ASCENTO_RECOVERY_CHECKPOINT",
       "default": null,
       "purpose": "Recovery checkpoint input for scripts/preflight_long_run.sh."
+    },
+    {
+      "name": "ASCENTO_RUNTIME_ENV",
+      "default": "$HOME/.cache/ascento-mjlab/<compute>",
+      "purpose": "External uv environment used for native CUDA work, kept outside the checkout."
     }
   ],
   "interfaces": {
@@ -472,6 +477,10 @@
     {
       "path": "scripts/maintain.sh",
       "purpose": "Bootstrap/update locked runtime, build Docker/frontend, and start dashboard."
+    },
+    {
+      "path": "scripts/ascento-gpu",
+      "purpose": "Verify canonical WSL main and launch commands from the external CUDA runtime."
     },
     {
       "path": "scripts/preflight_long_run.sh",

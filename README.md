@@ -68,10 +68,14 @@ The maintainer:
 - installs missing base tooling, Docker Engine/Compose, uv, and NVIDIA Container
   Toolkit where appropriate on supported Debian/Ubuntu systems;
 - automatically chooses CUDA when a usable NVIDIA GPU is present, otherwise CPU;
-- updates the checkout to the requested remote branch without deleting
-  `logs/`, `checkpoints/`, or `captures/`;
-- runs exact `uv sync`, including every dependency group and every optional
-  dependency compatible with the selected compute backend;
+- updates only the canonical WSL `main` checkout without deleting run
+  artifacts; the Windows copy is a mirror and alternate worktrees are refused
+  for managed launches;
+- prepares an external, exact `uv` runtime environment without rewriting the
+  checkout-local MCP environment;
+- builds Docker from the canonical WSL commit and bind-mounts that same source
+  plus read-only Git metadata at runtime; managed launches verify the image
+  revision manifest, so Docker is not a second working checkout;
 - uses `npm ci` for an exact frontend dependency reconciliation and rebuilds the
   dashboard;
 - rebuilds the Docker image from scratch so removed image dependencies cannot
@@ -164,18 +168,21 @@ Use Linux/WSL2, Python 3.11–3.13, an NVIDIA driver compatible with the pinned
 CUDA wheel, and `uv`:
 
 ```bash
-uv sync --extra cu128 --extra dashboard
+export UV_PROJECT_ENVIRONMENT="${ASCENTO_RUNTIME_ENV:-$HOME/.cache/ascento-mjlab/cu128}"
+uv sync --project . --frozen --all-groups --extra cu128 --extra dashboard --extra mcp --extra introspection
 ```
 
-For CPU-only development:
+For CPU-only development, use a separate external environment:
 
 ```bash
-uv sync --extra cpu --extra dashboard
+export UV_PROJECT_ENVIRONMENT="${ASCENTO_RUNTIME_ENV:-$HOME/.cache/ascento-mjlab/cpu}"
+uv sync --project . --frozen --all-groups --extra cpu --extra dashboard --extra mcp --extra introspection
 ```
 
-The lockfile pins mjlab 1.6.0, MuJoCo 3.11, MuJoCo Warp, Warp, Torch, and
-RSL-RL. When using the CUDA environment, keep `--extra cu128` on `uv run`
-commands or use the environment created by `uv sync --extra cu128`.
+Both environments stay outside the checkout, leaving its `.venv` available to
+the registered MCP service. Use `scripts/ascento-gpu` for GPU-backed training,
+evaluation, and simulation commands. The lockfile pins mjlab 1.6.0, MuJoCo
+3.11, MuJoCo Warp, Warp, Torch, and RSL-RL.
 
 ## Operations CLI and MCP
 
@@ -190,8 +197,8 @@ The unified `ascento` CLI uses the same run service as the dashboard:
 > launches the MCP server in WSL for Codex.
 
 ```bash
-uv run --extra dashboard ascento run start --task Ascento-Balance-Flat \
-  --display-name "Balance baseline" --envs 512 --iterations 10000 --seed 123
+scripts/ascento-gpu ascento run start --task Ascento-Balance-Flat \
+  --display-name "Balance baseline" --envs 512 --iterations 10000 --seed 123 -- --device cuda:0
 uv run --extra dashboard ascento run list --active
 uv run --extra dashboard ascento run monitor <run-id> --interval 30
 uv run --extra dashboard ascento run progress <run-id> --json

@@ -85,10 +85,13 @@ import or CUDA mismatches. Reconcile it from the locked project definition:
 > `uv`, which can fail while manipulating the project's Linux `.venv`.
 
 ```bash
-uv sync --frozen --all-groups --extra cu128 --extra dashboard --extra mcp
+export UV_PROJECT_ENVIRONMENT="$HOME/.cache/ascento-mjlab/cu128"
+uv sync --project . --frozen --all-groups --extra cu128 --extra dashboard --extra mcp --extra introspection
 ```
 
-For CPU development, replace `cu128` with `cpu`. Run
+This keeps the registered MCP service's checkout-local `.venv` intact. For CPU
+development, use `$HOME/.cache/ascento-mjlab/cpu` and replace `cu128` with
+`cpu`. Run
 `python -m ascento_mjlab.tools.smoke` after synchronization to confirm Torch,
 CUDA/device, MuJoCo/Warp, and finite simulation steps.
 

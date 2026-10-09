@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXTRA="${ASCENTO_COMPUTE_EXTRA:-cu128}"
-PY=(uv run --frozen --extra "$EXTRA")
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GPU_RUNNER="$ROOT/scripts/ascento-gpu"
+PY=("$GPU_RUNNER")
 
 "${PY[@]}" python -m ascento_mjlab.tools.smoke
 "${PY[@]}" python -m ascento_mjlab.tools.inspect_model
@@ -16,7 +17,8 @@ PY=(uv run --frozen --extra "$EXTRA")
   --agent.max-iterations 2 \
   --agent.save-interval 1 \
   --agent.run-name preflight-smoke \
-  --agent.logger tensorboard
+  --agent.logger tensorboard \
+  --device cuda:0
 
 if [[ -n "${ASCENTO_BALANCE_CHECKPOINT:-}" \
    && -n "${ASCENTO_VELOCITY_CHECKPOINT:-}" \
@@ -25,7 +27,7 @@ if [[ -n "${ASCENTO_BALANCE_CHECKPOINT:-}" \
     --balance-checkpoint "$ASCENTO_BALANCE_CHECKPOINT" \
     --velocity-checkpoint "$ASCENTO_VELOCITY_CHECKPOINT" \
     --recovery-checkpoint "$ASCENTO_RECOVERY_CHECKPOINT" \
-    --device auto
+    --device cuda:0
 else
   echo "Evaluator preflight skipped: set ASCENTO_{BALANCE,VELOCITY,RECOVERY}_CHECKPOINT." >&2
   exit 3

@@ -10,13 +10,17 @@ Use the maintained Linux/WSL2 path from [Operations](operations.md). For manual
 development, use exactly one compute extra:
 
 ```bash
-uv sync --frozen --extra cu128 --extra dashboard
+export UV_PROJECT_ENVIRONMENT="$HOME/.cache/ascento-mjlab/cu128"
+uv sync --project . --frozen --all-groups --extra cu128 --extra dashboard --extra mcp --extra introspection
 # or, without a CUDA GPU:
-uv sync --frozen --extra cpu --extra dashboard
+export UV_PROJECT_ENVIRONMENT="$HOME/.cache/ascento-mjlab/cpu"
+uv sync --project . --frozen --all-groups --extra cpu --extra dashboard --extra mcp --extra introspection
 ```
 
-The `cpu` and `cu128` extras are mutually exclusive. Keep the extra on `uv run`
-commands when the active environment is not already configured for it.
+These runtime environments live outside the checkout, preserving the `.venv`
+used by MCP. The `cpu` and `cu128` extras are mutually exclusive. Use
+`scripts/ascento-gpu` for managed training and simulation so it verifies the
+canonical checkout and resolves the CUDA device before launching.
 
 ## Stage order and task purpose
 

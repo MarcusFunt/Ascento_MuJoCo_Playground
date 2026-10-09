@@ -83,10 +83,14 @@ animation twice. Keep the scene, manifest, video, and optional frames under
 `captures/blender` so the dashboard can serve them from the read-only WSL
 captures mount.
 
-When Blender is installed on Windows and the project/dashboard captures live
-in WSL, run the checked-in wrapper from this checkout. It invokes this
-checkout's importer and writes directly through the WSL UNC path into the
-Linux checkout's mounted captures directory:
+When Blender is installed on Windows and the dashboard captures live in WSL,
+run the wrapper from the synchronized Windows mirror. It verifies that the
+canonical WSL checkout is clean, on current `main`, and has the same wrapper
+source. The importer and warehouse assets are then read directly from the
+canonical WSL checkout; only Blender itself executes on Windows. The default
+`-RenderDevice auto` uses a supported GPU when Blender exposes one and records
+the selected device in the render manifest. Use `-RenderDevice cpu` to opt into
+CPU rendering or `-RenderDevice gpu` to require a GPU.
 
 ```powershell
 .\scripts\render_blender.ps1 `
@@ -95,8 +99,9 @@ Linux checkout's mounted captures directory:
   -Name 'jump-take-000'
 ```
 
-Set `ASCENTO_WSL_REPOSITORY` or pass `-WslRepository` when the Linux checkout
-is at another path. For a legacy capture that lacks checkpoint provenance,
+The canonical WSL path is fixed at
+`\\wsl.localhost\Ubuntu\root\Ascento_MuJoCo_Playground`; other checkout
+paths are rejected. For a legacy capture that lacks checkpoint provenance,
 pass `-Checkpoint` with the checkpoint that generated it. The Ascento robot
 description archive remains a local input asset and is not committed.
 Pass `-Fps 24` to render at a chosen output rate; zero (the default) preserves

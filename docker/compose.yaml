@@ -25,12 +25,25 @@ services:
         REPOSITORY_BRANCH: ${ASCENTO_REPOSITORY_BRANCH:-unknown}
         REPOSITORY_DIRTY: ${ASCENTO_REPOSITORY_DIRTY:-unknown}
     volumes:
+      # The CLI/smoke container sees the same canonical WSL source and Git
+      # metadata as the Dashboard; it must not execute an image-only checkout.
+      - ../.git:/workspace/.git:ro
+      - ../src:/workspace/src:ro
+      - ../dashboard:/workspace/dashboard:ro
+      - ../scripts:/workspace/scripts:ro
+      - ../config:/workspace/config:ro
       - ../logs:/workspace/logs
       - ../checkpoints:/workspace/checkpoints
       - ../captures:/workspace/captures
       - ../evaluations:/workspace/evaluations
+      - ../.maintenance/repository-version.json:/etc/ascento/repository-version.json:ro
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
+      GIT_OPTIONAL_LOCKS: "0"
+      ASCENTO_RUNTIME_KIND: packaged-docker
+      ASCENTO_CANONICAL_SOURCE_ROOT: ${ASCENTO_CANONICAL_SOURCE_ROOT:-/root/Ascento_MuJoCo_Playground}
+      ASCENTO_CANONICAL_VERSION_FILE: /etc/ascento/repository-version.json
+      ASCENTO_COMPUTE_EXTRA: ${ASCENTO_COMPUTE_EXTRA:-cpu}
 
   dashboard:
     image: ascento-mjlab:local
@@ -52,6 +65,13 @@ services:
       - "${ASCENTO_DASHBOARD_BIND_ADDRESS:-127.0.0.1}:${ASCENTO_DASHBOARD_PORT:-8000}:8000"
       - "127.0.0.1:${ASCENTO_VIEWER_PORT:-8081}:${ASCENTO_VIEWER_PORT:-8081}"
     volumes:
+      # The runtime uses the one canonical WSL source tree read-only. The image
+      # supplies dependencies and the built frontend; it is not another checkout.
+      - ../.git:/workspace/.git:ro
+      - ../src:/workspace/src:ro
+      - ../dashboard:/workspace/dashboard:ro
+      - ../scripts:/workspace/scripts:ro
+      - ../config:/workspace/config:ro
       # Run management writes launcher metadata, logs and checkpoints beneath
       # the shared artifact root. Other repository artifacts stay read-only.
       - ../logs:/workspace/logs
@@ -61,12 +81,18 @@ services:
       # This is the only host-control surface exposed to the web container.
       # It is a fixed-operation Unix socket, not Docker's control socket.
       - /run/ascento-supervisor:/run/ascento-supervisor
+      - ../.maintenance/repository-version.json:/etc/ascento/repository-version.json:ro
     environment:
       MUJOCO_GL: ${ASCENTO_MUJOCO_GL:-disable}
+      GIT_OPTIONAL_LOCKS: "0"
       ASCENTO_ARTIFACT_ROOT: /workspace/logs/rsl_rl
       ASCENTO_DATABASE_URL: postgresql+psycopg://ascento:${ASCENTO_DB_PASSWORD:-ascento-local}@dashboard-db:5432/ascento
       ASCENTO_VIEWER_PORT: ${ASCENTO_VIEWER_PORT:-8081}
       ASCENTO_SUPERVISOR_SOCKET: /run/ascento-supervisor/supervisor.sock
+      ASCENTO_RUNTIME_KIND: packaged-docker
+      ASCENTO_CANONICAL_SOURCE_ROOT: ${ASCENTO_CANONICAL_SOURCE_ROOT:-/root/Ascento_MuJoCo_Playground}
+      ASCENTO_CANONICAL_VERSION_FILE: /etc/ascento/repository-version.json
+      ASCENTO_COMPUTE_EXTRA: ${ASCENTO_COMPUTE_EXTRA:-cpu}
     restart: unless-stopped
 
 

@@ -7,6 +7,24 @@ from dashboard.provenance import WorkingTreeState
 from dashboard.run_service import RunService
 
 
+@pytest.fixture(autouse=True)
+def _runtime_policy_for_service_tests(monkeypatch):
+    def identity(_root, *, requested_device):
+        return {
+            "runtime_kind": "canonical-wsl-checkout",
+            "source_checkout_root": "/root/Ascento_MuJoCo_Playground",
+            "execution_root": "/root/Ascento_MuJoCo_Playground",
+            "source_commit": "abc123",
+            "source_branch": "main",
+            "source_dirty": False,
+            "compute_backend": "cu128" if requested_device.startswith("cuda") else "cpu",
+            "device": requested_device,
+            "python_executable": "/external/gpu-env/bin/python",
+        }
+
+    monkeypatch.setattr("dashboard.run_service.runtime_identity", identity)
+
+
 def _run(root: Path, name: str, *, state: str = "finished", reward: float | None = None) -> Path:
     run = root / name
     run.mkdir(parents=True)
@@ -146,7 +164,12 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
     assert "dashboard.launch" in command
     assert "--display-name" in command
     assert "Velocity validation" in command
-    assert command[-2:] == ["--agent.max-iterations", "5000"]
+    trainer_args = command[command.index("--") + 1 :]
+    assert trainer_args == [
+        "--env.episode-length-s", "60.0",
+        "--agent.max-iterations", "5000",
+        "--device", "cuda:0",
+    ]
     separator = command.index("--")
     assert command.index("--env.episode-length-s") > separator
     assert command[command.index("--env.episode-length-s") + 1] == "60.0"
@@ -159,6 +182,9 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
     assert status["state"] == "starting"
     assert status["launcher_pid"] == 4321
     assert metadata["run_id"] == created["id"]
+    assert metadata["runtime"]["source_checkout_root"] == "/root/Ascento_MuJoCo_Playground"
+    assert metadata["runtime"]["device"] == "cuda:0"
+    assert status["device"] == "cuda:0"
 
 
 def test_create_run_is_immediately_visible_after_cached_empty_discovery(monkeypatch, tmp_path):
@@ -350,6 +376,37 @@ def test_speed_locomotion_run_records_and_exports_selected_command_range(monkeyp
     assert metadata["speed_command_training_schedule"]["resampling_time_range_s"] == [3.0, 6.0]
     assert metadata["speed_command_training_schedule"]["standing_probability"] == 0.15
     assert captured["kwargs"]["env"]["ASCENTO_LOCOMOTION_MAX_SPEED_COMMAND_MPS"] == "0.8"
+
+
+def test_explicit_cpu_request_is_preserved_for_a_managed_run(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeProcess:
+        pid = 4323
+
+    def fake_popen(command, **_kwargs):
+        captured["command"] = command
+        return FakeProcess()
+
+    monkeypatch.setattr("dashboard.run_service.subprocess.Popen", fake_popen)
+    monkeypatch.setattr(
+        "dashboard.run_service.working_tree_state",
+        lambda _: WorkingTreeState("abc123", "main", (), ()),
+    )
+    service = RunService(tmp_path)
+    created = service.create(
+        {
+            "display_name": "CPU smoke run",
+            "training_args": ["--device", "cpu"],
+        }
+    )
+
+    command = captured["command"]
+    trainer_args = command[command.index("--") + 1 :]
+    assert trainer_args == ["--device", "cpu"]
+    run = service.resolve(created["id"])
+    metadata = json.loads((run.path / "run_metadata.json").read_text(encoding="utf-8"))
+    assert metadata["runtime"]["device"] == "cpu"
 
 
 def test_speed_locomotion_run_requires_a_positive_maximum_speed(tmp_path):

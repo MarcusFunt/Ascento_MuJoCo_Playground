@@ -251,7 +251,7 @@ def characterize(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--device", default="cpu", help="mjlab device, such as cpu or cuda:0")
+    parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu", help="mjlab device, such as cpu or cuda:0")
     parser.add_argument("--duration-s", type=float, default=20.0)
     parser.add_argument("--direction-duration-s", type=float, default=0.10)
     parser.add_argument("--wheel-action", type=float, default=0.05)

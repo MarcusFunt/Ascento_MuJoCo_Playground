@@ -39,6 +39,7 @@ export function RunDetailPage() {
 
   const run = detail.data
   const info = run.run_info || {}
+  const runtime = (info.runtime || run.metadata?.runtime || {}) as Record<string, unknown>
   const telemetry = run.telemetry || {}
   const active = ['starting', 'running', 'stopping'].includes(String(run.state || ''))
   const percent = Number(telemetry.percent_complete || 0)
@@ -126,7 +127,11 @@ export function RunDetailPage() {
               ['Task topology ABI', run.task_contract?.status || 'legacy'],
               ['Action-controller ABI', run.action_contract?.status || 'legacy'],
               ['Plant ABI', run.plant_contract?.status || 'legacy'],
-              ['Device', String(info.device || '—')],
+              ['Device', String(info.device || runtime.device || '—')],
+              ['Executor', String(runtime.runtime_kind || '—')],
+              ['Canonical source', String(runtime.source_checkout_root || '—')],
+              ['Execution root', String(runtime.execution_root || '—')],
+              ['Compute backend', String(runtime.compute_backend || '—')],
               ['Seed', String(info.seed ?? '—')],
               ['Simulation timestep', String(info.simulation_timestep ?? '—')],
               ['Checkpoint', String(info.checkpoint_path || '—')],

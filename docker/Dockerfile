@@ -22,7 +22,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/venv/bin:$PATH \
     ASCENTO_REPOSITORY_COMMIT=$REPOSITORY_COMMIT \
     ASCENTO_REPOSITORY_BRANCH=$REPOSITORY_BRANCH \
-    ASCENTO_REPOSITORY_DIRTY=$REPOSITORY_DIRTY
+    ASCENTO_REPOSITORY_DIRTY=$REPOSITORY_DIRTY \
+    ASCENTO_DASHBOARD_DIST=/opt/ascento-dashboard-dist
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -47,7 +48,7 @@ COPY tests_dashboard ./tests_dashboard
 COPY scripts ./scripts
 # Keep the runtime-compose contract available to the in-image dashboard tests.
 COPY docker/compose.yaml ./docker/compose.yaml
-COPY --from=dashboard-frontend /frontend/dist ./dashboard/frontend/dist
+COPY --from=dashboard-frontend /frontend/dist /opt/ascento-dashboard-dist
 
 # Install every optional extra that is compatible with the selected compute
 # backend, plus every dependency group. cpu/cu128 are mutually exclusive.
