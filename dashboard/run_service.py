@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import signal
@@ -17,7 +18,7 @@ from dashboard.config import REPO_ROOT
 from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
 from dashboard.monitor import invalidate_discovery_cache
 from dashboard.provenance import working_tree_state
-from dashboard.task_catalog import horizon_task_ids, task_ids
+from dashboard.task_catalog import horizon_task_ids, speed_task_ids, task_ids
 from dashboard.versioning import annotate_run_summary, classify_run_version
 
 RUN_METADATA = "run_metadata.json"
@@ -98,6 +99,7 @@ class RunService:
             "purpose": metadata.get("purpose") or "",
             "parent_run_id": metadata.get("parent_run_id"),
             "parent_checkpoint": metadata.get("parent_checkpoint"),
+            "max_speed_mps": metadata.get("max_speed_mps"),
             "created_at": metadata.get("created_at"),
             "updated_at": metadata.get("updated_at"),
             "schema_version": int(metadata.get("schema_version") or 1),
@@ -148,9 +150,7 @@ class RunService:
             "parent_run_id": metadata.get("parent_run_id"),
             "parent_checkpoint": metadata.get("parent_checkpoint"),
         }
-        summary["repository_version"] = classify_run_version(
-            run_dir, self.artifact_root
-        )
+        summary["repository_version"] = classify_run_version(run_dir, self.artifact_root)
         return summary
 
     def detail(self, run_id: str) -> dict[str, Any]:
@@ -243,6 +243,18 @@ class RunService:
                 raise ValueError("episode_horizon_s must be a number") from error
             if episode_horizon_s not in {20.0, 60.0, 120.0, 300.0}:
                 raise ValueError("episode_horizon_s must be one of 20, 60, 120, or 300 seconds")
+        max_speed_mps = request.get("max_speed_mps")
+        if task in speed_task_ids():
+            if max_speed_mps is None:
+                raise ValueError("max_speed_mps is required for speed-selectable locomotion")
+            try:
+                max_speed_mps = float(max_speed_mps)
+            except (TypeError, ValueError) as error:
+                raise ValueError("max_speed_mps must be a number") from error
+            if not math.isfinite(max_speed_mps) or max_speed_mps <= 0.0:
+                raise ValueError("max_speed_mps must be finite and positive")
+        elif max_speed_mps is not None:
+            raise ValueError("max_speed_mps is only configurable for speed-selectable locomotion")
         training_args = request.get("training_args") or []
         if not isinstance(training_args, list) or not all(
             isinstance(value, str) for value in training_args
@@ -286,6 +298,18 @@ class RunService:
                     "purpose": str(request.get("purpose") or "").strip(),
                     "parent_run_id": str(parent_run_id) if parent_run_id else None,
                     "parent_checkpoint": str(request.get("parent_checkpoint") or "").strip(),
+                    "max_speed_mps": max_speed_mps,
+                    "speed_command_training_schedule": (
+                        {
+                            "max_speed_mps": max_speed_mps,
+                            "max_slew_rate_mps_per_s": 0.5,
+                            "resampling_time_range_s": [3.0, 6.0],
+                            "standing_probability": 0.15,
+                            "speed_sampling": "uniform from 0 to max_speed_mps",
+                        }
+                        if max_speed_mps is not None
+                        else None
+                    ),
                     "created_at": started_at,
                     "updated_at": started_at,
                 },
@@ -299,6 +323,7 @@ class RunService:
                     "task": task,
                     "stage": task.removeprefix("Ascento-").removesuffix("-Flat").lower(),
                     "display_name": display_name,
+                    "max_speed_mps": max_speed_mps,
                     "started_at": started_at,
                 },
             )
@@ -350,10 +375,18 @@ class RunService:
             command.extend(["--env.episode-length-s", str(episode_horizon_s)])
         command.extend(training_args)
 
+        launch_env = os.environ.copy()
+        speed_command_env = "ASCENTO_LOCOMOTION_MAX_SPEED_COMMAND_MPS"
+        if max_speed_mps is not None:
+            launch_env[speed_command_env] = str(max_speed_mps)
+        else:
+            launch_env.pop(speed_command_env, None)
+
         try:
             process = subprocess.Popen(
                 command,
                 cwd=REPO_ROOT,
+                env=launch_env,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -379,6 +412,7 @@ class RunService:
             "name": directory_name,
             "display_name": display_name,
             "task": task,
+            "max_speed_mps": max_speed_mps,
             "state": "starting",
             "launcher_pid": process.pid,
             "created_at": _now(),

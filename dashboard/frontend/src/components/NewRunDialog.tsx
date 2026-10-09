@@ -23,6 +23,17 @@ const schema = z.object({
   seed: z.string(),
   extra_args: z.string(),
   allow_dirty_provenance: z.boolean(),
+  max_speed_mps: z.string(),
+}).superRefine((values, context) => {
+  if (values.task !== 'Ascento-Locomotion-Speed-Flat') return
+  const speed = Number(values.max_speed_mps)
+  if (!values.max_speed_mps.trim() || !Number.isFinite(speed) || speed <= 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['max_speed_mps'],
+      message: 'Enter a positive maximum speed for the selectable range.',
+    })
+  }
 })
 
 type FormValues = z.infer<typeof schema>
@@ -41,6 +52,7 @@ const defaults: FormValues = {
   seed: '',
   extra_args: '',
   allow_dirty_provenance: false,
+  max_speed_mps: '',
 }
 
 export function NewRunDialog({
@@ -82,6 +94,7 @@ export function NewRunDialog({
         parent_run_id: values.parent_run_id || null,
         parent_checkpoint: values.parent_checkpoint || null,
         episode_horizon_s: task?.supports_horizon ? values.episode_horizon_s : null,
+        max_speed_mps: task?.supports_speed_command ? Number(values.max_speed_mps) : null,
         notes: values.notes,
         training_args: args,
         allow_dirty_provenance: values.allow_dirty_provenance,
@@ -134,6 +147,15 @@ export function NewRunDialog({
             <Field label="Maximum PPO iterations" error={form.formState.errors.max_iterations?.message}>
               <Input type="number" min={1} {...form.register('max_iterations', { valueAsNumber: true })} />
             </Field>
+            {task?.supports_speed_command ? (
+              <Field label="Maximum selectable speed (m/s)" error={form.formState.errors.max_speed_mps?.message}>
+                <Input type="number" min={0.01} step={0.05} placeholder="Choose a validated training cap" {...form.register('max_speed_mps')} />
+                <p className="mt-1 text-xs leading-relaxed text-muted">
+                  One policy will train across 0 to this cap; the Viser slider selects speed at runtime.
+                  Choose a conservative cap and validate it before relying on the upper end.
+                </p>
+              </Field>
+            ) : null}
             {task?.supports_horizon ? (
               <Field label="Initial episode horizon">
                 <SelectInput {...form.register('episode_horizon_s', { valueAsNumber: true })}>

@@ -23,6 +23,7 @@ from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
 from ascento_mjlab.robot_cfg import JOINT_NAMES
 from ascento_mjlab.task_contract import current_task_contract_for_task
+from ascento_mjlab.tasks.locomotion_speed.env_cfg import configure_speed_command_cap
 
 
 def _jump_state_array(state: dict[str, torch.Tensor]) -> np.ndarray:
@@ -165,7 +166,9 @@ def capture(
 
     captures: list[dict[str, Any]] = []
     for take in range(takes):
-        cfg = _configure_capture_cfg(load_env_cfg(task, play=True), take=take)
+        cfg = _configure_capture_cfg(
+            configure_speed_command_cap(load_env_cfg(task, play=True)), take=take
+        )
         base_env = ManagerBasedRlEnv(
             cfg,
             device=device,
@@ -205,7 +208,7 @@ def capture(
                 # checkpoint compatibility is against the canonical training
                 # task, not the viewer-specific presentation config.
                 require_current_checkpoint_contracts(
-                    infos, load_env_cfg(task, play=False)
+                    infos, configure_speed_command_cap(load_env_cfg(task, play=False))
                 )
                 policy = runner.get_inference_policy(device=device)
             captured_steps, ended_on_done = _run_capture_steps(env, policy, steps=steps)

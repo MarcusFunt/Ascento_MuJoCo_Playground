@@ -144,3 +144,21 @@ def test_guard_morphology_baseline_suite_covers_precision_recovery_medium_and_lo
         "long_target": 2.5,
     }
     assert by_family["push_recovery_retarget"][0].disturbances[0].equivalent_delta_v == 0.05
+
+
+def test_guard_morphology_replay_smoke_suite_is_small_and_diagnostic():
+    suite = load_suite(
+        Path("benchmarks/suites/guard_generalist_morphology_replay_smoke_v1.toml")
+    )
+    scenarios = materialize_suite(suite, step_dt=0.02)
+
+    assert suite.task == "Ascento-Generalist-Locomotion-Flat"
+    assert suite.policy_mode == "deterministic"
+    assert not suite.gates
+    assert len(scenarios) == 4
+    assert {scenario.family for scenario in scenarios} == {
+        "flat_precision",
+        "push_recovery_retarget",
+        "medium_target",
+        "long_target",
+    }

@@ -134,6 +134,7 @@ export type TaskOption = {
   label: string
   description: string
   supports_horizon: boolean
+  supports_speed_command?: boolean
 }
 
 export type TelemetryRecord = {

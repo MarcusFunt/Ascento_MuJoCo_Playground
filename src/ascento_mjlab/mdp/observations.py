@@ -130,6 +130,19 @@ def obstacle_mode(env: ManagerBasedRlEnv) -> torch.Tensor:
     return value
 
 
+def speed_command_fraction(
+    env: ManagerBasedRlEnv,
+    command_name: str = "speed",
+    max_speed_mps: float = 0.5,
+) -> torch.Tensor:
+    """Normalize the requested speed to the policy's trained [0, 1] command range."""
+    if max_speed_mps <= 0.0:
+        raise ValueError("max_speed_mps must be positive")
+    command = env.command_manager.get_command(command_name)
+    assert command is not None and command.shape[1] == 1
+    return command / max_speed_mps
+
+
 def jump_state(env: ManagerBasedRlEnv) -> torch.Tensor:
     from .jump import phase_features
 

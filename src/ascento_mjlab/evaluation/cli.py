@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pickle
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -26,6 +28,7 @@ from ascento_mjlab.task_contract import (
     current_task_contract,
     current_task_contract_for_task,
 )
+from ascento_mjlab.tasks.locomotion_speed.env_cfg import configure_speed_command_cap
 
 from .consistency import check_collection
 from .gates import evaluate_gates
@@ -109,6 +112,22 @@ def _device(value: str) -> str:
     return "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
+_SPEED_EVALUATION_CONFIG_LOCK = threading.RLock()
+_SPEED_COMMAND_ENV = "ASCENTO_LOCOMOTION_MAX_SPEED_COMMAND_MPS"
+
+
+def _run_metadata_for_checkpoint(checkpoint: Path) -> dict[str, Any]:
+    for parent in checkpoint.resolve().parents:
+        candidate = parent / "run_metadata.json"
+        if candidate.is_file():
+            try:
+                metadata = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return {}
+            return metadata if isinstance(metadata, dict) else {}
+    return {}
+
+
 def _make_output_dir(base: Path, suite_id: str, checkpoint: Path) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = base / f"{stamp}_{suite_id}_{checkpoint.stem}"
@@ -140,7 +159,7 @@ def _manifest(
         repository_commit = os.environ.get("ASCENTO_REPOSITORY_COMMIT", "unknown")
     if repository_branch == "unknown":
         repository_branch = os.environ.get("ASCENTO_REPOSITORY_BRANCH", "unknown")
-    env_cfg = load_env_cfg(suite.task, play=False)
+    env_cfg = configure_speed_command_cap(load_env_cfg(suite.task, play=False))
     timestep = physics_timestep(env_cfg)
     decimation = int(env_cfg.decimation)
     return {
@@ -173,6 +192,16 @@ def _manifest(
         "plant_contract": current_plant_contract(),
         "action_contract": current_action_contract(),
         "task_contract": task_contract or current_task_contract_for_task(suite.task),
+        "speed_command": (
+            {
+                "max_speed_mps": float(env_cfg.commands["speed"].max_speed_mps),
+                "max_speed_slew_rate_mps_per_s": float(
+                    env_cfg.commands["speed"].max_speed_slew_rate_mps_per_s
+                ),
+            }
+            if suite.task == "Ascento-Locomotion-Speed-Flat"
+            else None
+        ),
         "packages": _package_versions(),
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "argv": sys.argv,
@@ -194,7 +223,7 @@ def _checkpoint_contract_preflight(checkpoint: Path, task: str) -> dict[str, Any
     try:
         import ascento_mjlab.tasks  # noqa: F401
 
-        cfg = load_env_cfg(task, play=False)
+        cfg = configure_speed_command_cap(load_env_cfg(task, play=False))
         apply_checkpoint_curriculum_contract(cfg, infos, task)
         compatibility = classify_task_contract_compatibility(
             checkpoint_task_contract, current_task_contract(cfg)
@@ -253,7 +282,7 @@ def _write_invalid_preflight_artifacts(
     )
 
 
-def evaluate(
+def _evaluate(
     *,
     checkpoint: Path,
     suite_path: Path,
@@ -451,6 +480,63 @@ def _evaluate(
             clip_payload.update({"status": "error", "error": str(error)})
         write_json(output_dir / "clips_manifest.json", clip_payload)
     return status, output_dir
+
+
+def evaluate(
+    *,
+    checkpoint: Path,
+    suite_path: Path,
+    output_base: Path,
+    batch_size: int,
+    device: str,
+    render_clips: bool = False,
+    clip_takes: int = 3,
+    clip_steps: int = 600,
+) -> tuple[EvaluationStatus, Path]:
+    """Evaluate with the command range recorded beside managed checkpoints."""
+    suite = load_suite(suite_path)
+    if suite.task != "Ascento-Locomotion-Speed-Flat":
+        return _evaluate(
+            checkpoint=checkpoint,
+            suite_path=suite_path,
+            output_base=output_base,
+            batch_size=batch_size,
+            device=device,
+            render_clips=render_clips,
+            clip_takes=clip_takes,
+            clip_steps=clip_steps,
+        )
+
+    metadata = _run_metadata_for_checkpoint(checkpoint)
+    max_speed_mps = metadata.get("max_speed_mps")
+    if max_speed_mps is not None:
+        if (
+            isinstance(max_speed_mps, bool)
+            or not isinstance(max_speed_mps, (int, float))
+            or not torch.isfinite(torch.tensor(float(max_speed_mps))).item()
+            or float(max_speed_mps) <= 0.0
+        ):
+            raise ValueError("managed speed run metadata has an invalid max_speed_mps")
+    with _SPEED_EVALUATION_CONFIG_LOCK:
+        previous = os.environ.get(_SPEED_COMMAND_ENV)
+        if max_speed_mps is not None:
+            os.environ[_SPEED_COMMAND_ENV] = str(float(max_speed_mps))
+        try:
+            return _evaluate(
+                checkpoint=checkpoint,
+                suite_path=suite_path,
+                output_base=output_base,
+                batch_size=batch_size,
+                device=device,
+                render_clips=render_clips,
+                clip_takes=clip_takes,
+                clip_steps=clip_steps,
+            )
+        finally:
+            if previous is None:
+                os.environ.pop(_SPEED_COMMAND_ENV, None)
+            else:
+                os.environ[_SPEED_COMMAND_ENV] = previous
 
 
 def main() -> None:

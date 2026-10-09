@@ -37,6 +37,7 @@ from ascento_mjlab.semantic_normalization import (
     require_model_normalizer_contract,
 )
 from ascento_mjlab.task_contract import current_task_contract
+from ascento_mjlab.tasks.locomotion_speed.env_cfg import configure_speed_command_cap
 
 from .policy import RslRlPolicyAdapter
 from .schema import EpisodeResult, ScenarioSpec
@@ -47,6 +48,11 @@ DEFAULT_PLANT_EFFORT_LIMIT = PHYSICS_PROFILE.peak_effort_nm
 def physics_timestep(cfg: Any) -> float:
     """Return the MuJoCo physics timestep from an mjlab environment config."""
     return float(cfg.sim.mujoco.timestep)
+
+
+def _load_task_env_cfg(task: str, *, play: bool) -> Any:
+    """Load a fresh task config and apply any managed runtime speed cap."""
+    return configure_speed_command_cap(load_env_cfg(task, play=play))
 
 
 def task_capabilities(task: str) -> set[str]:
@@ -61,6 +67,8 @@ def task_capabilities(task: str) -> set[str]:
         capabilities.add("balance")
     if "Locomotion" in task:
         capabilities.add("locomotion")
+    if "Speed" in task:
+        capabilities.update({"command:speed", "speed_tracking"})
     if "Velocity" in task:
         capabilities.update(
             {
@@ -95,7 +103,7 @@ def checkpoint_sha256(path: str | Path) -> str:
 
 
 def task_step_dt(task: str) -> float:
-    cfg = load_env_cfg(task, play=False)
+    cfg = _load_task_env_cfg(task, play=False)
     return physics_timestep(cfg) * int(cfg.decimation)
 
 
@@ -281,16 +289,25 @@ def _apply_commands(
     for name, updates in _command_values_for_step(scenarios, step).items():
         if name == "world_target_offset":
             continue
+        term_name = "speed" if name == "speed_fraction" else name
         try:
-            term = base_env.command_manager.get_term(name)
+            term = base_env.command_manager.get_term(term_name)
         except (KeyError, AttributeError) as exc:
-            raise RuntimeError(f"Scenario requires unavailable command term {name!r}") from exc
+            raise RuntimeError(f"Scenario requires unavailable command term {term_name!r}") from exc
         command = term.command
         for env_id, values in updates:
             if len(values) != command.shape[1]:
                 raise RuntimeError(
                     f"Command {name!r} expects {command.shape[1]} values, got {len(values)}"
                 )
+            if name == "speed_fraction" and hasattr(term, "set_manual_speed_mps"):
+                if len(values) != 1 or not np.isfinite(values[0]) or not 0.0 <= values[0] <= 1.0:
+                    raise RuntimeError("Command 'speed_fraction' expects one value in [0, 1]")
+                term.set_manual_speed_mps(
+                    float(values[0]) * float(term.cfg.max_speed_mps),
+                    env_id=env_id,
+                )
+                continue
             command[env_id] = torch.tensor(values, device=command.device, dtype=command.dtype)
             if (
                 name == "motion"
@@ -408,7 +425,7 @@ def _evaluation_env_cfg(task: str, *, capacity: int, max_horizon: int) -> Any:
     keeps the actor/reward interface while omitting stochastic training events
     such as balance pushes and locomotion's settle-triggered sequence.
     """
-    cfg = load_env_cfg(task, play=True)
+    cfg = _load_task_env_cfg(task, play=True)
     cfg.scene.num_envs = capacity
     cfg.auto_reset = False
     cfg.seed = 0
@@ -420,6 +437,44 @@ def _evaluation_env_cfg(task: str, *, capacity: int, max_horizon: int) -> Any:
 def _stationary_quality_mask(active: torch.Tensor, stable_now: torch.Tensor) -> torch.Tensor:
     """Select only samples that are quiet at the current evaluator step."""
     return active & stable_now
+
+
+def _morphology_metric_arrays(
+    *,
+    denom: torch.Tensor,
+    support_count: torch.Tensor,
+    left_only_contact_count: torch.Tensor,
+    right_only_contact_count: torch.Tensor,
+    max_single_wheel_support_s: torch.Tensor,
+    wheel_contact_transition_count: torch.Tensor,
+    sum_leg_pose_asymmetry_sq: torch.Tensor,
+    leg_pose_asymmetry_trace: torch.Tensor,
+    sum_leg_target_offset_sq: torch.Tensor,
+    leg_target_offset_count: torch.Tensor,
+    sum_leg_target_rate_sq: torch.Tensor,
+    leg_target_rate_count: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    """Assemble per-scenario morphology telemetry from active-step accumulators."""
+    sample_denom = denom.clamp(min=1.0)
+    return {
+        "dual_wheel_contact_fraction": support_count / sample_denom,
+        "left_only_contact_fraction": left_only_contact_count / sample_denom,
+        "right_only_contact_fraction": right_only_contact_count / sample_denom,
+        "max_continuous_single_wheel_support_s": max_single_wheel_support_s,
+        "wheel_contact_transition_count": wheel_contact_transition_count,
+        "left_right_leg_pose_asymmetry_rms_rad": torch.sqrt(
+            sum_leg_pose_asymmetry_sq / sample_denom
+        ),
+        "left_right_leg_pose_asymmetry_p95_rad": torch.nanquantile(
+            leg_pose_asymmetry_trace, 0.95, dim=1
+        ),
+        "leg_target_offset_rms_rad": torch.sqrt(
+            sum_leg_target_offset_sq / leg_target_offset_count.clamp(min=1.0)
+        ),
+        "leg_target_rate_rms_rad_s": torch.sqrt(
+            sum_leg_target_rate_sq / leg_target_rate_count.clamp(min=1.0)
+        ),
+    }
 
 
 def _create_runtime(
@@ -439,10 +494,9 @@ def _create_runtime(
     """
     payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
     infos = payload.get("infos") if isinstance(payload, dict) else None
-    # Align the cached configs with the checkpoint's curriculum fractions. The
-    # evaluator deliberately runs a play config, so suite-owned resets and
-    # interventions remain the only rollout stochasticity.
-    contract_cfg = load_env_cfg(task, play=False)
+    # Align configs with the checkpoint curriculum and managed runtime speed cap.
+    # The evaluator uses suite-owned resets and interventions for deterministic rollouts.
+    contract_cfg = _load_task_env_cfg(task, play=False)
     cfg = _evaluation_env_cfg(task, capacity=capacity, max_horizon=max_horizon)
     apply_checkpoint_curriculum_contract(contract_cfg, infos, task)
     apply_checkpoint_curriculum_contract(cfg, infos, task)
@@ -532,6 +586,7 @@ def _run_batch(
     count = len(scenarios)
     dev = base_env.device
     is_velocity_task = "Velocity" in task
+    is_speed_task = "Speed" in task
     is_recovery_task = "Recovery" in task
     is_jump_task = "Jump" in task
     active = torch.ones(count, dtype=torch.bool, device=dev)
@@ -594,6 +649,11 @@ def _run_batch(
     previous_right_contact = torch.zeros(count, dtype=torch.bool, device=dev)
     has_previous_contact_sample = torch.zeros(count, dtype=torch.bool, device=dev)
     path_length = torch.zeros(count, device=dev)
+    sum_speed_tracking_sq = torch.zeros(count, device=dev)
+    sum_speed_tracking_count = torch.zeros(count, device=dev)
+    sum_requested_speed = torch.zeros(count, device=dev)
+    sum_zero_command_speed_sq = torch.zeros(count, device=dev)
+    sum_zero_command_speed_count = torch.zeros(count, device=dev)
     sum_velocity_tracking_sq = torch.zeros(count, device=dev)
     sum_height_tracking_sq = torch.zeros(count, device=dev)
     sum_hip_mismatch_sq = torch.zeros(count, device=dev)
@@ -790,6 +850,19 @@ def _run_batch(
                 -robot.data.projected_gravity_b[:, 2].clamp(max=-1.0e-6),
             )
             planar_speed = torch.linalg.vector_norm(robot.data.root_link_lin_vel_w[:, :2], dim=1)
+            if is_speed_task:
+                speed_term = base_env.command_manager.get_term("speed")
+                applied_speed_command = speed_term.command[:, 0]
+                speed_weight = active.float()
+                sum_speed_tracking_sq += (
+                    torch.square(planar_speed - applied_speed_command) * speed_weight
+                )
+                sum_speed_tracking_count += speed_weight
+                target_speed = speed_term._target_speed[:, 0]
+                sum_requested_speed += target_speed * speed_weight
+                zero_command = (target_speed <= 1.0e-6).float() * speed_weight
+                sum_zero_command_speed_sq += planar_speed.square() * zero_command
+                sum_zero_command_speed_count += zero_command
             angular_xy = torch.linalg.vector_norm(robot.data.root_link_ang_vel_b[:, :2], dim=1)
             height = robot.data.root_link_pos_w[:, 2]
             actuator_output = robot.data.actuator_force
@@ -1243,7 +1316,6 @@ def _run_batch(
         stationary_net_displacement = torch.linalg.vector_norm(
             final_xy_snapshot - settled_xy, dim=1
         )
-        leg_pose_asymmetry_p95 = torch.nanquantile(leg_pose_asymmetry_trace, 0.95, dim=1)
 
         arrays = {
             "success": finished_success,
@@ -1283,12 +1355,21 @@ def _run_batch(
             "joint_applied_saturation_fraction": joint_saturation_count
             / request_count.clamp(min=1.0),
             "both_supported_fraction": support_count / denom,
-            "dual_wheel_contact_fraction": support_count / denom,
-            "left_only_contact_fraction": left_only_contact_count / denom,
-            "right_only_contact_fraction": right_only_contact_count / denom,
+            **_morphology_metric_arrays(
+                denom=denom,
+                support_count=support_count,
+                left_only_contact_count=left_only_contact_count,
+                right_only_contact_count=right_only_contact_count,
+                max_single_wheel_support_s=max_single_wheel_support_s,
+                wheel_contact_transition_count=wheel_contact_transition_count,
+                sum_leg_pose_asymmetry_sq=sum_leg_pose_asymmetry_sq,
+                leg_pose_asymmetry_trace=leg_pose_asymmetry_trace,
+                sum_leg_target_offset_sq=sum_leg_target_offset_sq,
+                leg_target_offset_count=leg_target_offset_count,
+                sum_leg_target_rate_sq=sum_leg_target_rate_sq,
+                leg_target_rate_count=leg_target_rate_count,
+            ),
             "airborne_fraction": airborne_count / denom,
-            "max_continuous_single_wheel_support_s": max_single_wheel_support_s,
-            "wheel_contact_transition_count": wheel_contact_transition_count,
             "path_length": path_length,
             "net_displacement": net_displacement,
             "settling_time_s": torch.where(
@@ -1360,14 +1441,6 @@ def _run_batch(
             ),
             "leg_hip_mismatch_rms": torch.sqrt(sum_hip_mismatch_sq / denom),
             "leg_knee_mismatch_rms": torch.sqrt(sum_knee_mismatch_sq / denom),
-            "left_right_leg_pose_asymmetry_rms_rad": torch.sqrt(sum_leg_pose_asymmetry_sq / denom),
-            "left_right_leg_pose_asymmetry_p95_rad": leg_pose_asymmetry_p95,
-            "leg_target_offset_rms_rad": torch.sqrt(
-                sum_leg_target_offset_sq / leg_target_offset_count.clamp(min=1.0)
-            ),
-            "leg_target_rate_rms_rad_s": torch.sqrt(
-                sum_leg_target_rate_sq / leg_target_rate_count.clamp(min=1.0)
-            ),
             "recovered": recovered.float(),
             "recovery_time_s": recovery_time,
             "max_recovery_hold_s": max_recovery_hold_s,
@@ -1390,6 +1463,18 @@ def _run_batch(
                 stationary_nan,
             ),
         }
+        if is_speed_task:
+            speed_term = base_env.command_manager.get_term("speed")
+            speed_max = float(speed_term.cfg.max_speed_mps)
+            speed_rmse = torch.sqrt(sum_speed_tracking_sq / sum_speed_tracking_count.clamp(min=1.0))
+            arrays["speed_tracking_rmse_mps"] = speed_rmse
+            arrays["speed_tracking_rmse_fraction"] = speed_rmse / speed_max
+            arrays["mean_requested_speed_mps"] = (
+                sum_requested_speed / sum_speed_tracking_count.clamp(min=1.0)
+            )
+            arrays["zero_command_speed_rms_mps"] = torch.sqrt(
+                sum_zero_command_speed_sq / sum_zero_command_speed_count.clamp(min=1.0)
+            )
         if is_velocity_task:
             arrays["velocity_tracking_rmse"] = torch.sqrt(sum_velocity_tracking_sq / denom)
             arrays["height_tracking_rmse"] = torch.sqrt(sum_height_tracking_sq / denom)

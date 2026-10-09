@@ -162,9 +162,7 @@ class ViewerService:
                         "a viewer is already active; stop it before starting another"
                     )
             if self._port_open():
-                raise ViewerBusyError(
-                    f"viewer port {self.port} is already in use"
-                )
+                raise ViewerBusyError(f"viewer port {self.port} is already in use")
 
             ref = self.run_service.resolve(run_id)
             detail = self.run_service.detail(run_id)
@@ -221,10 +219,30 @@ class ViewerService:
             if device:
                 command.extend(["--device", str(device)])
 
+            viewer_env = os.environ.copy()
+            speed_command_env = "ASCENTO_LOCOMOTION_MAX_SPEED_COMMAND_MPS"
+            run_metadata = detail.get("metadata")
+            if not isinstance(run_metadata, dict):
+                run_metadata = run_info.get("metadata")
+            run_metadata = run_metadata if isinstance(run_metadata, dict) else {}
+            if task == "Ascento-Locomotion-Speed-Flat":
+                max_speed_mps = run_metadata.get("max_speed_mps", detail.get("max_speed_mps"))
+                if (
+                    not isinstance(max_speed_mps, (int, float))
+                    or isinstance(max_speed_mps, bool)
+                    or not math.isfinite(float(max_speed_mps))
+                    or float(max_speed_mps) <= 0.0
+                ):
+                    raise ValueError("speed-selectable run metadata is missing max_speed_mps")
+                viewer_env[speed_command_env] = str(float(max_speed_mps))
+            else:
+                viewer_env.pop(speed_command_env, None)
+
             with log_path.open("ab", buffering=0) as log_handle:
                 process = subprocess.Popen(
                     command,
                     cwd=REPO_ROOT,
+                    env=viewer_env,
                     stdin=subprocess.DEVNULL,
                     stdout=log_handle,
                     stderr=subprocess.STDOUT,
@@ -265,9 +283,7 @@ class ViewerService:
             viewer = self._require(viewer_id)
             limit = max(1, min(int(tail), 5000))
             try:
-                lines = viewer.log_path.read_text(
-                    encoding="utf-8", errors="replace"
-                ).splitlines()
+                lines = viewer.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
             except OSError:
                 lines = []
             return {"viewer_id": viewer_id, "lines": lines[-limit:]}
@@ -336,12 +352,16 @@ class ViewerService:
             schema = _read_json(viewer.introspection_dir / "schema.json")
             latest = _read_json(viewer.introspection_dir / "latest.json")
             actor_schema = schema.get("actor") if isinstance(schema, dict) else None
-            observation_dim = actor_schema.get("input_dim") if isinstance(actor_schema, dict) else None
+            observation_dim = (
+                actor_schema.get("input_dim") if isinstance(actor_schema, dict) else None
+            )
             if not isinstance(observation_dim, int) or observation_dim <= 0:
                 raise ValueError("viewer introspection schema is not ready")
             checkpoint = str(payload.get("checkpoint") or "")
             if not isinstance(schema, dict) or checkpoint != schema.get("checkpoint"):
-                raise ValueError("explanations require the checkpoint currently loaded in the viewer")
+                raise ValueError(
+                    "explanations require the checkpoint currently loaded in the viewer"
+                )
             input_raw = payload.get("input_raw")
             if not _finite_vector(input_raw, observation_dim):
                 raise ValueError(f"input_raw must contain {observation_dim} finite values")
@@ -360,7 +380,9 @@ class ViewerService:
             if baseline_kind == "selected_frame" and not _finite_vector(
                 payload.get("baseline_raw"), observation_dim
             ):
-                raise ValueError(f"selected-frame baseline must contain {observation_dim} finite values")
+                raise ValueError(
+                    f"selected-frame baseline must contain {observation_dim} finite values"
+                )
             n_steps = payload.get("n_steps", 32)
             if not isinstance(n_steps, int) or isinstance(n_steps, bool) or not 8 <= n_steps <= 512:
                 raise ValueError("n_steps must be an integer between 8 and 512")
@@ -377,7 +399,9 @@ class ViewerService:
                 "episode_id": payload.get("episode_id"),
                 "event_id": payload.get("event_id"),
             }
-            request_id = IntrospectionIPC(viewer.introspection_dir).queue_explanation_request(request)
+            request_id = IntrospectionIPC(viewer.introspection_dir).queue_explanation_request(
+                request
+            )
             return {"viewer_id": viewer_id, "explanation_id": request_id, "state": "queued"}
 
     def introspection_explanation(self, viewer_id: str, explanation_id: str) -> dict[str, Any]:

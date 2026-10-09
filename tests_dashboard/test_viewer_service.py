@@ -112,6 +112,30 @@ def test_viewer_service_launches_isolated_worker_and_rejects_duplicate(
         service.start(run_id=run_id)
 
 
+def test_speed_viewer_inherits_checkpoint_run_speed_cap(monkeypatch, tmp_path):
+    run_service, run_id, run_dir = _run(tmp_path / "artifacts")
+    status = json.loads((run_dir / "run_status.json").read_text(encoding="utf-8"))
+    status["task"] = "Ascento-Locomotion-Speed-Flat"
+    (run_dir / "run_status.json").write_text(json.dumps(status), encoding="utf-8")
+    (run_dir / "run_metadata.json").write_text(
+        json.dumps({"run_id": run_id, "max_speed_mps": 0.8}),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_popen(command, **kwargs):
+        captured["kwargs"] = kwargs
+        return FakeProcess(command)
+
+    _patch_popen(monkeypatch, fake_popen)
+    service = ViewerService(run_service, logs_root=tmp_path / "viewer-logs", stable_age_seconds=0)
+    monkeypatch.setattr(service, "_port_open", lambda: False)
+
+    service.start(run_id=run_id)
+
+    assert captured["kwargs"]["env"]["ASCENTO_LOCOMOTION_MAX_SPEED_COMMAND_MPS"] == "0.8"
+
+
 def test_viewer_introspection_reads_only_its_managed_runtime_directory(monkeypatch, tmp_path):
     run_service, run_id, _ = _run(tmp_path / "artifacts")
     _patch_popen(monkeypatch, lambda command, **kwargs: FakeProcess(command))
@@ -166,7 +190,9 @@ def test_viewer_capture_artifacts_are_scoped_and_manual_requests_are_queued(
     assert listed["captures"][0]["event_type"] == "manual"
     assert capture["frames"] == [{"sequence_id": 7}]
     assert queued["state"] == "queued"
-    assert list((tmp_path / "viewer-logs" / viewer_id / "introspection").glob("capture-request-*.json"))
+    assert list(
+        (tmp_path / "viewer-logs" / viewer_id / "introspection").glob("capture-request-*.json")
+    )
 
 
 def test_introspection_explanation_is_validated_and_spooled_for_viewer(monkeypatch, tmp_path):
@@ -202,7 +228,10 @@ def test_introspection_explanation_is_validated_and_spooled_for_viewer(monkeypat
     assert queued["state"] == "queued"
     assert queued["explanation_id"] == request["explanation_id"]
     assert request["input_raw"] == [0.2, -0.4]
-    assert service.introspection_explanation(viewer_id, queued["explanation_id"])["status"] == "pending"
+    assert (
+        service.introspection_explanation(viewer_id, queued["explanation_id"])["status"]
+        == "pending"
+    )
 
 
 def test_runtime_status_updates_loaded_checkpoint_and_lag(monkeypatch, tmp_path):

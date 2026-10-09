@@ -79,6 +79,7 @@ def _start(args: argparse.Namespace) -> int:
         "parent_run_id": args.parent_run_id,
         "parent_checkpoint": args.parent_checkpoint,
         "episode_horizon_s": args.episode_horizon_s,
+        "max_speed_mps": getattr(args, "max_speed_mps", None),
         "allow_dirty_provenance": bool(getattr(args, "allow_dirty_provenance", False)),
         "training_args": training_args,
     }
@@ -122,8 +123,11 @@ def _list(args: argparse.Namespace) -> int:
 
 
 def _status(args: argparse.Namespace, progress: bool = False) -> int:
-    value = (_service(_artifact_root(args.artifact_root)).progress(args.run_id)
-             if progress else _service(_artifact_root(args.artifact_root)).detail(args.run_id))
+    value = (
+        _service(_artifact_root(args.artifact_root)).progress(args.run_id)
+        if progress
+        else _service(_artifact_root(args.artifact_root)).detail(args.run_id)
+    )
     _print(value, args.json)
     return 0
 
@@ -139,7 +143,10 @@ def _logs(args: argparse.Namespace) -> int:
 
     service = _service(_artifact_root(args.artifact_root))
     ref = service.resolve(args.run_id)
-    _print({"run_id": args.run_id, "lines": tail_lines(training_log_path(ref.path), args.tail)}, args.json)
+    _print(
+        {"run_id": args.run_id, "lines": tail_lines(training_log_path(ref.path), args.tail)},
+        args.json,
+    )
     return 0
 
 
@@ -148,7 +155,10 @@ def _telemetry(args: argparse.Namespace) -> int:
 
     service = _service(_artifact_root(args.artifact_root))
     ref = service.resolve(args.run_id)
-    _print({"run_id": args.run_id, "records": load_dashboard_records(ref.path, limit=args.limit)}, args.json)
+    _print(
+        {"run_id": args.run_id, "records": load_dashboard_records(ref.path, limit=args.limit)},
+        args.json,
+    )
     return 0
 
 
@@ -333,7 +343,11 @@ def _capture(args: argparse.Namespace) -> int:
     if task is None and args.run_id is not None:
         task = _service(_artifact_root(args.artifact_root)).detail(args.run_id).get("task")
     task = str(task or "Ascento-Balance-Flat")
-    output = default_capture_dir(checkpoint) if args.output_dir is None else Path(args.output_dir).expanduser()
+    output = (
+        default_capture_dir(checkpoint)
+        if args.output_dir is None
+        else Path(args.output_dir).expanduser()
+    )
     if not output.is_absolute():
         output = _repo_root() / output
     video = None
@@ -409,7 +423,10 @@ def _dashboard_start(args: argparse.Namespace) -> int:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        _print({"state": "starting", "pid": process.pid, "host": args.host, "port": args.port}, args.json)
+        _print(
+            {"state": "starting", "pid": process.pid, "host": args.host, "port": args.port},
+            args.json,
+        )
         return 0
     return subprocess.run(command, cwd=_repo_root(), check=False).returncode
 
@@ -430,15 +447,21 @@ def _monitor(args: argparse.Namespace) -> int:
             value.get("stale"),
         )
         if signature != previous or args.once:
-            _print(value if args.json else {
-                "id": value.get("id"), "state": value.get("state"),
-                "iteration": telemetry.get("iteration"),
-                "percent_complete": telemetry.get("percent_complete"),
-                "reward": canonical.get("reward"),
-                "throughput": canonical.get("throughput"),
-                "stale": value.get("stale"),
-                "invalid_updates": (value.get("training_health") or {}).get("invalid_updates"),
-            }, args.json)
+            _print(
+                value
+                if args.json
+                else {
+                    "id": value.get("id"),
+                    "state": value.get("state"),
+                    "iteration": telemetry.get("iteration"),
+                    "percent_complete": telemetry.get("percent_complete"),
+                    "reward": canonical.get("reward"),
+                    "throughput": canonical.get("throughput"),
+                    "stale": value.get("stale"),
+                    "invalid_updates": (value.get("training_health") or {}).get("invalid_updates"),
+                },
+                args.json,
+            )
             previous = signature
         if args.once or value.get("state") not in {"starting", "running", "stopping"}:
             return 0
@@ -473,6 +496,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--iterations", type=int)
     start.add_argument("--seed", type=int)
     start.add_argument("--episode-horizon-s", type=float)
+    start.add_argument("--max-speed-mps", type=float)
     start.add_argument("--foreground", action="store_true")
     start.add_argument("--interval", type=float, default=15.0)
     start.add_argument("training_args", nargs=argparse.REMAINDER)
@@ -480,11 +504,16 @@ def build_parser() -> argparse.ArgumentParser:
     listed = run_sub.add_parser("list", parents=[common], help="list runs")
     listed.add_argument("--active", action="store_true")
     listed.set_defaults(handler=_list)
-    for name, handler, help_text in (("status", _status, "show detailed run status"), ("progress", lambda a: _status(a, True), "show cheap live progress")):
+    for name, handler, help_text in (
+        ("status", _status, "show detailed run status"),
+        ("progress", lambda a: _status(a, True), "show cheap live progress"),
+    ):
         command = run_sub.add_parser(name, parents=[common], help=help_text)
         command.add_argument("run_id")
         command.set_defaults(handler=handler)
-    monitor = run_sub.add_parser("monitor", parents=[common], help="print only changed progress snapshots")
+    monitor = run_sub.add_parser(
+        "monitor", parents=[common], help="print only changed progress snapshots"
+    )
     monitor.add_argument("run_id")
     monitor.add_argument("--interval", type=float, default=30.0)
     monitor.add_argument("--once", action="store_true")
@@ -497,14 +526,20 @@ def build_parser() -> argparse.ArgumentParser:
     logs.add_argument("run_id")
     logs.add_argument("--tail", type=int, default=200)
     logs.set_defaults(handler=_logs)
-    telemetry = run_sub.add_parser("telemetry", parents=[common], help="show bounded normalized telemetry")
+    telemetry = run_sub.add_parser(
+        "telemetry", parents=[common], help="show bounded normalized telemetry"
+    )
     telemetry.add_argument("run_id")
     telemetry.add_argument("--limit", type=int, default=50)
     telemetry.set_defaults(handler=_telemetry)
-    compare = run_sub.add_parser("compare", parents=[common], help="compare normalized latest metrics")
+    compare = run_sub.add_parser(
+        "compare", parents=[common], help="compare normalized latest metrics"
+    )
     compare.add_argument("run_ids", nargs="+", metavar="RUN_ID")
     compare.set_defaults(handler=_compare)
-    annotate = run_sub.add_parser("annotate", parents=[common], help="update run lineage and metadata")
+    annotate = run_sub.add_parser(
+        "annotate", parents=[common], help="update run lineage and metadata"
+    )
     annotate.add_argument("run_id")
     annotate.add_argument("--display-name")
     annotate.add_argument("--notes")
@@ -514,7 +549,9 @@ def build_parser() -> argparse.ArgumentParser:
     annotate.add_argument("--parent-checkpoint")
     annotate.set_defaults(handler=_annotate)
 
-    evaluate = sub.add_parser("evaluate", help="run, inspect, compare, and archive immutable evaluations")
+    evaluate = sub.add_parser(
+        "evaluate", help="run, inspect, compare, and archive immutable evaluations"
+    )
     evaluate_sub = evaluate.add_subparsers(dest="evaluate_command", required=True)
     evaluate_common = argparse.ArgumentParser(add_help=False)
     evaluate_common.add_argument("--artifact-root")
@@ -566,7 +603,9 @@ def build_parser() -> argparse.ArgumentParser:
     evaluation_archive.add_argument("evaluation")
     evaluation_archive.add_argument("--output")
     evaluation_archive.set_defaults(handler=_archive_evaluation)
-    suites = evaluate_sub.add_parser("suites", parents=[evaluate_common], help="list immutable suites")
+    suites = evaluate_sub.add_parser(
+        "suites", parents=[evaluate_common], help="list immutable suites"
+    )
     suites.set_defaults(handler=_list_suites)
     preflight = evaluate_sub.add_parser(
         "preflight", parents=[evaluate_common], help="run deterministic evaluator preflight"

@@ -273,3 +273,24 @@ def test_locomotion_episode_length_can_be_extended_without_reward_changes(monkey
 
     assert cfg.episode_length_s == pytest.approx(120.0)
     assert cfg.rewards["world_target_proximity"].weight == pytest.approx(4.0)
+
+
+def test_speed_selectable_locomotion_task_is_registered():
+    from ascento_mjlab.tasks import ASCENTO_TASK_IDS
+
+    assert "Ascento-Locomotion-Speed-Flat" in ASCENTO_TASK_IDS
+
+
+def test_speed_selectable_locomotion_has_a_normalized_speed_command():
+    from mjlab.tasks.registry import load_env_cfg
+
+    cfg = load_env_cfg("Ascento-Locomotion-Speed-Flat", play=False)
+
+    assert cfg.task_id == "Ascento-Locomotion-Speed-Flat"
+    assert cfg.commands["speed"].max_speed_mps == pytest.approx(0.5)
+    actor_term = cfg.observations["actor"].terms["speed_command"]
+    critic_term = cfg.observations["critic"].terms["speed_command"]
+    assert actor_term.func.__name__ == "speed_command_fraction"
+    assert actor_term.params["command_name"] == "speed"
+    assert actor_term.params["max_speed_mps"] == pytest.approx(0.5)
+    assert critic_term == actor_term

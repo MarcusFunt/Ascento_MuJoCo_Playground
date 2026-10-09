@@ -106,7 +106,9 @@ def _capture(
     if task is None and run_id is not None:
         task = _service().detail(run_id).get("task")
     project_root = repo_root().resolve()
-    resolved_output = default_capture_dir(model) if output_dir is None else Path(output_dir).expanduser()
+    resolved_output = (
+        default_capture_dir(model) if output_dir is None else Path(output_dir).expanduser()
+    )
     if not resolved_output.is_absolute():
         resolved_output = project_root / resolved_output
     resolved_output = resolved_output.resolve()
@@ -196,14 +198,20 @@ if FastMCP is not None:
         """Read a bounded tail of a run log without loading the full file."""
         service = _service()
         ref = service.resolve(run_id)
-        return {"run_id": run_id, "lines": tail_lines(training_log_path(ref.path), max(1, min(tail, 5000)))}
+        return {
+            "run_id": run_id,
+            "lines": tail_lines(training_log_path(ref.path), max(1, min(tail, 5000))),
+        }
 
     @mcp.tool()
     def get_run_telemetry(run_id: str, limit: int = 50) -> dict[str, Any]:
         """Read bounded normalized telemetry history for a run."""
         service = _service()
         ref = service.resolve(run_id)
-        return {"run_id": run_id, "records": load_dashboard_records(ref.path, limit=max(1, min(limit, 2000)))}
+        return {
+            "run_id": run_id,
+            "records": load_dashboard_records(ref.path, limit=max(1, min(limit, 2000))),
+        }
 
     @mcp.tool()
     def get_dashboard_health() -> dict[str, Any]:
@@ -225,6 +233,7 @@ if FastMCP is not None:
         iterations: int | None = None,
         seed: int | None = None,
         episode_horizon_s: float | None = None,
+        max_speed_mps: float | None = None,
         allow_dirty_provenance: bool = False,
         training_args: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -236,18 +245,21 @@ if FastMCP is not None:
             args += ["--agent.max-iterations", str(iterations)]
         if seed is not None:
             args += ["--agent.seed", str(seed)]
-        return _service().create({
-            "display_name": display_name,
-            "task": task,
-            "purpose": purpose,
-            "tags": tags or [],
-            "notes": notes,
-            "parent_run_id": parent_run_id,
-            "parent_checkpoint": parent_checkpoint,
-            "episode_horizon_s": episode_horizon_s,
-            "allow_dirty_provenance": allow_dirty_provenance,
-            "training_args": args,
-        })
+        return _service().create(
+            {
+                "display_name": display_name,
+                "task": task,
+                "purpose": purpose,
+                "tags": tags or [],
+                "notes": notes,
+                "parent_run_id": parent_run_id,
+                "parent_checkpoint": parent_checkpoint,
+                "episode_horizon_s": episode_horizon_s,
+                "max_speed_mps": max_speed_mps,
+                "allow_dirty_provenance": allow_dirty_provenance,
+                "training_args": args,
+            }
+        )
 
     @mcp.tool()
     def stop_run(run_id: str, reason: str = "user_requested") -> dict[str, Any]:
@@ -416,8 +428,7 @@ if FastMCP is not None:
 def main() -> None:
     if FastMCP is None:
         raise SystemExit(
-            "MCP support is not installed; run `uv sync --extra mcp` first: "
-            f"{_MCP_IMPORT_ERROR}"
+            f"MCP support is not installed; run `uv sync --extra mcp` first: {_MCP_IMPORT_ERROR}"
         )
     mcp.run(transport="stdio")
 

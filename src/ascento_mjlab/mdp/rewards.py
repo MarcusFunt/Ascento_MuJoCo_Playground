@@ -272,6 +272,30 @@ class GeneralistTargetArrivalSettledStopBonus:
         return newly_completed.to(dtype=asset.data.root_link_pos_w.dtype) / float(env.step_dt)
 
 
+def track_world_target_speed(
+    env: ManagerBasedRlEnv,
+    command_name: str = "speed",
+    std: float = 0.15,
+    stop_distance_m: float = 0.35,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Track commanded planar speed while a world target is beyond the stop zone."""
+    if std <= 0.0 or stop_distance_m <= 0.0:
+        raise ValueError("std and stop_distance_m must be positive")
+    asset: Entity = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    assert command is not None and command.shape[1] == 1
+    target_speed = command[:, 0]
+    achieved_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_w[:, :2], dim=1)
+    error = achieved_speed - target_speed
+    tracking = torch.exp(-torch.square(error) / (std * std))
+    to_target = world_target_xy(env) - asset.data.root_link_pos_w[:, :2]
+    distance = torch.linalg.vector_norm(to_target, dim=1)
+    travel_factor = torch.clamp(distance / stop_distance_m, min=0.0, max=1.0)
+    upright_factor = torch.clamp(-asset.data.projected_gravity_b[:, 2], min=0.0, max=1.0)
+    return tracking * travel_factor * upright_factor
+
+
 def world_target_heading(
     env: ManagerBasedRlEnv,
     std: float = 0.35,

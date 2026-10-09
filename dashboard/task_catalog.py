@@ -28,6 +28,14 @@ _TASKS: tuple[dict[str, Any], ...] = (
         "label": "Locomotion",
         "description": "Settle, push, recover, move to a nearby world target, then stop.",
         "supports_horizon": False,
+        "supports_speed_command": False,
+    },
+    {
+        "id": "Ascento-Locomotion-Speed-Flat",
+        "label": "Speed-selectable locomotion",
+        "description": "Train one world-target policy across a selectable 0-to-maximum speed range. This is a new policy ABI; legacy locomotion checkpoints are not resume-compatible.",
+        "supports_horizon": False,
+        "supports_speed_command": True,
     },
     {
         "id": "Ascento-Generalist-Locomotion-Flat",
@@ -66,3 +74,7 @@ def task_ids() -> set[str]:
 
 def horizon_task_ids() -> set[str]:
     return {str(item["id"]) for item in _TASKS if item["supports_horizon"]}
+
+
+def speed_task_ids() -> set[str]:
+    return {str(item["id"]) for item in _TASKS if item.get("supports_speed_command")}

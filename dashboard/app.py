@@ -80,6 +80,7 @@ class RunCreateRequest(BaseModel):
     parent_run_id: str | None = None
     parent_checkpoint: str | None = None
     episode_horizon_s: float | None = Field(default=None)
+    max_speed_mps: float | None = Field(default=None)
     allow_dirty_provenance: bool = False
     training_args: list[str] = Field(default_factory=list)
 
@@ -136,20 +137,13 @@ def _sample_records(records: list[dict], max_points: int) -> list[dict]:
     if len(records) <= max_points:
         return records
     last_index = len(records) - 1
-    return [
-        records[round(index * last_index / (max_points - 1))]
-        for index in range(max_points)
-    ]
+    return [records[round(index * last_index / (max_points - 1))] for index in range(max_points)]
 
 
 def _telemetry_coverage(records: list[dict]) -> dict[str, dict[str, int]]:
     """Describe which canonical series are genuinely available after sampling."""
     keys = sorted(
-        {
-            str(key)
-            for record in records
-            for key in (record.get("canonical_metrics") or {})
-        }
+        {str(key) for record in records for key in (record.get("canonical_metrics") or {})}
     )
     return {
         key: {
@@ -541,9 +535,7 @@ def overview():
         "active": sum(1 for row in rows if row.get("state") in active_states),
         "errors": sum(1 for row in rows if row.get("state") == "error"),
         "outdated": sum(
-            1
-            for row in rows
-            if (row.get("repository_version") or {}).get("is_outdated")
+            1 for row in rows if (row.get("repository_version") or {}).get("is_outdated")
         ),
     }
     if active is None:

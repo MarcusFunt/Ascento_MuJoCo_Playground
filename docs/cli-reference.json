@@ -107,6 +107,12 @@
               "default": null
             },
             {
+              "name": "--max-speed-mps",
+              "type": "number",
+              "default": null,
+              "description": "Required by Ascento-Locomotion-Speed-Flat; records the policy's selectable speed ceiling."
+            },
+            {
               "name": "--foreground",
               "type": "boolean",
               "default": false

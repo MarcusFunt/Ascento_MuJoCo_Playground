@@ -318,3 +318,47 @@ def test_compare_includes_experiment_manifest_configuration(tmp_path):
     assert rows["first"]["experiment_manifest"]["seed"] == 1
     assert rows["second"]["configuration_delta"]["seed"]["match"] is False
     assert rows["second"]["configuration_delta"]["environment_count"]["match"] is True
+
+
+def test_speed_locomotion_run_records_and_exports_selected_command_range(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeProcess:
+        pid = 4322
+
+    def fake_popen(command, **kwargs):
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    monkeypatch.setattr("dashboard.run_service.subprocess.Popen", fake_popen)
+    monkeypatch.setattr(
+        "dashboard.run_service.working_tree_state",
+        lambda _: WorkingTreeState("abc123", "main", (), ()),
+    )
+    service = RunService(tmp_path)
+    created = service.create(
+        {
+            "display_name": "Speed conditioned",
+            "task": "Ascento-Locomotion-Speed-Flat",
+            "max_speed_mps": 0.8,
+        }
+    )
+
+    run = service.resolve(created["id"])
+    metadata = json.loads((run.path / "run_metadata.json").read_text(encoding="utf-8"))
+    assert metadata["max_speed_mps"] == pytest.approx(0.8)
+    assert metadata["speed_command_training_schedule"]["resampling_time_range_s"] == [3.0, 6.0]
+    assert metadata["speed_command_training_schedule"]["standing_probability"] == 0.15
+    assert captured["kwargs"]["env"]["ASCENTO_LOCOMOTION_MAX_SPEED_COMMAND_MPS"] == "0.8"
+
+
+def test_speed_locomotion_run_requires_a_positive_maximum_speed(tmp_path):
+    service = RunService(tmp_path)
+
+    with pytest.raises(ValueError, match="max_speed_mps"):
+        service.create(
+            {
+                "display_name": "Missing speed range",
+                "task": "Ascento-Locomotion-Speed-Flat",
+            }
+        )

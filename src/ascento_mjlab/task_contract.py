@@ -160,7 +160,12 @@ def current_task_contract_for_task(task: str, *, play: bool = False) -> dict[str
 
     import ascento_mjlab.tasks  # noqa: F401
 
-    return current_task_contract(load_env_cfg(task, play=play))
+    cfg = load_env_cfg(task, play=play)
+    if task == "Ascento-Locomotion-Speed-Flat":
+        from .tasks.locomotion_speed.env_cfg import configure_speed_command_cap
+
+        cfg = configure_speed_command_cap(cfg)
+    return current_task_contract(cfg)
 
 
 def canonical_task_cfg_for_runtime_cfg(cfg: Any) -> Any:
