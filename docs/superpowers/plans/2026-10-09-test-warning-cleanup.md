@@ -70,10 +70,10 @@ The first implementation task reconciles the prior report with the exact checkou
 - Consumes: module-level `DATABASE`, `VIEWER_SERVICE`, and `STARTUP_WARNINGS`.
 - Produces: `lifespan(app: FastAPI)` as the FastAPI lifespan context manager passed to `FastAPI(..., lifespan=lifespan)`.
 
-- [ ] Add a failing test that enters the app lifespan, asserts `DATABASE.initialize()` runs and the unavailable-database message is appended once, and asserts `VIEWER_SERVICE.stop_all()` plus `DATABASE.dispose()` run on exit.
-- [ ] Add a failing startup-error test proving resource cleanup still runs if initialization raises after partially opening resources; keep behavior aligned with the current initialize/dispose contract.
-- [ ] Replace both `@app.on_event` handlers with an `@asynccontextmanager` lifespan function. Preserve the existing database fallback warning de-duplication and cleanup order.
-- [ ] Run `uv run --extra cpu --extra dashboard --group dev python -m pytest tests_dashboard -q -W error::DeprecationWarning`; confirm lifecycle, API, streaming, and TestClient behavior pass with no FastAPI event-hook warnings.
+- [x] Add a failing test that enters the app lifespan, asserts `DATABASE.initialize()` runs and the unavailable-database message is appended once, and asserts `VIEWER_SERVICE.stop_all()` plus `DATABASE.dispose()` run on exit.
+- [x] Add a failing startup-error test proving resource cleanup still runs if initialization raises after partially opening resources; keep behavior aligned with the current initialize/dispose contract.
+- [x] Replace both `@app.on_event` handlers with an `@asynccontextmanager` lifespan function. Preserve the existing database fallback warning de-duplication and cleanup order.
+- [x] Run `uv run --extra cpu --extra dashboard --group dev python -m pytest tests_dashboard -q -W error::DeprecationWarning`; confirm lifecycle, API, streaming, and TestClient behavior pass with no FastAPI event-hook warnings.
 
 ### Task 3: Move Starlette TestClient to its supported HTTP client
 
@@ -91,22 +91,24 @@ The first implementation task reconciles the prior report with the exact checkou
 - [x] Keep the existing `fastapi.testclient.TestClient` imports and add only the missing test dependency; the current tests import TestClient directly and have no shared fixture. Preserve request, response, streaming, and lifespan behavior.
 - [x] Run `uv run --extra cpu --extra dashboard --group dev python -m pytest tests_dashboard/test_testclient_compat.py -q -W error::DeprecationWarning`; confirm there is no TestClient warning and the request still returns HTTP 200.
 
-### Task 4: Remove the mjlab/Torch JIT deprecation at its source
+### Task 4: Resolve mjlab Warp and PyTorch deprecations at their source
 
 **Files:**
-- Modify: `pyproject.toml` and `uv.lock` only if selecting a compatible upstream `mjlab` or PyTorch version.
-- If upstream has no compatible fix: add the smallest maintained compatibility patch at the dependency boundary and document its upstream issue/reference; do not patch the installed environment manually.
-- Add or modify: focused dependency compatibility tests in the established simulator test suite.
+- Modify: pyproject.toml and uv.lock to cap CPU and CUDA Torch constraints below 2.10; the lock resolves both to Torch 2.9.1.
+- Add: src/mjlab/__init__.py as a minimal compatibility overlay for the pinned upstream mjlab==1.6.0, only if upstream still assigns the deprecated wp.config.quiet; preserve upstream initialization, entry-point loading, and the installed asset root.
+- Add: tests_mjlab/test_dependency_warnings.py with subprocess imports under warning-as-error settings.
 
 **Interfaces:**
-- Consumes: the complete warning stack trace for `torch.jit.script` FutureWarnings and current CPU/CUDA dependency constraints.
-- Produces: a dependency source that no longer emits the warning while preserving the simulator API and numerical behavior.
+- Consumes: the full traces showing Torch 2.14's @torch.jit.script FutureWarning in mjlab.utils.lab_api.math and Warp's wp.config.quiet DeprecationWarning in mjlab.__init__.
+- Produces: a repeatable CPU/CUDA dependency resolution and an upstream-compatible mjlab initialization path with no warning filters.
 
-- [ ] Capture the full warning stack trace and identify the exact deprecated JIT call, its dependency owner, and all affected code paths.
-- [ ] Check for the first upstream `mjlab` release that removes or safely replaces that call and supports the repository’s Python, Torch, and MuJoCo Warp matrix. If available, update the exact project constraint and lockfile to that release.
-- [ ] If no compatible upstream release exists, prepare a minimal tracked patch or fork reference that replaces only the deprecated call while preserving the function signature and behavior; document why a Torch version pin alone is insufficient or sufficient based on the trace.
-- [ ] Run focused simulator tests on CPU and the existing CUDA smoke test on the project GPU environment. Compare deterministic outputs within the existing tolerances before accepting the dependency change.
-- [ ] Run the focused test with `-W error::FutureWarning` and confirm the JIT warning is gone without a warning filter.
+- [x] Add warning-as-error subprocess tests for import mjlab (DeprecationWarning) and import mjlab.utils.lab_api.math (all warnings as errors); run them before the fix and confirm they fail on the respective dependency warnings.
+- [x] Check upstream mjlab release/source and Warp's documented replacement. As of 2026-10-09, upstream mjlab==1.6.0 still uses wp.config.quiet = quiet; Warp documents wp.config.log_level = wp.LOG_WARNING as the replacement and schedules removal of quiet in 1.18. Record the upstream references in the compatibility code.
+- [x] Replace the deprecated Warp setting at the dependency boundary with the documented public log_level setting, without filtering warnings or changing the default verbosity.
+- [x] Torch 2.11.0 still emits a DeprecationWarning from TorchScript decorators when the project task entry point loads; PyTorch 2.9.0 source does not emit that runtime warning. Cap CPU/CUDA optional constraints at <2.10, resolve uv.lock, and confirm both resolve to the validated 2.9 line. Do not replace TorchScript decorators with torch.compile unless CPU/CUDA behavior and numerical tolerances are demonstrated equivalent.
+- [x] Preserve MJLAB_SRC_PATH as the installed dependency asset root and preserve mjlab entry-point task registration; verify the standard asset files resolve and the project's registered tasks load.
+- [x] Run focused simulator tests and a CPU simulation smoke. Run the existing CUDA smoke on the project GPU environment if available; record when hardware prevents that check.
+- [x] Run the focused warning tests with -W error::DeprecationWarning and -W error::FutureWarning; confirm both dependency warnings are gone without suppression.
 
 ### Task 5: Enforce a clean warning baseline
 
@@ -132,3 +134,9 @@ The first implementation task reconciles the prior report with the exact checkou
 
 
 **Canonical WSL baseline (Task 0, after Task 3):** At 6f27b7f plus the TestClient dependency fix, the full suite reports 529 passed, 5 skipped, and 147 warnings in 60.47 seconds. The visible warning groups are 140 FastAPI lifecycle emissions, 6 Alembic path-separator emissions, and 1 Torch JIT FutureWarning. The invalid-escape warning was confirmed during the initial uncached collection, then hidden by Python bytecode cache on the later full run; it remains a source fix. The earlier 183 count and a separate TestClient warning do not reproduce in this canonical environment. Task 3 resolved a hard collection error, not merely a warning.
+
+
+**Task 2 verification note:** The dashboard suite passes with deprecations treated as errors after Task 4 (187 passed); the earlier strict collection error was the independent Warp deprecation that Task 4 fixed.
+
+
+**Task 4 result:** The warning tests first failed for the upstream Warp setter and TorchScript decorators. Upstream mjlab 1.6.0 still uses wp.config.quiet; Warp's public replacement is config.log_level. Torch 2.11.0 emits a DeprecationWarning at @torch.jit.script, while the 2.9.1 CPU and cu128 builds pass the warning-as-error import tests. The lock therefore caps CPU/CUDA Torch at <2.10, and the local mjlab initializer overlay is pinned to mjlab==1.6.0, keeps the installed asset root and entry-point load, and can be removed when upstream ships the equivalent Warp fix.
