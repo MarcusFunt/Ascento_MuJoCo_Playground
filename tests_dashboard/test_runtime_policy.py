@@ -2,7 +2,12 @@ import json
 from pathlib import Path
 
 import pytest
-from dashboard.runtime_policy import RuntimePolicyError, runtime_identity, training_device
+from dashboard.runtime_policy import (
+    RuntimePolicyError,
+    apply_training_device,
+    runtime_identity,
+    training_device,
+)
 
 
 def _host_git(monkeypatch, root: Path, *, commit="abc123", remote="abc123", dirty=""):
@@ -135,3 +140,17 @@ def test_training_device_defaults_to_cuda_and_honors_explicit_cpu():
     assert training_device(["--device", "cpu"]) == "cpu"
     assert training_device(["--device=cuda:1"]) == "cuda:1"
     assert training_device(["--agent.device", "cpu"]) == "cpu"
+
+
+def test_training_device_reads_mjlab_gpu_ids():
+    assert training_device(["--gpu-ids", "[1]"]) == "cuda:1"
+    assert training_device(["--gpu-ids", "None"]) == "cpu"
+
+
+def test_training_device_adapter_uses_mjlab_gpu_ids():
+    assert apply_training_device(["--env.scene.num-envs", "512"], "cuda:0") == [
+        "--env.scene.num-envs",
+        "512",
+        "--gpu-ids",
+        "[0]",
+    ]

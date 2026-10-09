@@ -168,7 +168,7 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
     assert trainer_args == [
         "--env.episode-length-s", "60.0",
         "--agent.max-iterations", "5000",
-        "--device", "cuda:0",
+        "--gpu-ids", "[0]",
     ]
     separator = command.index("--")
     assert command.index("--env.episode-length-s") > separator
@@ -403,7 +403,7 @@ def test_explicit_cpu_request_is_preserved_for_a_managed_run(monkeypatch, tmp_pa
 
     command = captured["command"]
     trainer_args = command[command.index("--") + 1 :]
-    assert trainer_args == ["--device", "cpu"]
+    assert trainer_args == ["--gpu-ids", "None"]
     run = service.resolve(created["id"])
     metadata = json.loads((run.path / "run_metadata.json").read_text(encoding="utf-8"))
     assert metadata["runtime"]["device"] == "cpu"

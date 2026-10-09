@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -40,8 +41,31 @@ def cuda_available() -> bool:
     return bool(torch.cuda.is_available())
 
 
+def _gpu_ids_device(value: str) -> str:
+    if value == "all":
+        return "cuda:0"
+    try:
+        gpu_ids = ast.literal_eval(value)
+    except (SyntaxError, ValueError) as error:
+        raise RuntimePolicyError(f"invalid --gpu-ids value {value!r}") from error
+    if gpu_ids is None:
+        return "cpu"
+    if (
+        isinstance(gpu_ids, (list, tuple))
+        and gpu_ids
+        and all(isinstance(index, int) and not isinstance(index, bool) and index >= 0 for index in gpu_ids)
+    ):
+        return f"cuda:{gpu_ids[0]}"
+    raise RuntimePolicyError(f"invalid --gpu-ids value {value!r}")
+
+
 def training_device(arguments: list[str]) -> str:
-    """Get an explicit trainer device, defaulting managed training to the GPU."""
+    # Read mjlab's actual GPU selection before checking legacy device flags.
+    for index, argument in enumerate(arguments):
+        if argument == "--gpu-ids" and index + 1 < len(arguments):
+            return _gpu_ids_device(arguments[index + 1])
+        if argument.startswith("--gpu-ids="):
+            return _gpu_ids_device(argument.partition("=")[2])
     names = ("--device", "--env.device", "--agent.device")
     for index, argument in enumerate(arguments):
         if argument in names and index + 1 < len(arguments):
@@ -53,19 +77,38 @@ def training_device(arguments: list[str]) -> str:
     return "cuda:0"
 
 
+def _gpu_ids_for_device(device: str) -> str:
+    if device == "cpu":
+        return "None"
+    if device == "cuda":
+        return "[0]"
+    match = re.fullmatch(r"cuda:(\d+)", device)
+    if match is None:
+        raise RuntimePolicyError(f"unsupported compute device {device!r}")
+    return f"[{match.group(1)}]"
+
+
 def apply_training_device(arguments: list[str], device: str) -> list[str]:
-    """Return trainer arguments with one explicit resolved device option."""
+    # Normalize dashboard device choices to mjlab's supported GPU-id option.
     updated = list(arguments)
+    gpu_ids = _gpu_ids_for_device(device)
+    for index, argument in enumerate(updated):
+        if argument == "--gpu-ids" and index + 1 < len(updated):
+            updated[index + 1] = gpu_ids
+            return updated
+        if argument.startswith("--gpu-ids="):
+            updated[index] = f"--gpu-ids={gpu_ids}"
+            return updated
     names = ("--device", "--env.device", "--agent.device")
     for index, argument in enumerate(updated):
         if argument in names and index + 1 < len(updated):
-            updated[index + 1] = device
+            updated[index : index + 2] = ["--gpu-ids", gpu_ids]
             return updated
         for name in names:
             if argument.startswith(name + "="):
-                updated[index] = f"{name}={device}"
+                updated[index] = f"--gpu-ids={gpu_ids}"
                 return updated
-    updated.extend(["--device", device])
+    updated.extend(["--gpu-ids", gpu_ids])
     return updated
 
 
