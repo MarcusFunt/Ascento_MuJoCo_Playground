@@ -105,7 +105,7 @@ def test_speed_command_is_finite_and_range_checked_against_task_cap():
         normalize_waypoint_command({"operation": "speed", "speed_mps": float("nan")})
 
     controller = WaypointController(_speed_env(max_speed_mps=0.4))
-    with pytest.raises(ValueError, match="within \[0, 0.4\]"):
+    with pytest.raises(ValueError, match=r"within \[0, 0.4\]"):
         controller.apply({"operation": "speed", "speed_mps": 0.5})
 
 
