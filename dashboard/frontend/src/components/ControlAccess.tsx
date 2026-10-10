@@ -24,14 +24,14 @@ export function ControlAccess() {
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['control-session'] }) },
   })
   const state = session.data
-  const label = !state?.configured ? 'Controls unconfigured' : state.authenticated ? 'Controls unlocked' : 'Controls locked'
+  const label = !state?.configured ? 'Read-only mode' : state.authenticated ? 'Controls unlocked' : 'Controls locked'
 
   return <>
     <div className="flex items-center gap-2">
       <span className={`hidden items-center gap-1.5 text-xs sm:flex ${state?.authenticated ? 'text-success' : state?.configured ? 'text-warning' : 'text-muted'}`} aria-live="polite">
         {state?.authenticated ? <ShieldCheck size={14} /> : <LockKeyhole size={14} />}{label}
       </span>
-      {state?.authenticated ? <Button size="sm" variant="ghost" onClick={() => lock.mutate()} disabled={lock.isPending}><LogOut size={14} /> Lock</Button> : <Button size="sm" variant="secondary" onClick={() => setOpen(true)}><LockKeyhole size={14} /> Unlock</Button>}
+      {state?.authenticated ? <Button size="sm" variant="ghost" onClick={() => lock.mutate()} disabled={lock.isPending}><LogOut size={14} /> Lock</Button> : <Button size="sm" variant="secondary" onClick={() => setOpen(true)}><LockKeyhole size={14} /> {state && !state.configured ? 'Setup' : 'Unlock'}</Button>}
     </div>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-w-md">

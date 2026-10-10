@@ -43,34 +43,34 @@ export function VisualizerPage() {
         eyebrow="Interactive policy review"
         title="Visualizer"
         description="Inspect a stable checkpoint in the managed Viser viewer, command a bounded world-frame route and read policy telemetry from the same viewer session."
-        actions={<div className="min-w-[260px]"><SelectInput aria-label="Select run for visualization" value={selectedId} onChange={(event) => chooseRun(event.target.value)}><option value="">Choose a run</option>{(runs.data?.runs || []).map((item) => <option key={item.id} value={item.id}>{item.display_name} · {item.task || item.stage || 'unknown task'}</option>)}</SelectInput></div>}
+        actions={<div className="w-full min-w-0 lg:w-[26rem]"><SelectInput aria-label="Select run for visualization" value={selectedId} onChange={(event) => chooseRun(event.target.value)}><option value="">Choose a run</option>{(runs.data?.runs || []).map((item) => <option key={item.id} value={item.id}>{item.display_name} · {item.task || item.stage || 'unknown task'}</option>)}</SelectInput></div>}
       />
 
       {runs.error ? <div className="mb-5 rounded-xl border border-danger/40 bg-danger/10 p-4 text-sm text-danger">Could not load runs: {runs.error.message}</div> : null}
       {!selectedId ? <div className="rounded-xl border border-border bg-panel p-8 text-center text-sm text-muted">No runs are available yet. Start or import a run before opening a policy viewer.</div> : (
         <div className="space-y-6">
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(22rem,0.9fr)]">
-            <section className="overflow-hidden rounded-xl border border-border bg-panel">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,0.9fr)]">
+            <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-panel">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
                 <div><div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Managed Viser session</div><h2 className="mt-1 font-semibold">3D policy view</h2></div>
                 <span className={`rounded border px-2 py-1 text-xs font-bold uppercase ${viewer?.state === 'running' ? 'border-success/40 bg-success/10 text-success' : 'border-border-strong bg-raised text-secondary'}`}>{viewer?.state || 'not started'}</span>
               </div>
               {viewerUrl ? (
                 <div className="relative bg-black">
-                  <iframe title="Interactive Ascento MuJoCo Viser viewer" src={viewerUrl} onLoad={() => setBrowserLoaded(true)} className="aspect-video w-full border-0" allow="fullscreen" />
+                  <iframe loading="lazy" title="Interactive Ascento MuJoCo Viser viewer" src={viewerUrl} onLoad={() => setBrowserLoaded(true)} className="aspect-video w-full border-0" allow="fullscreen" />
                   <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-panel px-4 py-3 text-xs">
                     <span className="text-secondary">Viewer process running · policy telemetry {introspection.connected ? 'connected' : 'connecting'}{browserLoaded ? ' · 3D panel loaded' : ''}</span>
                     <a href={viewerUrl} target="_blank" rel="noreferrer" className="control-focus inline-flex min-h-8 items-center gap-1.5 rounded border border-border-strong px-2.5 font-semibold hover:bg-hover">Open separately <ExternalLink size={13} /></a>
                   </div>
                 </div>
               ) : (
-                <div className="flex aspect-video items-center justify-center bg-[#080d12] p-8 text-center text-sm text-muted">{viewer?.state === 'starting' ? 'Viewer is starting. The 3D panel will appear when its port is ready.' : viewer?.state === 'failed' ? `Viewer failed${viewer.exit_code === null || viewer.exit_code === undefined ? '' : ` with exit code ${viewer.exit_code}`}. Check its run detail and logs.` : 'Start the selected checkpoint viewer to open the live 3D panel.'}</div>
+                <div className="flex aspect-video min-h-48 items-center justify-center bg-[#080d12] p-5 text-center text-sm text-secondary">{viewer?.state === 'starting' ? 'Viewer is starting. The 3D panel will appear when its port is ready.' : viewer?.state === 'failed' ? `Viewer failed${viewer.exit_code === null || viewer.exit_code === undefined ? '' : ` with exit code ${viewer.exit_code}`}. Check its run detail and logs.` : 'Start the selected checkpoint viewer to open the live 3D panel.'}</div>
               )}
             </section>
-            <ViewerCard runId={selectedId} checkpointPath={typeof detail.data?.run_info?.checkpoint_path === 'string' ? String(detail.data.run_info.checkpoint_path) : undefined} />
+            <div className="min-w-0"><ViewerCard runId={selectedId} checkpointPath={typeof detail.data?.run_info?.checkpoint_path === 'string' ? String(detail.data.run_info.checkpoint_path) : undefined} /></div>
           </div>
 
-          {viewer ? <WaypointConsole viewerId={viewer.id} viewerState={viewer.state} task={viewer.task || run?.task || undefined} /> : <section className="rounded-xl border border-border bg-panel p-5 text-sm text-muted">Select a stable checkpoint above to start the managed viewer. Viewer controls remain isolated from the trainer.</section>}
+          {viewer ? <div id="waypoint-controls" className="scroll-mt-32"><WaypointConsole viewerId={viewer.id} viewerState={viewer.state} task={viewer.task || run?.task || undefined} /></div> : <section className="rounded-xl border border-border bg-panel p-5 text-sm text-muted">Select a stable checkpoint above to start the managed viewer. Viewer controls remain isolated from the trainer.</section>}
 
           <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-panel px-5 py-4">
             <div><div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Selected run</div><h2 className="mt-1 font-semibold">{run?.display_name || detail.data?.display_name || 'Loading run…'}</h2><p className="mt-1 text-sm text-muted">{String(run?.task || detail.data?.run_info?.task || 'Task unavailable')} · checkpoint {viewer?.checkpoint || 'not loaded'}</p></div>

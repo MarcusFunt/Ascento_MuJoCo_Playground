@@ -108,6 +108,7 @@ _SUMMARY_REFRESHING = False
 _ASSESSMENTS_CACHE_TTL_S = 30.0
 _ASSESSMENTS_CACHE_LOCK = threading.Lock()
 _ASSESSMENTS_CACHE: tuple[float, dict] | None = None
+_ASSESSMENTS_REFRESHING = False
 
 @asynccontextmanager
 async def dashboard_lifespan(_: FastAPI):
@@ -1023,16 +1024,44 @@ def _build_assessments_snapshot():
     }
 
 
+def _refresh_assessments_cache() -> None:
+    """Keep artifact checks off HTTP request threads."""
+    global _ASSESSMENTS_CACHE, _ASSESSMENTS_REFRESHING
+    try:
+        snapshot = _build_assessments_snapshot()
+    except Exception as error:
+        snapshot = {
+            "assessed_at": time.time(),
+            "read_only": True,
+            "assessments": [],
+            "error": str(error),
+        }
+    with _ASSESSMENTS_CACHE_LOCK:
+        _ASSESSMENTS_CACHE = (time.monotonic(), snapshot)
+        _ASSESSMENTS_REFRESHING = False
+
+
 @app.get("/api/assessments")
 def assessments():
-    global _ASSESSMENTS_CACHE
+    global _ASSESSMENTS_REFRESHING
     with _ASSESSMENTS_CACHE_LOCK:
         now = time.monotonic()
         if _ASSESSMENTS_CACHE is not None and now - _ASSESSMENTS_CACHE[0] < _ASSESSMENTS_CACHE_TTL_S:
             return copy.deepcopy(_ASSESSMENTS_CACHE[1])
-        snapshot = _build_assessments_snapshot()
-        _ASSESSMENTS_CACHE = (time.monotonic(), snapshot)
-        return copy.deepcopy(snapshot)
+        if not _ASSESSMENTS_REFRESHING:
+            _ASSESSMENTS_REFRESHING = True
+            threading.Thread(
+                target=_refresh_assessments_cache,
+                daemon=True,
+                name="dashboard-assessments-refresh",
+            ).start()
+        if _ASSESSMENTS_CACHE is not None:
+            # Stale evidence is explicitly marked as refreshing instead of
+            # silently forcing each browser to repeat an expensive scan.
+            payload = copy.deepcopy(_ASSESSMENTS_CACHE[1])
+            payload["refreshing"] = True
+            return payload
+        return {"assessed_at": None, "read_only": True, "assessments": [], "refreshing": True}
 
 
 @app.get("/api/experiments")

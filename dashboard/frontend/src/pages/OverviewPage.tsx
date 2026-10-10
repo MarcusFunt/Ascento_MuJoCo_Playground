@@ -23,7 +23,7 @@ export function OverviewPage() {
   })
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 30_000 })
   const activity = useQuery({ queryKey: ['activity'], queryFn: api.activity, refetchInterval: 30_000 })
-  const assessments = useQuery({ queryKey: ['assessments'], queryFn: api.assessments, refetchInterval: 30_000 })
+  const assessments = useQuery({ queryKey: ['assessments'], queryFn: api.assessments, refetchInterval: (query) => query.state.data?.refreshing ? 2_000 : 30_000 })
   const overviewRunId = overview.data?.active_run?.id || overview.data?.recent_run?.id
   const checkpointEvidence = useQuery({
     queryKey: ['checkpoint-evidence', overviewRunId],
@@ -73,7 +73,7 @@ export function OverviewPage() {
         <div className="mb-6 rounded-xl border border-danger/45 bg-danger/10 p-4 text-sm text-danger">{overview.error.message}</div>
       ) : null}
 
-      <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Current system activity" aria-live="polite">
+      <section className="mb-6 grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-5" aria-label="Current system activity" aria-live="polite">
         <ActivityMetric
           label="Trainer"
           status={activity.data?.trainer.status || 'checking'}
@@ -98,6 +98,7 @@ export function OverviewPage() {
         />
         <ActivityMetric
           label="Index"
+          wide
           status={activity.data?.index.status || 'checking'}
           detail={`${activity.data?.index.source || 'source pending'} · ${activity.data?.index.indexed_run_count ?? '—'} runs${activity.data?.index.source_conflicts ? ` · ${activity.data.index.source_conflicts} source conflict(s)` : ''}`}
         />
@@ -110,7 +111,7 @@ export function OverviewPage() {
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.1em] text-muted"><ShieldAlert size={14} /> Evidence based assessments</div>
               <p className="mt-1 text-xs text-muted">Read-only findings from current system and saved artifacts.</p>
             </div>
-            <span className="text-xs text-muted">Updated {new Date(assessments.data.assessed_at * 1000).toLocaleTimeString()}</span>
+            <span className="text-xs text-muted">Updated {assessments.data.assessed_at ? new Date(assessments.data.assessed_at * 1000).toLocaleTimeString() : 'pending'}</span>
           </div>
           <ul className="mt-4 divide-y divide-border">
             {assessments.data.assessments.slice(0, 6).map((item) => (
@@ -128,8 +129,10 @@ export function OverviewPage() {
             ))}
           </ul>
         </section>
-      ) : assessments.error ? (
-        <div className="mb-6 rounded-xl border border-warning/35 bg-warning/5 p-3 text-sm text-warning">Assessments unavailable: {assessments.error.message}</div>
+      ) : assessments.error || assessments.data?.error ? (
+        <div className="mb-6 rounded-xl border border-warning/35 bg-warning/5 p-3 text-sm text-warning">Assessments unavailable: {assessments.error?.message || assessments.data?.error}</div>
+      ) : assessments.data?.refreshing || assessments.isLoading ? (
+        <div className="mb-6 rounded-xl border border-border bg-panel px-4 py-3 text-sm text-secondary" role="status">Checking saved evidence for actionable findings… Other dashboard controls remain available.</div>
       ) : null}
 
       {!run ? (
@@ -340,15 +343,15 @@ function OverviewSkeleton() {
   )
 }
 
-function ActivityMetric({ label, status, detail }: { label: string; status: string; detail: string }) {
+function ActivityMetric({ label, status, detail, wide = false }: { label: string; status: string; detail: string; wide?: boolean }) {
   const tone = ['active', 'healthy', 'available'].includes(status)
     ? 'text-success'
     : ['unknown', 'degraded', 'unavailable', 'stale'].includes(status)
       ? 'text-warning'
       : 'text-secondary'
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-panel px-4 py-3">
-      <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">{label}</div>
+    <div className={`min-w-0 rounded-lg border border-border bg-panel px-3 py-3 sm:px-4 ${wide ? 'col-span-2 sm:col-span-1' : ''}`}>
+      <div className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{label}</div>
       <strong className={`mt-1 block text-sm capitalize ${tone}`}>{status}</strong>
       <p className="mt-1 truncate text-xs text-muted" title={detail}>{detail}</p>
     </div>

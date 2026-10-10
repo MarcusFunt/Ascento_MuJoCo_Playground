@@ -10,8 +10,8 @@
   --color-border-strong: #343a40;
   --color-foreground: #f1f3f5;
   --color-secondary: #a8afb7;
-  --color-muted: #6e767f;
-  --color-subtle: #4b5259;
+  --color-muted: #858e98;
+  --color-subtle: #67717a;
   --color-success: #35c789;
   --color-warning: #e5aa45;
   --color-danger: #ef6262;
@@ -40,6 +40,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: clip;
   background:
     radial-gradient(circle at 48% -22%, rgba(255,255,255,0.045), transparent 42%),
     #08090a;
