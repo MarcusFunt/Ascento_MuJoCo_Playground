@@ -57,11 +57,11 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
   }, [viewer?.port, viewer?.state])
 
   return (
-    <section className="rounded-xl border border-border bg-panel p-6">
+    <section className="min-w-0 rounded-xl border border-border bg-panel p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.1em] text-muted"><Box size={14} /> Policy viewer</div>
-          <h2 className="mt-1 text-xl font-semibold tracking-[-0.02em]">Interactive MuJoCo / Viser</h2>
+          <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">Checkpoint controls</h2>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
             Run one checkpoint in an isolated one-environment viewer with live balance diagnostics and reward terms.
           </p>
@@ -70,15 +70,15 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
       </div>
 
       {!forSelected || !viewerActive ? (
-        <div className="mt-6">
+        <div className="mt-5">
           {viewerActive && viewer ? (
             <div className="mb-4 rounded-lg border border-warning/35 bg-warning/10 p-4 text-sm text-warning">
               Another run owns the single viewer slot. Stop it before opening this run.
               <Button className="ml-3" size="sm" variant="danger" onClick={() => stop.mutate(viewer.id)} disabled={stop.isPending}>Stop active viewer</Button>
             </div>
           ) : null}
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_13rem_auto] md:items-end">
-            <label>
+          <div className="grid min-w-0 gap-3">
+            <label className="block min-w-0">
               <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.06em] text-muted">Checkpoint</span>
               <SelectInput
                 value={checkpoint}
@@ -100,13 +100,13 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
                 ))}
               </SelectInput>
             </label>
-            <label>
+            <label className="block min-w-0">
               <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.06em] text-muted">Jacobian cadence</span>
               <SelectInput value={jacobianHz} onChange={(event) => setJacobianHz(Number(event.target.value))} disabled={viewerActive}>
                 {[0, 1, 2, 5, 10].map((rate) => <option key={rate} value={rate}>{rate === 0 ? 'Off' : `${rate} Hz`}{rate === 2 ? ' · default' : ''}</option>)}
               </SelectInput>
             </label>
-            <Button variant="primary" size="lg" disabled={viewerActive || checkpoints.isLoading || Boolean(checkpoints.error) || !checkpoints.data?.checkpoints?.length || start.isPending} onClick={() => start.mutate()}>
+            <Button className="w-full" variant="primary" size="default" disabled={viewerActive || checkpoints.isLoading || Boolean(checkpoints.error) || !checkpoints.data?.checkpoints?.length || start.isPending} onClick={() => start.mutate()}>
               {start.isPending ? 'Starting…' : 'Visualize checkpoint'}
             </Button>
           </div>
@@ -131,7 +131,7 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
         </div>
       ) : viewer ? (
         <div className="mt-6">
-          <div className="grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3 lg:grid-cols-7">
+          <div className="grid gap-px overflow-hidden rounded-lg border border-border bg-border grid-cols-2 sm:grid-cols-3">
             {[
               ['Loaded', viewer.checkpoint || '—'],
               ['Policy iteration', fmtNumber(viewer.checkpoint_iteration, 0)],
@@ -142,7 +142,7 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
               ['Port', viewer.port || '—'],
             ].map(([label, value]) => (
               <div key={String(label)} className="bg-panel p-3">
-                <span className="block text-[11px] uppercase tracking-[0.06em] text-muted">{label}</span>
+                <span className="block text-xs uppercase tracking-[0.06em] text-secondary">{label}</span>
                 <strong className="numeric mt-1 block truncate text-sm">{String(value)}</strong>
               </div>
             ))}

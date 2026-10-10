@@ -45,7 +45,7 @@ export const api = {
   blenderRenders: (limit = 100) => fetchJson<{ renders: BlenderRender[]; root: string }>(`/api/blender/renders?limit=${encodeURIComponent(String(limit))}`),
   overview: () => fetchJson<OverviewResponse>('/api/overview'),
   activity: () => fetchJson<ActivitySnapshot>('/api/activity'),
-  assessments: () => fetchJson<{ assessed_at: number; read_only: boolean; assessments: DashboardAssessment[] }>('/api/assessments'),
+  assessments: () => fetchJson<{ assessed_at: number | null; read_only: boolean; refreshing?: boolean; error?: string; assessments: DashboardAssessment[] }>('/api/assessments'),
   evaluationSuites: () => fetchJson<{ suites: Array<Record<string, any>>; read_only: boolean; evaluation_launch_available: boolean }>('/api/evaluation-suites'),
   evaluations: (filters: { task?: string; suite?: string; status?: string; evidence_class?: string; experiment_id?: string; checkpoint_id?: string; limit?: number; offset?: number } = {}) => {
     const query = new URLSearchParams()

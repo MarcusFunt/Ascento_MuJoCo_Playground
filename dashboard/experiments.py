@@ -15,6 +15,20 @@ def _read(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _run_summary(run: dict[str, Any]) -> dict[str, Any]:
+    """Return only fields needed by experiment navigation.
+
+    Annotated run records may carry full telemetry, giant metadata structures,
+    and checkpoint details. Embedding those for every unlinked run made the
+    experiment list response hundreds of megabytes.
+    """
+    return {
+        key: run[key]
+        for key in ("id", "name", "display_name", "task", "stage", "state", "stale")
+        if key in run
+    }
+
+
 def _arm_summary(key: str, value: dict[str, Any]) -> dict[str, Any]:
     attempts = value.get("run_attempts")
     return {
@@ -48,11 +62,11 @@ def discover_experiments(root: Path, runs: list[dict[str, Any]]) -> dict[str, An
                 metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
                 tags = metadata.get("tags") if isinstance(metadata.get("tags"), list) else []
                 if metadata.get("experiment_id") == program_id:
-                    linked_runs.append({"run": run, "link_source": "experiment_id"})
+                    linked_runs.append({"run": _run_summary(run), "link_source": "experiment_id"})
                 elif program_id in tags:
-                    linked_runs.append({"run": run, "link_source": "explicit_tag"})
+                    linked_runs.append({"run": _run_summary(run), "link_source": "explicit_tag"})
                 elif not metadata.get("experiment_id"):
-                    unlinked_runs.append(run)
+                    unlinked_runs.append(_run_summary(run))
             arms = [
                 _arm_summary(key, value)
                 for key, value in raw.items()

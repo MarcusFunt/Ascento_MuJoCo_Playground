@@ -357,8 +357,17 @@ def test_assessment_response_reuses_activity_and_evaluation_snapshots(monkeypatc
     monkeypatch.setattr(module, "_evaluation_summaries", evaluations)
     client = TestClient(module.app)
     first = client.get("/api/assessments")
-    second = client.get("/api/assessments")
-    assert first.status_code == second.status_code == 200
+    assert first.status_code == 200
+    assert first.json()["read_only"] is True
+    assert first.json().get("refreshing") is True
+    # A cold HTTP response must never wait for filesystem and revision scans.
+    for _ in range(100):
+        second = client.get("/api/assessments")
+        if not second.json().get("refreshing"):
+            break
+        time.sleep(0.01)
+    assert second.status_code == 200
+    assert not second.json().get("refreshing")
     assert counts == {"activity": 1, "evaluations": 1}
 
 
@@ -549,3 +558,32 @@ def test_sampled_telemetry_reports_canonical_coverage(monkeypatch, tmp_path):
     assert len(payload["records"]) == 2
     assert payload["coverage"]["reward"] == {"present": 2, "missing": 0}
     assert payload["coverage"]["ppo_loss"] == {"present": 0, "missing": 2}
+
+
+def test_assessments_cold_request_does_not_block_on_scan(monkeypatch, tmp_path):
+    module = _load_app(monkeypatch, tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocked_snapshot():
+        started.set()
+        assert release.wait(timeout=4)
+        return {"assessed_at": 123.0, "read_only": True, "assessments": []}
+
+    monkeypatch.setattr(module, "_build_assessments_snapshot", blocked_snapshot)
+    try:
+        beginning = time.monotonic()
+        first = module.assessments()
+        assert time.monotonic() - beginning < 0.5
+        assert first["refreshing"] is True
+        assert started.wait(timeout=2)
+        assert module.assessments()["refreshing"] is True
+    finally:
+        release.set()
+    for _ in range(100):
+        result = module.assessments()
+        if not result.get("refreshing"):
+            break
+        time.sleep(0.01)
+    assert not result.get("refreshing")
+    assert result["assessed_at"] == 123.0

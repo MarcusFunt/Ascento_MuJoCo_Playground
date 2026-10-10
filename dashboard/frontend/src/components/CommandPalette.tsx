@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Command } from 'cmdk'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Activity, ChartNoAxesCombined, Gauge, ListTree, Search, Settings } from 'lucide-react'
+import { Activity, ChartNoAxesCombined, ClipboardCheck, Eye, Film, FlaskConical, Gauge, ListTree, Search, Settings } from 'lucide-react'
 import { api } from '../api'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 
@@ -31,7 +31,7 @@ export function CommandPalette() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="control-focus flex h-10 items-center gap-2 rounded-lg border border-border bg-raised px-3 text-sm text-secondary hover:bg-hover hover:text-foreground"
+        className="control-focus flex h-10 items-center gap-2 rounded-lg border border-border bg-raised px-3 text-sm text-secondary hover:bg-hover hover:text-foreground" aria-label="Search and navigate dashboard"
       >
         <Search size={16} />
         <span className="hidden sm:inline">Search</span>
@@ -56,6 +56,10 @@ export function CommandPalette() {
               <Command.Group heading="Navigation" className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.1em] [&_[cmdk-group-heading]]:text-muted">
                 {[
                   ['Overview', '/', Gauge],
+                  ['Experiments', '/experiments', FlaskConical],
+                  ['Evaluations', '/evaluations', ClipboardCheck],
+                  ['Visualizer', '/visualizer', Eye],
+                  ['Captures', '/captures', Film],
                   ['Runs', '/runs', ListTree],
                   ['Analyze', '/analyze', ChartNoAxesCombined],
                   ['System', '/system', Settings],

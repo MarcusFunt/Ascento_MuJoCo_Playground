@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
+      '/api': process.env.ASCENTO_DASHBOARD_DEV_API || 'http://127.0.0.1:8000',
     },
   },
 })

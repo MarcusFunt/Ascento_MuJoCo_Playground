@@ -19,10 +19,10 @@ export function DialogContent({
   return (
     <BaseDialog.Portal>
       <BaseDialog.Backdrop className="fixed inset-0 z-50 bg-black/70 backdrop-blur-[2px] transition-opacity" />
-      <BaseDialog.Viewport className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-[8vh]">
+      <BaseDialog.Viewport className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-2 py-[3vh] sm:px-4 sm:py-[8vh]">
         <BaseDialog.Popup
           className={cn(
-            'relative w-full max-w-2xl rounded-xl border border-border-strong bg-panel p-6 shadow-2xl shadow-black/50 outline-none',
+            'relative w-full max-w-2xl rounded-xl border border-border-strong bg-panel p-4 shadow-2xl sm:p-6 shadow-black/50 outline-none',
             className,
           )}
         >
