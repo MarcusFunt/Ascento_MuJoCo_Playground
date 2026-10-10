@@ -1,0 +1,618 @@
+schema_version = 1
+suite_id = "roadrunner_generalist_driver_gate_v1"
+task = "Ascento-Generalist-Locomotion-Flat"
+root_seed = 20261010
+policy_mode = "deterministic"
+required_capabilities = ["locomotion", "exact_reset", "force_disturbance", "deterministic_policy", "command:world_target_pose", "waypoint_dwell"]
+
+# 256 fixed scenarios across direct 2-3 m navigation, a 90-degree endpoint turn,
+# a three-waypoint turning route, and the same route with a recovery push.
+# The first target is assigned at step zero, replacing the reset helper's short target.
+# Each waypoint requires a 0.75 s physical dwell; the final stop must hold 1 s.
+# Final target and stop-window error must stay within the practical 5 cm limit.
+
+[[families]]
+id = "forward_2m"
+kind = "command_timeline"
+count = 64
+horizon_s = 35.0
+commands = [
+  { time_s = 0.0, name = "world_target_pose", values = [2.0, 0.0, 0.000000000000000] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "turn_3m"
+kind = "command_timeline"
+count = 64
+horizon_s = 50.0
+commands = [
+  { time_s = 0.0, name = "world_target_pose", values = [3.0, 0.0, 1.570796326794897] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "route_turns"
+kind = "command_timeline"
+count = 64
+horizon_s = 55.0
+commands = [
+  { time_s = 0.0, name = "world_target_pose", values = [2.0, 0.0, 0.000000000000000] },
+  { time_s = 17.0, name = "world_target_pose", values = [2.0, 2.0, 1.570796326794897] },
+  { time_s = 34.0, name = "world_target_pose", values = [0.0, 2.0, 3.141592653589793] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[[families]]
+id = "route_recovery"
+kind = "disturbance"
+count = 64
+horizon_s = 55.0
+commands = [
+  { time_s = 0.0, name = "world_target_pose", values = [2.0, 0.0, 0.000000000000000] },
+  { time_s = 17.0, name = "world_target_pose", values = [2.0, 2.0, 1.570796326794897] },
+  { time_s = 34.0, name = "world_target_pose", values = [0.0, 2.0, 3.141592653589793] },
+]
+[families.reset]
+roll = [-0.08, 0.08]
+pitch = [-0.08, 0.08]
+yaw = [-3.141592653589793, 3.141592653589793]
+vx = [-0.05, 0.05]
+vy = [-0.05, 0.05]
+vz = [-0.05, 0.05]
+wx = [-0.10, 0.10]
+wy = [-0.10, 0.10]
+wz = [-0.10, 0.10]
+
+[families.disturbance]
+start_s = 30.0
+duration_s = 0.10
+directions = ["+x", "-x", "+y", "-y"]
+equivalent_delta_v = [0.05, 0.10, 0.15]
+
+[[gates]]
+id = "forward_2m_survival"
+family = "forward_2m"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.90
+
+[[gates]]
+id = "forward_2m_waypoints_complete"
+family = "forward_2m"
+metric = "waypoint_sequence_complete"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "forward_2m_final_stop"
+family = "forward_2m"
+metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "forward_2m_waypoint_final_error"
+family = "forward_2m"
+metric = "waypoint_final_error"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "forward_2m_waypoint_final_heading_error"
+family = "forward_2m"
+metric = "waypoint_final_heading_error"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "forward_2m_waypoint_final_speed"
+family = "forward_2m"
+metric = "waypoint_final_speed"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "forward_2m_waypoint_stop_window_error_rms"
+family = "forward_2m"
+metric = "waypoint_stop_window_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "forward_2m_waypoint_stop_window_heading_rms"
+family = "forward_2m"
+metric = "waypoint_stop_window_heading_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "forward_2m_waypoint_stop_window_speed_rms"
+family = "forward_2m"
+metric = "waypoint_stop_window_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "forward_2m_waypoint_stop_window_tilt_rms"
+family = "forward_2m"
+metric = "waypoint_stop_window_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "forward_2m_waypoint_stop_window_rocking_rms"
+family = "forward_2m"
+metric = "waypoint_stop_window_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "forward_2m_waypoint_stop_window_action_rate_rms"
+family = "forward_2m"
+metric = "waypoint_stop_window_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "forward_2m_waypoint_stop_window_action_second_difference_rms"
+family = "forward_2m"
+metric = "waypoint_stop_window_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.18
+
+[[gates]]
+id = "forward_2m_waypoint_stop_window_high_frequency_action_power_ratio"
+family = "forward_2m"
+metric = "waypoint_stop_window_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "forward_2m_action_clip_fraction"
+family = "forward_2m"
+metric = "action_clip_fraction"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "forward_2m_physical_saturation_fraction"
+family = "forward_2m"
+metric = "physical_saturation_fraction"
+statistic = "p95"
+op = "<="
+threshold = 0.01
+
+[[gates]]
+id = "turn_3m_survival"
+family = "turn_3m"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.90
+
+[[gates]]
+id = "turn_3m_waypoints_complete"
+family = "turn_3m"
+metric = "waypoint_sequence_complete"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "turn_3m_final_stop"
+family = "turn_3m"
+metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "turn_3m_waypoint_final_error"
+family = "turn_3m"
+metric = "waypoint_final_error"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "turn_3m_waypoint_final_heading_error"
+family = "turn_3m"
+metric = "waypoint_final_heading_error"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "turn_3m_waypoint_final_speed"
+family = "turn_3m"
+metric = "waypoint_final_speed"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "turn_3m_waypoint_stop_window_error_rms"
+family = "turn_3m"
+metric = "waypoint_stop_window_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "turn_3m_waypoint_stop_window_heading_rms"
+family = "turn_3m"
+metric = "waypoint_stop_window_heading_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "turn_3m_waypoint_stop_window_speed_rms"
+family = "turn_3m"
+metric = "waypoint_stop_window_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "turn_3m_waypoint_stop_window_tilt_rms"
+family = "turn_3m"
+metric = "waypoint_stop_window_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "turn_3m_waypoint_stop_window_rocking_rms"
+family = "turn_3m"
+metric = "waypoint_stop_window_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "turn_3m_waypoint_stop_window_action_rate_rms"
+family = "turn_3m"
+metric = "waypoint_stop_window_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "turn_3m_waypoint_stop_window_action_second_difference_rms"
+family = "turn_3m"
+metric = "waypoint_stop_window_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.18
+
+[[gates]]
+id = "turn_3m_waypoint_stop_window_high_frequency_action_power_ratio"
+family = "turn_3m"
+metric = "waypoint_stop_window_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "turn_3m_action_clip_fraction"
+family = "turn_3m"
+metric = "action_clip_fraction"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "turn_3m_physical_saturation_fraction"
+family = "turn_3m"
+metric = "physical_saturation_fraction"
+statistic = "p95"
+op = "<="
+threshold = 0.01
+
+[[gates]]
+id = "route_turns_survival"
+family = "route_turns"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.90
+
+[[gates]]
+id = "route_turns_waypoints_complete"
+family = "route_turns"
+metric = "waypoint_sequence_complete"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "route_turns_final_stop"
+family = "route_turns"
+metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "route_turns_waypoint_final_error"
+family = "route_turns"
+metric = "waypoint_final_error"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_turns_waypoint_final_heading_error"
+family = "route_turns"
+metric = "waypoint_final_heading_error"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "route_turns_waypoint_final_speed"
+family = "route_turns"
+metric = "waypoint_final_speed"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "route_turns_waypoint_stop_window_error_rms"
+family = "route_turns"
+metric = "waypoint_stop_window_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_turns_waypoint_stop_window_heading_rms"
+family = "route_turns"
+metric = "waypoint_stop_window_heading_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "route_turns_waypoint_stop_window_speed_rms"
+family = "route_turns"
+metric = "waypoint_stop_window_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "route_turns_waypoint_stop_window_tilt_rms"
+family = "route_turns"
+metric = "waypoint_stop_window_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_turns_waypoint_stop_window_rocking_rms"
+family = "route_turns"
+metric = "waypoint_stop_window_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "route_turns_waypoint_stop_window_action_rate_rms"
+family = "route_turns"
+metric = "waypoint_stop_window_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_turns_waypoint_stop_window_action_second_difference_rms"
+family = "route_turns"
+metric = "waypoint_stop_window_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.18
+
+[[gates]]
+id = "route_turns_waypoint_stop_window_high_frequency_action_power_ratio"
+family = "route_turns"
+metric = "waypoint_stop_window_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "route_turns_action_clip_fraction"
+family = "route_turns"
+metric = "action_clip_fraction"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_turns_physical_saturation_fraction"
+family = "route_turns"
+metric = "physical_saturation_fraction"
+statistic = "p95"
+op = "<="
+threshold = 0.01
+
+[[gates]]
+id = "route_recovery_recovery"
+family = "route_recovery"
+metric = "recovered"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.85
+
+[[gates]]
+id = "route_recovery_survival"
+family = "route_recovery"
+metric = "success"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.90
+
+[[gates]]
+id = "route_recovery_waypoints_complete"
+family = "route_recovery"
+metric = "waypoint_sequence_complete"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "route_recovery_final_stop"
+family = "route_recovery"
+metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.80
+
+[[gates]]
+id = "route_recovery_waypoint_final_error"
+family = "route_recovery"
+metric = "waypoint_final_error"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_recovery_waypoint_final_heading_error"
+family = "route_recovery"
+metric = "waypoint_final_heading_error"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "route_recovery_waypoint_final_speed"
+family = "route_recovery"
+metric = "waypoint_final_speed"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "route_recovery_waypoint_stop_window_error_rms"
+family = "route_recovery"
+metric = "waypoint_stop_window_error_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_recovery_waypoint_stop_window_heading_rms"
+family = "route_recovery"
+metric = "waypoint_stop_window_heading_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.20
+
+[[gates]]
+id = "route_recovery_waypoint_stop_window_speed_rms"
+family = "route_recovery"
+metric = "waypoint_stop_window_speed_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.08
+
+[[gates]]
+id = "route_recovery_waypoint_stop_window_tilt_rms"
+family = "route_recovery"
+metric = "waypoint_stop_window_tilt_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_recovery_waypoint_stop_window_rocking_rms"
+family = "route_recovery"
+metric = "waypoint_stop_window_rocking_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.03
+
+[[gates]]
+id = "route_recovery_waypoint_stop_window_action_rate_rms"
+family = "route_recovery"
+metric = "waypoint_stop_window_action_rate_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_recovery_waypoint_stop_window_action_second_difference_rms"
+family = "route_recovery"
+metric = "waypoint_stop_window_action_second_difference_rms"
+statistic = "p95"
+op = "<="
+threshold = 0.18
+
+[[gates]]
+id = "route_recovery_waypoint_stop_window_high_frequency_action_power_ratio"
+family = "route_recovery"
+metric = "waypoint_stop_window_high_frequency_action_power_ratio"
+statistic = "p95"
+op = "<="
+threshold = 0.10
+
+[[gates]]
+id = "route_recovery_action_clip_fraction"
+family = "route_recovery"
+metric = "action_clip_fraction"
+statistic = "p95"
+op = "<="
+threshold = 0.05
+
+[[gates]]
+id = "route_recovery_physical_saturation_fraction"
+family = "route_recovery"
+metric = "physical_saturation_fraction"
+statistic = "p95"
+op = "<="
+threshold = 0.01

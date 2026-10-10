@@ -262,3 +262,69 @@ def test_evaluator_rejects_two_targets_for_one_environment_on_one_step():
 
     with pytest.raises(RuntimeError, match="two world targets"):
         _apply_commands(env, [scenario], 0)
+def test_generalist_driver_suite_covers_long_goals_turns_routes_recovery_and_control_gates():
+    from math import hypot
+    from pathlib import Path
+
+    import pytest
+
+    from ascento_mjlab.evaluation.scenarios import materialize_suite
+    from ascento_mjlab.evaluation.schema import load_suite
+
+    suite = load_suite(Path("benchmarks/suites/roadrunner_generalist_driver_gate_v1.toml"))
+    scenarios = materialize_suite(suite, step_dt=0.01)
+
+    assert suite.task == "Ascento-Generalist-Locomotion-Flat"
+    assert len(scenarios) == 256
+    assert {
+        "locomotion",
+        "exact_reset",
+        "force_disturbance",
+        "deterministic_policy",
+        "command:world_target_pose",
+        "waypoint_dwell",
+    } <= set(suite.required_capabilities)
+
+    by_family = {
+        family: [scenario for scenario in scenarios if scenario.family == family]
+        for family in ("forward_2m", "turn_3m", "route_turns", "route_recovery")
+    }
+    assert {family: len(items) for family, items in by_family.items()} == {
+        "forward_2m": 64,
+        "turn_3m": 64,
+        "route_turns": 64,
+        "route_recovery": 64,
+    }
+
+    first_commands = {family: items[0].commands for family, items in by_family.items()}
+    assert first_commands["forward_2m"][0].step == 0
+    assert first_commands["forward_2m"][0].values == pytest.approx((2.0, 0.0, 0.0))
+    assert first_commands["turn_3m"][0].step == 0
+    assert first_commands["turn_3m"][0].values == pytest.approx((3.0, 0.0, 1.5707963267948966))
+    for family in ("route_turns", "route_recovery"):
+        commands = first_commands[family]
+        assert [point.step for point in commands] == [0, 1700, 3400]
+        assert [point.values[2] for point in commands] == pytest.approx(
+            (0.0, 1.5707963267948966, 3.141592653589793)
+        )
+        coordinates = [(point.values[0], point.values[1]) for point in commands]
+        leg_lengths = [
+            hypot(right[0] - left[0], right[1] - left[1])
+            for left, right in zip(coordinates, coordinates[1:], strict=False)
+        ]
+        assert leg_lengths == pytest.approx([2.0, 2.0])
+
+    recovery = by_family["route_recovery"][0]
+    assert len(recovery.disturbances) == 1
+    assert recovery.disturbances[0].start_step == 3000
+    assert recovery.disturbances[0].equivalent_delta_v in {0.05, 0.10, 0.15}
+
+    gates = {(gate.family, gate.metric): gate for gate in suite.gates}
+    for family in by_family:
+        assert gates[(family, "success")].threshold == 0.90
+        assert gates[(family, "waypoint_sequence_complete")].threshold == 0.80
+        assert gates[(family, "waypoint_final_error")].threshold == 0.05
+        assert gates[(family, "waypoint_stop_window_error_rms")].threshold == 0.05
+        assert gates[(family, "action_clip_fraction")].threshold == 0.05
+        assert gates[(family, "physical_saturation_fraction")].threshold == 0.01
+    assert gates[("route_recovery", "recovered")].threshold == 0.85
