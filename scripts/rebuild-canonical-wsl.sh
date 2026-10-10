@@ -106,7 +106,28 @@ EOF
 chmod 600 "$VERSION_FILE"
 
 log "Verifying live API provenance and built frontend"
-CHECK='import json,sys,urllib.request as u; c,g=sys.argv[1:3]; get=lambda p:u.urlopen("http://127.0.0.1:8000"+p,timeout=15).read(); h=json.loads(get("/api/health")); v=json.loads(get("/api/runtime/identity")); assert h["status"]=="healthy",h; assert v["checkout"]["commit"]==c and v["checkout"]["origin_main"]==c,v; assert v["packaged_image"]["commit"]==c and v["packaged_image"]["manifest_commit"]==c,v; assert v["packaged_image"]["compute"]==g and v["comparisons"]["checkout_matches_image"] and v["comparisons"]["image_matches_manifest"],v; html=get("/").decode(); a=html.split("src="+chr(34),1)[1].split(chr(34),1)[0]; assert a.startswith("/assets/"),html; assert len(get(a))>100; print(json.dumps({"health":h["status"],"commit":c,"compute":g,"frontend_asset":a,"runtime_matches":True},indent=2))'
+CHECK='import json,sys,time,urllib.error as e,urllib.request as u
+c,g=sys.argv[1:3]
+base="http://127.0.0.1:8000"
+def get(path):
+    for _ in range(60):
+        try:
+            return u.urlopen(base+path,timeout=3).read()
+        except (OSError,e.URLError):
+            time.sleep(1)
+    raise SystemExit("Dashboard API did not become reachable within 60 seconds")
+h=json.loads(get("/api/health"))
+v=json.loads(get("/api/runtime/identity"))
+assert h["status"]=="healthy",h
+assert v["checkout"]["commit"]==c and v["checkout"]["origin_main"]==c,v
+assert v["packaged_image"]["commit"]==c and v["packaged_image"]["manifest_commit"]==c,v
+assert v["packaged_image"]["compute"]==g,v
+assert v["comparisons"]["checkout_matches_image"] and v["comparisons"]["image_matches_manifest"],v
+html=get("/").decode()
+a=html.split("src="+chr(34),1)[1].split(chr(34),1)[0]
+assert a.startswith("/assets/"),html
+assert len(get(a))>100
+print(json.dumps({"health":h["status"],"commit":c,"compute":g,"frontend_asset":a,"runtime_matches":True},indent=2))'
 compose "$ENV_FILE" exec -T dashboard python -c "$CHECK" "$COMMIT" "$COMPUTE"
 TS_CONTAINER="$(compose "$ENV_FILE" ps -q tailscale-dashboard)"
 [[ -n "$TS_CONTAINER" ]] || die "Tailscale sidecar is missing."
