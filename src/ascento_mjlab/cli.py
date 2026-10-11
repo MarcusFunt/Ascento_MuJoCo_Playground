@@ -205,6 +205,7 @@ def _evaluate(args: argparse.Namespace) -> int:
         output_base=output,
         batch_size=args.batch_size,
         device=_device(args.device),
+        obstacle_mode=args.obstacle_mode,
         render_clips=args.render_clips,
         clip_takes=args.clip_takes,
         clip_steps=args.clip_steps,
@@ -567,6 +568,12 @@ def build_parser() -> argparse.ArgumentParser:
     evaluation.add_argument("--suite", required=True, help="suite ID or TOML path")
     evaluation.add_argument("--batch-size", type=int, default=512)
     evaluation.add_argument("--device", default="auto")
+    evaluation.add_argument(
+        "--obstacle-mode",
+        type=int,
+        choices=(0, 1),
+        help="explicit obstacle behavior command for the generalist task",
+    )
     evaluation.add_argument("--render-clips", action="store_true")
     evaluation.add_argument("--clip-takes", type=int, default=3)
     evaluation.add_argument("--clip-steps", type=int, default=600)

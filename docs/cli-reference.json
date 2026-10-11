@@ -363,6 +363,16 @@
               "default": "auto"
             },
             {
+              "name": "--obstacle-mode",
+              "type": "integer",
+              "default": null,
+              "choices": [
+                0,
+                1
+              ],
+              "description": "Explicit obstacle behavior command for the generalist task."
+            },
+            {
               "name": "--render-clips",
               "type": "boolean",
               "default": false
