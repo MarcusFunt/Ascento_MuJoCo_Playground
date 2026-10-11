@@ -29,7 +29,14 @@
     "nested_run_id": "bd2730714479",
     "status_at_protocol_start": "running",
     "source_commit": "5c5bb32e5cd7292e28ffa3036962361e26c74803",
-    "handling": "wait for natural completion before updating the canonical checkout or starting GPU experiments"
+    "handling": "waited for natural completion before updating the canonical checkout or starting GPU experiments",
+    "final_state": "finished",
+    "exit_code": 0,
+    "finished_at": "2026-10-11T18:57:48.225586+00:00",
+    "final_checkpoint": {
+      "path": "logs/rsl_rl/20261011_135525_fresh-base-turn-curriculum-12h-measured-2026-10-_bd273071/ascento_generalist_locomotion_flat/2026-10-11_13-55-35/model_9799.pt",
+      "sha256": "4eec0809dd560f2454ca914a08c8ba559d91ff3dd207318359e5ada65b81ab32"
+    }
   },
   "arms": [
     {
