@@ -55,7 +55,7 @@ normalization; the critic, optimizer, iteration count, and environment state
 are deliberately new:
 
 ```bash
-ascento tools initialize-transfer -- \
+scripts/ascento-gpu ascento tools initialize-transfer -- \
   --source logs/rsl_rl/<on-run>/ascento_balance/<run>/model_79999.pt \
   --task Ascento-Balance-Quiet-Flat \
   --output logs/transfers/balance_79999_to_quiet/model_000000.pt
@@ -105,7 +105,7 @@ ascento tools initialize-transfer -- \
   --task Ascento-Balance-Recovery-Flat \
   --output logs/transfers/balance_to_recovery/model_000000.pt
 
-ascento evaluate run \
+scripts/ascento-gpu ascento evaluate run \
   --checkpoint logs/transfers/balance_to_recovery/model_000000.pt \
   --suite balance_recovery_edge_v1 --batch-size 256 --device cuda:0
 ```
@@ -173,11 +173,11 @@ ascento tools initialize-transfer -- \
   --task Ascento-Generalist-Locomotion-Flat \
   --output transfers/ascento_generalist_locomotion_flat/roadrunner_generalist_signed/model_000000.pt
 
-ascento evaluate run \
+scripts/ascento-gpu ascento evaluate run \
   --checkpoint transfers/ascento_generalist_locomotion_flat/roadrunner_generalist_signed/model_000000.pt \
   --suite roadrunner_generalist_sequence_gate_v1 --batch-size 256 --device cuda:0
 
-ascento run start --task Ascento-Generalist-Locomotion-Flat \
+scripts/ascento-gpu ascento run start --task Ascento-Generalist-Locomotion-Flat \
   --display-name "Roadrunner-inspired generalist locomotion pilot" \
   --purpose experiment --tag roadrunner-inspired --tag shared-policy \
   --parent-run-id 762230a3d4b4 \
@@ -523,5 +523,22 @@ ascento run start --task Ascento-Generalist-Locomotion-Flat \
 For `bonus_8`, change only the achievement weight to `8.0`. For `settled_quality`, keep the achievement weight at `5.0` and change the quality weight to `8.0`. For `potential_progress`, keep both settle weights at their control values and set `ASCENTO_GENERALIST_PROGRESS_REWARD_MODE=potential`. Evaluate updates 100, 200, and 300 on the existing hard gate; evaluate the transfer and update 300 on the diagnostic suite, always passing `--obstacle-mode 0`. Compare per-family target-arrival and settled-stop rates, final-error p95, heading error, arrival time, survival, and recovery. Record run IDs, checkpoint and suite hashes, returns, and paired deltas in `docs/experiments/reward_alignment_v1.json`.
 
 After that comparison selects a reward configuration, continue its update-300 checkpoint with `ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE` unset. The existing scheduler can then increase target distance only after its measured recovery lower bound reaches 0.85 and its short-arrival lower bound reaches 0.50. If those thresholds are not met, keep stage 0 and report the observed evidence before changing target difficulty.
+
+For this continuation, preserve the selected arm's reward overrides and resume from its update-300 checkpoint with the same seed. Omit the fixed-stage environment variable so the existing curriculum uses its measured promotion windows:
+
+```bash
+unset ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE
+ASCENTO_GENERALIST_OBSTACLE_MODE=0 \
+ASCENTO_GENERALIST_PROGRESS_REWARD_MODE=velocity \
+ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT=5.0 \
+ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT=0.0 \
+scripts/ascento-gpu ascento run start --task Ascento-Generalist-Locomotion-Flat \
+  --display-name "reward alignment adaptive continuation" --purpose ablation-continuation \
+  --parent-run-id <selected-arm-run-id> \
+  --parent-checkpoint <selected-arm-update-300-checkpoint> \
+  --envs 512 --iterations 300 --seed 20261012 --foreground --interval 60 --json -- \
+  --agent.resume True --agent.load-run _resume_parent \
+  --agent.load-checkpoint model_0300.pt --agent.save-interval 100
+```
 
 The deterministic `scripts/reward_probe.py` checks reward arithmetic for settled success, a 10 cm miss, a moving arrival, and a bad-heading arrival under the control, bonus-8, and quality-8 configurations. This probe catches arithmetic regressions; it does not establish what a learned policy will do. Potential-based shaping follows the policy-invariant form from [Ng, Harada, and Russell (1999)](https://ai.stanford.edu/~ang/papers/shaping-icml99.pdf). Progress target difficulty only after measured competence supports it; the stage-0 long-target results do not justify advancing the goal mix.
