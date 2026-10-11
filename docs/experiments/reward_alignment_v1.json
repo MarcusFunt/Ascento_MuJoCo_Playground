@@ -127,6 +127,16 @@
     ],
     "comparison": "Use paired scenario results against the same transfer and across arms; promote no candidate unless it improves the target outcomes without losing the existing hard gate."
   },
+  "post_ablation_curriculum": {
+    "status": "pending_fixed_stage_comparison",
+    "selected_arm": null,
+    "start_checkpoint": null,
+    "fixed_goal_mix_stage_override": null,
+    "promotion_rule": "After selecting the reward arm, continue its update-300 checkpoint with the fixed-stage override unset and allow the existing curriculum to promote only from measured recovery and navigation evidence. Stage-0 promotion requires recovery LCB >= 0.85 and short-target arrival LCB >= 0.50. If the current evidence does not clear those thresholds, keep stage 0.",
+    "run_id": null,
+    "checkpoint_sha256": null,
+    "evaluation_ids": {}
+  },
   "scripted_reward_probe": {
     "artifact": "scripts/reward_probe.py",
     "interpretation": "scripted arithmetic only; not physics simulation or policy-quality evidence",

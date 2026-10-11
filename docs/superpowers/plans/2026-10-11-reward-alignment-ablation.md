@@ -20,6 +20,7 @@
 - Use the same transfer checkpoint, seed `20261012`, 512 environments, 300 updates, save interval 100, and evaluator scenario hashes across arms.
 - Do not stop, restart, or edit files in the canonical checkout while the live run is active; begin GPU experiments only after it finishes.
 - Compare settled arrivals, final target-error p95, heading error, arrival time, survival/recovery, by diagnostic-suite family; scalar return is secondary.
+- After selecting the reward arm from the fixed-stage comparison, continue that checkpoint with the default evidence-driven curriculum. The existing stage-0 promotion thresholds remain the only basis for increasing goal distance; if competence has not cleared them, stage stays fixed.
 
 ## Review Focus
 
@@ -124,4 +125,5 @@ Expected: 320 deterministic scenarios are materialized across the five named fam
 - [ ] Run the control, bonus-8-only, settled-quality-only, and potential-progress-only arms sequentially from that same transfer, seed `20261012`, 512 environments, 300 updates, saving every 100 updates; keep the goal mix at stage 0.
 - [ ] Evaluate update 100, 200, and 300 checkpoints on `roadrunner_generalist_sequence_gate_v1`; evaluate the transfer and update-300 checkpoints on `generalist_reward_alignment_v1`.
 - [ ] Record settled arrivals, p95 target error, heading error, arrival time, survival/recovery, cohort/band family, return, and run lineage. State whether any arm improves outcomes without losing the existing gate.
+- [ ] Continue the selected arm's update-300 checkpoint with `ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE` unset. Let the current measured-competence thresholds promote the curriculum only when recovery and target-arrival evidence qualifies; otherwise keep the stage unchanged. Evaluate and record the continuation.
 - [ ] Commit the completed experiment record as `docs: record reward alignment ablation results`.
