@@ -146,6 +146,42 @@ def test_generalist_gate_share_curriculum_can_be_fixed_at_endpoint(monkeypatch):
     assert metric["curriculum_start_gate_like_fraction"] == pytest.approx(0.25)
 
 
+def test_generalist_training_samples_independent_quarter_turn_heading_goals(monkeypatch):
+    from ascento_mjlab.tasks.generalist_locomotion.env_cfg import (
+        ascento_generalist_locomotion_env_cfg,
+    )
+
+    monkeypatch.delenv("ASCENTO_GENERALIST_QUARTER_TURN_HEADING_FRACTION", raising=False)
+    cfg = ascento_generalist_locomotion_env_cfg(num_envs=20)
+    initial = cfg.events["initialize_world_target"].params
+    repeated = cfg.events["repeated_random_world_targets"].params
+
+    assert initial["quarter_turn_heading_fraction"] == pytest.approx(0.20)
+    assert repeated["quarter_turn_heading_fraction"] == pytest.approx(0.20)
+
+    monkeypatch.setenv("ASCENTO_GENERALIST_QUARTER_TURN_HEADING_FRACTION", "0.35")
+    overridden = ascento_generalist_locomotion_env_cfg(num_envs=20)
+    assert overridden.events["initialize_world_target"].params[
+        "quarter_turn_heading_fraction"
+    ] == pytest.approx(0.35)
+    assert overridden.events["repeated_random_world_targets"].params[
+        "quarter_turn_heading_fraction"
+    ] == pytest.approx(0.35)
+
+
+@pytest.mark.parametrize("fraction", ["-0.01", "1.01", "nan", "inf"])
+def test_generalist_quarter_turn_heading_fraction_rejects_invalid_values(
+    monkeypatch, fraction
+):
+    from ascento_mjlab.tasks.generalist_locomotion.env_cfg import (
+        ascento_generalist_locomotion_env_cfg,
+    )
+
+    monkeypatch.setenv("ASCENTO_GENERALIST_QUARTER_TURN_HEADING_FRACTION", fraction)
+    with pytest.raises(ValueError, match="quarter-turn heading fraction"):
+        ascento_generalist_locomotion_env_cfg(num_envs=20)
+
+
 def test_generalist_gate_recovery_and_phase_metrics_survive_retarget():
     from types import SimpleNamespace
 

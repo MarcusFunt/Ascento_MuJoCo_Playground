@@ -328,3 +328,64 @@ def test_generalist_driver_suite_covers_long_goals_turns_routes_recovery_and_con
         assert gates[(family, "action_clip_fraction")].threshold == 0.05
         assert gates[(family, "physical_saturation_fraction")].threshold == 0.01
     assert gates[("route_recovery", "recovered")].threshold == 0.85
+
+def test_external_command_refresh_reads_new_command_without_advancing_history():
+    from types import SimpleNamespace
+
+    import torch
+
+    from ascento_mjlab.evaluation import runner
+
+    refresh = getattr(runner, "_refresh_observations_after_commands", None)
+    assert callable(refresh), "external command observation refresh is not implemented"
+
+    class CachedObservationManager:
+        def __init__(self):
+            self.value = 0.0
+            self.history_updates = 0
+            self._obs_buffer = {"actor": torch.tensor([[0.0]])}
+
+        def compute(self, update_history=False, env_ids=None):
+            if not update_history and self._obs_buffer is not None:
+                return self._obs_buffer
+            if update_history:
+                self.history_updates += 1
+            self._obs_buffer = {"actor": torch.tensor([[self.value]])}
+            return self._obs_buffer
+
+    manager = CachedObservationManager()
+    env = SimpleNamespace(observation_manager=manager, obs_buf=manager._obs_buffer)
+
+    # A scenario command changes the target while the previous observation is cached.
+    manager.value = 2.0
+    observations = refresh(env)
+
+    assert observations["actor"].item() == 2.0
+    assert env.obs_buf["actor"].item() == 2.0
+    assert manager.history_updates == 0
+
+def test_roadrunner_driver_progression_suite_is_a_fixed_four_stage_ladder():
+    from pathlib import Path
+
+    from ascento_mjlab.evaluation.scenarios import materialize_suite
+    from ascento_mjlab.evaluation.schema import load_suite
+
+    suite = load_suite(Path("benchmarks/suites/roadrunner_driver_progression_v1.toml"))
+    scenarios = materialize_suite(suite, step_dt=0.01)
+
+    assert suite.task == "Ascento-Generalist-Locomotion-Flat"
+    assert [scenario.family for scenario in scenarios] == [
+        "balance_10s",
+        "straight_050m",
+        "turn_90deg",
+        "waypoint_050m",
+    ]
+    assert [scenario.horizon_steps for scenario in scenarios] == [1000, 600, 600, 800]
+    assert [scenario.commands[0].values for scenario in scenarios] == [
+        (0.0, 0.0, 0.0),
+        (0.5, 0.0, 0.0),
+        (0.0, 0.0, 1.5707963267948966),
+        (0.5, 0.25, 0.0),
+    ]
+    assert len(suite.gates) == 11
+    assert all(gate.hard for gate in suite.gates)

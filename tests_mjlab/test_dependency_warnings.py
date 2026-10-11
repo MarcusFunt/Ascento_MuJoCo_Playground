@@ -10,10 +10,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _assert_import_is_warning_free(statement: str, category: str | None = None) -> None:
     warning_args = ["-W", f"error::{category}"] if category else ["-W", "error"]
+    env = os.environ.copy()
+    project_src = str(ROOT / "src")
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = os.pathsep.join(
+        path for path in (project_src, existing_pythonpath) if path
+    )
     result = subprocess.run(
         [sys.executable, *warning_args, "-c", statement],
         cwd=ROOT,
-        env=os.environ.copy(),
+        env=env,
         capture_output=True,
         text=True,
         check=False,

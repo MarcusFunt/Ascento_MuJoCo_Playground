@@ -204,6 +204,23 @@ def _refresh_exact_observation_history(base_env: ManagerBasedRlEnv) -> None:
     base_env.obs_buf = base_env.observation_manager.compute(update_history=True, env_ids=env_ids)
 
 
+def _refresh_observations_after_commands(base_env: ManagerBasedRlEnv) -> dict[str, Any]:
+    """Recompute cached observations after scenario commands mutate the task state.
+
+    Timeline commands execute outside the environment step. The observation
+    manager otherwise returns its cached pre-command frame, delaying the new
+    target by one action. Invalidate that cache and recompute without advancing
+    history because no physics step has elapsed.
+    """
+    manager = base_env.observation_manager
+    if not hasattr(manager, "_obs_buffer"):
+        raise RuntimeError("observation manager does not expose its cached observation buffer")
+    manager._obs_buffer = None
+    observations = manager.compute()
+    base_env.obs_buf = observations
+    return observations
+
+
 def _reset_finished_slots(base_env: ManagerBasedRlEnv, policy, finish: torch.Tensor) -> None:
     """Clear mjlab manual-reset state for completed vector slots."""
     if not bool(finish.any().item()):
@@ -866,7 +883,11 @@ def _run_batch(
                 waypoint_confirmed[new_waypoint_ids] = False
                 waypoint_dwell_count[new_waypoint_ids] = 0
                 waypoint_last_dwell_time_s[new_waypoint_ids] = float("nan")
-            target_commanded |= _apply_commands(base_env, scenarios, step)
+            commanded_now = _apply_commands(base_env, scenarios, step)
+            target_commanded |= commanded_now
+            other_command_updates = _command_values_for_step(scenarios, step)
+            if bool(commanded_now.any().item()) or any(other_command_updates.values()):
+                _refresh_observations_after_commands(base_env)
             twist_target = (
                 _command_target(scenarios, step, name="twist", dim=3, device=dev)
                 if is_velocity_task

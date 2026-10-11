@@ -133,6 +133,13 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
             weight=target_achievement_weight,
             params={"hold_s": 0.35, "target_reached_distance_m": 0.035},
         )
+    quarter_turn_heading_fraction = float(
+        os.environ.get("ASCENTO_GENERALIST_QUARTER_TURN_HEADING_FRACTION", "0.20")
+    )
+    if not math.isfinite(quarter_turn_heading_fraction) or not 0.0 <= quarter_turn_heading_fraction <= 1.0:
+        raise ValueError(
+            "generalist quarter-turn heading fraction must be finite and in [0, 1]"
+        )
     goal_band_params = {
         "stratified_goal_mix": not play,
         "short_min_distance_m": 0.15,
@@ -144,6 +151,9 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
         "initial_long_goal_fraction": 0.10,
         "medium_goal_fraction": 0.25,
         "max_long_goal_fraction": 0.40,
+        "quarter_turn_heading_fraction": (
+            quarter_turn_heading_fraction if not play else None
+        ),
     }
     fixed_cohort_params = {
         "precision_anchor_fraction": precision_anchor_fraction,
