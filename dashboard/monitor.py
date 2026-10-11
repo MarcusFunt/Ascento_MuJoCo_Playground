@@ -7,6 +7,7 @@ import math
 import re
 import threading
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha1
 from pathlib import Path
@@ -87,19 +88,25 @@ def load_json(path: Path) -> dict[str, Any] | None:
 def load_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
-    records: list[dict[str, Any]] = []
+
+    def parse_lines(lines: Iterable[str]) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for line in lines:
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                records.append(value)
+        return records
+
+    if limit is not None:
+        return parse_lines(tail_lines(path, limit)) if limit > 0 else []
     try:
         with path.open("r", encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                try:
-                    value = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(value, dict):
-                    records.append(value)
+            return parse_lines(handle)
     except OSError:
         return []
-    return records[-limit:] if limit is not None else records
 
 
 def _training_limit(run_dir: Path) -> int | None:
@@ -249,9 +256,9 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
 def load_training_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
     """Read the densest available history, preserving the full run span."""
     candidates = [
-        load_jsonl(run_dir / "telemetry.jsonl", limit=None),
-        load_log_records(run_dir, limit=None),
-        load_tensorboard_records(run_dir, limit=None),
+        load_jsonl(run_dir / "telemetry.jsonl", limit=limit),
+        load_log_records(run_dir, limit=limit),
+        load_tensorboard_records(run_dir, limit=limit),
     ]
     records = max(candidates, key=len, default=[])
     return records[-limit:] if limit is not None else records
