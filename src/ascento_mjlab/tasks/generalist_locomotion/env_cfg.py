@@ -133,6 +133,33 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
             weight=target_achievement_weight,
             params={"hold_s": 0.35, "target_reached_distance_m": 0.035},
         )
+    progress_reward_mode = os.environ.get(
+        "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE", "velocity"
+    ).strip().lower()
+    if progress_reward_mode not in {"velocity", "potential"}:
+        raise ValueError(
+            "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE must be 'velocity' or 'potential'"
+        )
+    if not play and progress_reward_mode == "potential":
+        from ascento_mjlab.tasks.generalist_locomotion.rl_cfg import (
+            AscentoGeneralistLocomotionRlCfg,
+        )
+
+        potential_scale = float(os.environ.get("ASCENTO_GENERALIST_POTENTIAL_SCALE", "20.0"))
+        if not math.isfinite(potential_scale) or potential_scale <= 0.0:
+            raise ValueError(
+                "ASCENTO_GENERALIST_POTENTIAL_SCALE must be finite and positive"
+            )
+        velocity_term = cfg.rewards["world_target_progress"]
+        cfg.rewards["world_target_progress"] = RewardTermCfg(
+            func=ascento_mdp.rewards.PotentialBasedTargetDistanceReward,
+            weight=1.0,
+            params={
+                "potential_scale": potential_scale,
+                "discount_factor": float(AscentoGeneralistLocomotionRlCfg.algorithm.gamma),
+                "asset_cfg": velocity_term.params["asset_cfg"],
+            },
+        )
     quarter_turn_heading_fraction = float(
         os.environ.get("ASCENTO_GENERALIST_QUARTER_TURN_HEADING_FRACTION", "0.20")
     )
@@ -167,10 +194,30 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
         }
     )
     if not play:
+        fixed_goal_mix_stage_value = os.environ.get(
+            "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE"
+        )
+        fixed_goal_mix_stage = None
+        if fixed_goal_mix_stage_value is not None:
+            try:
+                fixed_goal_mix_stage = int(fixed_goal_mix_stage_value)
+            except ValueError as exc:
+                raise ValueError(
+                    "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE must be 0, 1, or 2"
+                ) from exc
+            if fixed_goal_mix_stage not in (0, 1, 2):
+                raise ValueError(
+                    "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE must be 0, 1, or 2"
+                )
         cfg.events["repeated_random_world_targets"].params.update(
             {
                 **goal_band_params,
                 **fixed_cohort_params,
+                **(
+                    {}
+                    if fixed_goal_mix_stage is None
+                    else {"fixed_goal_mix_stage": fixed_goal_mix_stage}
+                ),
                 "minimum_attempts_per_window": 64,
                 "gate_recovery_lcb_threshold": 0.85,
                 "target_arrival_lcb_threshold": 0.50,

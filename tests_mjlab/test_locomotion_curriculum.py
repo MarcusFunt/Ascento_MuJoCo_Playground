@@ -788,6 +788,65 @@ def test_goal_mix_uses_fresh_attempt_windows_and_prevents_duplicate_episode_cred
         assert sequence._goal_mix_state["stage"] == expected_stage
 
 
+def test_generalist_fixed_goal_mix_stage_freezes_promotion():
+    from types import SimpleNamespace
+
+    import torch
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        common_step_counter=0,
+        step_dt=0.1,
+        termination_manager=SimpleNamespace(
+            dones=torch.tensor([True, True]),
+            terminated=torch.tensor([False, False]),
+            time_outs=torch.tensor([True, True]),
+        ),
+    )
+    sequence = events.RepeatedRandomWorldTargetSequence(
+        SimpleNamespace(params={"fixed_goal_mix_stage": 0}), env
+    )
+    state = events.generalist_episode_metrics_state(env)
+    sequence._gate_like[:] = torch.tensor([True, False])
+    state["gate_like"][:] = sequence._gate_like
+    state["recovery_completed"][:] = torch.tensor([True, False])
+    state["target_attempt_count_by_cohort_band"][
+        1, events.GENERALIST_COHORT_REGULAR, events.GENERALIST_TARGET_BAND_SHORT
+    ] = 1.0
+    state["arrival_completed_count_by_cohort_band"][
+        1, events.GENERALIST_COHORT_REGULAR, events.GENERALIST_TARGET_BAND_SHORT
+    ] = 1.0
+
+    sequence._record_goal_mix_outcomes(
+        env,
+        minimum_attempts=1,
+        gate_recovery_lcb_threshold=0.0,
+        target_arrival_lcb_threshold=0.0,
+    )
+
+    assert sequence._goal_mix_state["stage"] == 0
+    assert sequence._goal_mix_state["long_goal_fraction"] == pytest.approx(0.10)
+
+
+def test_generalist_fixed_goal_mix_stage_override_is_opt_in(monkeypatch):
+    from ascento_mjlab.tasks.generalist_locomotion.env_cfg import (
+        ascento_generalist_locomotion_env_cfg,
+    )
+
+    monkeypatch.delenv("ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE", raising=False)
+    adaptive_cfg = ascento_generalist_locomotion_env_cfg(num_envs=2)
+    assert "fixed_goal_mix_stage" not in adaptive_cfg.events[
+        "repeated_random_world_targets"
+    ].params
+
+    monkeypatch.setenv("ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE", "0")
+    fixed_cfg = ascento_generalist_locomotion_env_cfg(num_envs=2)
+    assert fixed_cfg.events["repeated_random_world_targets"].params[
+        "fixed_goal_mix_stage"
+    ] == 0
+
+
 def test_generalist_fixed_cohorts_have_exact_counts_and_survive_episode_reset():
     import torch
 

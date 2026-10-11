@@ -178,6 +178,106 @@ def test_world_target_rewards_distinguish_arrival_from_near_target_departure():
     assert world_target_heading(env).item() < 1.0
 
 
+def test_potential_target_progress_is_gamma_discounted_and_dt_scaled():
+    from ascento_mjlab.mdp import rewards as reward_terms
+
+    potential_reward = getattr(reward_terms, "PotentialBasedTargetDistanceReward", None)
+    assert callable(potential_reward)
+
+    def first_step_reward(step_dt):
+        env = _env(step_dt=step_dt)
+        env.num_envs = 1
+        env.ascento_world_target_state = {
+            "target_xy": torch.tensor([[1.0, 0.0]]),
+            "target_yaw": torch.tensor([0.0]),
+        }
+        env.ascento_generalist_episode_metrics = {"attempt_id": torch.tensor([1])}
+        term = potential_reward(None, env)
+        env.scene["robot"].data.root_link_pos_w[0, 0] = 0.1
+        return term(env, potential_scale=2.0, discount_factor=0.9) * step_dt
+
+    assert first_step_reward(0.01).item() == pytest.approx(0.38)
+    assert first_step_reward(0.02).item() == pytest.approx(0.38)
+
+    env = _env(step_dt=0.01)
+    env.num_envs = 1
+    env.ascento_world_target_state = {
+        "target_xy": torch.tensor([[1.0, 0.0]]),
+        "target_yaw": torch.tensor([0.0]),
+    }
+    env.ascento_generalist_episode_metrics = {"attempt_id": torch.tensor([1])}
+    term = potential_reward(None, env)
+    env.scene["robot"].data.root_link_pos_w[0, 0] = 0.1
+    first = term(env, potential_scale=2.0, discount_factor=0.9) * env.step_dt
+    env.scene["robot"].data.root_link_pos_w[0, 0] = 0.2
+    second = term(env, potential_scale=2.0, discount_factor=0.9) * env.step_dt
+    discounted_return = first + 0.9 * second
+    phi_initial = -2.0
+    phi_final = -2.0 * 0.8
+    assert discounted_return.item() == pytest.approx(-phi_initial + 0.9**2 * phi_final)
+
+
+def test_potential_target_progress_resets_and_masks_target_reassignment():
+    from ascento_mjlab.mdp import rewards as reward_terms
+
+    potential_reward = getattr(reward_terms, "PotentialBasedTargetDistanceReward", None)
+    assert callable(potential_reward)
+    env = _env(step_dt=0.01)
+    env.num_envs = 1
+    env.ascento_world_target_state = {
+        "target_xy": torch.tensor([[1.0, 0.0]]),
+        "target_yaw": torch.tensor([0.0]),
+    }
+    env.ascento_generalist_episode_metrics = {"attempt_id": torch.tensor([1])}
+    term = potential_reward(None, env)
+    robot = env.scene["robot"]
+
+    robot.data.root_link_pos_w[0, 0] = 0.25
+    term(env, potential_scale=2.0, discount_factor=0.9)
+    # Reset events have already placed the robot and target before reward reset.
+    robot.data.root_link_pos_w[0, 0] = 0.5
+    env.ascento_world_target_state["target_xy"][0, 0] = 2.0
+    env.ascento_generalist_episode_metrics["attempt_id"][0] = 2
+    term.reset()
+    same_state = term(env, potential_scale=2.0, discount_factor=0.9)
+    expected_reset_value = 2.0 * 1.5 * (1.0 - 0.9) / env.step_dt
+    assert same_state.item() == pytest.approx(expected_reset_value)
+
+    env.ascento_world_target_state["target_xy"][0, 0] = 3.0
+    env.ascento_generalist_episode_metrics["attempt_id"][0] = 3
+    reassignment = term(env, potential_scale=2.0, discount_factor=0.9)
+    assert reassignment.item() == pytest.approx(0.0)
+    robot.data.root_link_pos_w[0, 0] = 0.6
+    toward_new_target = term(env, potential_scale=2.0, discount_factor=0.9)
+    assert toward_new_target.item() > 0.0
+
+
+def test_generalist_potential_target_progress_mode_is_opt_in_and_uses_ppo_gamma(monkeypatch):
+    from ascento_mjlab.mdp import rewards as reward_terms
+    from ascento_mjlab.tasks.generalist_locomotion.env_cfg import (
+        ascento_generalist_locomotion_env_cfg,
+    )
+    from ascento_mjlab.tasks.generalist_locomotion.rl_cfg import (
+        AscentoGeneralistLocomotionRlCfg,
+    )
+
+    monkeypatch.delenv("ASCENTO_GENERALIST_PROGRESS_REWARD_MODE", raising=False)
+    default_cfg = ascento_generalist_locomotion_env_cfg(num_envs=2)
+    assert default_cfg.rewards["world_target_progress"].func is world_target_progress_velocity
+    assert default_cfg.rewards["world_target_progress"].weight == pytest.approx(8.0)
+
+    monkeypatch.setenv("ASCENTO_GENERALIST_PROGRESS_REWARD_MODE", "potential")
+    cfg = ascento_generalist_locomotion_env_cfg(num_envs=2)
+    term = cfg.rewards["world_target_progress"]
+    assert term.func is getattr(reward_terms, "PotentialBasedTargetDistanceReward", None)
+    assert callable(term.func)
+    assert term.weight == pytest.approx(1.0)
+    assert term.params["potential_scale"] == pytest.approx(20.0)
+    assert term.params["discount_factor"] == pytest.approx(
+        AscentoGeneralistLocomotionRlCfg.algorithm.gamma
+    )
+
+
 def test_generalist_arrival_settle_bonus_is_once_per_attempt_and_requires_dwell():
     env = _env()
     env.num_envs = 1

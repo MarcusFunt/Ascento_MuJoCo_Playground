@@ -146,6 +146,88 @@ def world_target_progress_velocity(
     return torch.tanh(closing_speed / speed_scale) * upright_factor * approach_factor
 
 
+class PotentialBasedTargetDistanceReward:
+    """Potential-based distance shaping, expressed as a reward-manager rate.
+
+    The reward manager multiplies terms by ``env.step_dt``. Dividing this
+    transition's potential difference by that timestep preserves the intended
+    per-transition shaping after that integration. Target changes are masked
+    because the old and new target belong to different go-to-pose attempts.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+        del cfg
+        self._env = env
+        self._previous_distance = self._distance(env)
+        self._last_target_xy = world_target_xy(env).clone()
+        self._last_attempt_id = self._attempt_ids(env)
+
+    @staticmethod
+    def _distance(env: ManagerBasedRlEnv) -> torch.Tensor:
+        asset: Entity = env.scene[_DEFAULT_ASSET_CFG.name]
+        return torch.linalg.vector_norm(
+            asset.data.root_link_pos_w[:, :2] - world_target_xy(env), dim=1
+        )
+
+    @staticmethod
+    def _attempt_ids(env: ManagerBasedRlEnv) -> torch.Tensor | None:
+        metrics = getattr(env, "ascento_generalist_episode_metrics", None)
+        attempt_ids = metrics.get("attempt_id") if isinstance(metrics, dict) else None
+        if isinstance(attempt_ids, torch.Tensor) and attempt_ids.shape == (env.num_envs,):
+            return attempt_ids.to(device=env.device, dtype=torch.long).clone()
+        return None
+
+    def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+        """Refresh the cache after reset events have assigned the new state."""
+        env = self._env
+        if env_ids is None:
+            env_ids = slice(None)
+        distance = self._distance(env)
+        target_xy = world_target_xy(env)
+        self._previous_distance[env_ids] = distance[env_ids]
+        self._last_target_xy[env_ids] = target_xy[env_ids]
+        attempt_ids = self._attempt_ids(env)
+        if attempt_ids is not None:
+            if self._last_attempt_id is None:
+                self._last_attempt_id = attempt_ids
+            else:
+                self._last_attempt_id[env_ids] = attempt_ids[env_ids]
+
+    def __call__(
+        self,
+        env: ManagerBasedRlEnv,
+        potential_scale: float = 20.0,
+        discount_factor: float = 0.998,
+        asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    ) -> torch.Tensor:
+        del asset_cfg
+        if not math.isfinite(potential_scale) or potential_scale <= 0.0:
+            raise ValueError("potential_scale must be finite and positive")
+        if not math.isfinite(discount_factor) or not 0.0 <= discount_factor < 1.0:
+            raise ValueError("discount_factor must be finite and in [0, 1)")
+        if not math.isfinite(env.step_dt) or env.step_dt <= 0.0:
+            raise ValueError("env.step_dt must be finite and positive")
+
+        target_xy = world_target_xy(env)
+        distance = self._distance(env)
+        changed = torch.linalg.vector_norm(target_xy - self._last_target_xy, dim=1) > 1.0e-6
+        attempt_ids = self._attempt_ids(env)
+        if attempt_ids is not None:
+            if self._last_attempt_id is None:
+                self._last_attempt_id = attempt_ids
+            else:
+                changed |= attempt_ids != self._last_attempt_id
+                self._last_attempt_id.copy_(attempt_ids)
+        self._previous_distance = torch.where(changed, distance, self._previous_distance)
+        phi_previous = -float(potential_scale) * self._previous_distance
+        phi_next = -float(potential_scale) * distance
+        transition = (float(discount_factor) * phi_next - phi_previous) / float(env.step_dt)
+        transition = torch.where(changed, torch.zeros_like(transition), transition)
+        self._previous_distance.copy_(distance)
+        self._last_target_xy.copy_(target_xy)
+        return transition
+
+
 def world_target_speed_penalty(
     env: ManagerBasedRlEnv,
     std: float = 0.35,

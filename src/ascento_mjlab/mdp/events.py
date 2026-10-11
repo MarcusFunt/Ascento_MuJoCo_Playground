@@ -1574,6 +1574,21 @@ class RepeatedRandomWorldTargetSequence:
             medium_goal_fraction=float(params.get("medium_goal_fraction", 0.25)),
             max_long_goal_fraction=float(params.get("max_long_goal_fraction", 0.40)),
         )
+        fixed_goal_mix_stage = params.get("fixed_goal_mix_stage")
+        if fixed_goal_mix_stage is not None:
+            fixed_goal_mix_stage = int(fixed_goal_mix_stage)
+            if fixed_goal_mix_stage not in (0, 1, 2):
+                raise ValueError("fixed_goal_mix_stage must be 0, 1, or 2")
+            self._goal_mix_state["stage"] = fixed_goal_mix_stage
+            self._goal_mix_state["long_goal_fraction"] = generalist_goal_mix_fractions(
+                fixed_goal_mix_stage,
+                medium_goal_fraction=float(self._goal_mix_state["medium_goal_fraction"]),
+                initial_long_goal_fraction=float(
+                    self._goal_mix_state["initial_long_goal_fraction"]
+                ),
+                max_long_goal_fraction=float(self._goal_mix_state["max_long_goal_fraction"]),
+            )["long"]
+        self._fixed_goal_mix_stage = fixed_goal_mix_stage
         self._settled_at_target_s = torch.zeros(
             env.num_envs, dtype=torch.float32, device=env.device
         )
@@ -1650,8 +1665,23 @@ class RepeatedRandomWorldTargetSequence:
         gate_max_target_distance_m: float = 0.20,
         gate_like_initial_hold: bool = False,
         quarter_turn_heading_fraction: float | None = None,
+        fixed_goal_mix_stage: int | None = None,
         asset_cfg: SceneEntityCfg,
     ) -> None:
+        if fixed_goal_mix_stage is not None:
+            fixed_goal_mix_stage = int(fixed_goal_mix_stage)
+            if fixed_goal_mix_stage not in (0, 1, 2):
+                raise ValueError("fixed_goal_mix_stage must be 0, 1, or 2")
+            if self._fixed_goal_mix_stage not in (None, fixed_goal_mix_stage):
+                raise ValueError("fixed_goal_mix_stage differs from its event configuration")
+            self._fixed_goal_mix_stage = fixed_goal_mix_stage
+            self._goal_mix_state["stage"] = fixed_goal_mix_stage
+            self._goal_mix_state["long_goal_fraction"] = generalist_goal_mix_fractions(
+                fixed_goal_mix_stage,
+                medium_goal_fraction=medium_goal_fraction,
+                initial_long_goal_fraction=initial_long_goal_fraction,
+                max_long_goal_fraction=max_long_goal_fraction,
+            )["long"]
         if (precision_anchor_fraction is None) != (recovery_retarget_anchor_fraction is None):
             raise ValueError("both fixed generalist anchor fractions must be configured together")
         if precision_anchor_fraction is not None:
@@ -2144,6 +2174,19 @@ class RepeatedRandomWorldTargetSequence:
             ("window_long_arrivals", long_arrivals),
         ):
             self._goal_mix_state[key] = int(self._goal_mix_state[key]) + value
+
+        if self._fixed_goal_mix_stage is not None:
+            for key in (
+                "window_gate_episodes",
+                "window_gate_recovery_successes",
+                "window_short_attempts",
+                "window_short_arrivals",
+                "window_long_attempts",
+                "window_long_arrivals",
+            ):
+                self._goal_mix_state[key] = 0
+            self._goal_mix_state["demotion_streak"] = 0
+            return
 
         stage = int(self._goal_mix_state["stage"])
         window_ready = (
