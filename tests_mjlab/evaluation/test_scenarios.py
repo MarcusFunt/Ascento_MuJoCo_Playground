@@ -187,6 +187,7 @@ def test_generalist_reward_alignment_suite_has_fixed_band_cohort_families():
     assert {
         gate.metric for gate in suite.gates
     } >= {
+        "target_arrived",
         "waypoint_final_stopped",
         "waypoint_final_error",
         "waypoint_final_heading_error",

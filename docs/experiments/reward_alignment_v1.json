@@ -115,6 +115,7 @@
       }
     },
     "reported_metrics_by_family": [
+      "target_arrived.wilson_lower",
       "waypoint_final_stopped.wilson_lower",
       "waypoint_final_error.p95",
       "waypoint_final_heading_error.p95",

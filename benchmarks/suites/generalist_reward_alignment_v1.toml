@@ -124,6 +124,14 @@ op = ">="
 threshold = 0.50
 hard = false
 [[gates]]
+id = "precision_short_target_arrival"
+family = "precision_short"
+metric = "target_arrived"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.50
+hard = false
+[[gates]]
 id = "precision_short_final_error"
 family = "precision_short"
 metric = "waypoint_final_error"
@@ -168,6 +176,14 @@ hard = false
 id = "recovery_retarget_short_settled_arrival"
 family = "recovery_retarget_short"
 metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.50
+hard = false
+[[gates]]
+id = "recovery_retarget_short_target_arrival"
+family = "recovery_retarget_short"
+metric = "target_arrived"
 statistic = "wilson_lower"
 op = ">="
 threshold = 0.50
@@ -230,6 +246,14 @@ op = ">="
 threshold = 0.50
 hard = false
 [[gates]]
+id = "navigation_short_target_arrival"
+family = "navigation_short"
+metric = "target_arrived"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.50
+hard = false
+[[gates]]
 id = "navigation_short_final_error"
 family = "navigation_short"
 metric = "waypoint_final_error"
@@ -279,6 +303,14 @@ op = ">="
 threshold = 0.50
 hard = false
 [[gates]]
+id = "navigation_medium_target_arrival"
+family = "navigation_medium"
+metric = "target_arrived"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.50
+hard = false
+[[gates]]
 id = "navigation_medium_final_error"
 family = "navigation_medium"
 metric = "waypoint_final_error"
@@ -323,6 +355,14 @@ hard = false
 id = "navigation_long_settled_arrival"
 family = "navigation_long"
 metric = "waypoint_final_stopped"
+statistic = "wilson_lower"
+op = ">="
+threshold = 0.50
+hard = false
+[[gates]]
+id = "navigation_long_target_arrival"
+family = "navigation_long"
+metric = "target_arrived"
 statistic = "wilson_lower"
 op = ">="
 threshold = 0.50
