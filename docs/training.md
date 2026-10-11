@@ -236,15 +236,25 @@ the earlier lifecycle and overlapping cohort masks and must not be used to
 retroactively claim those behaviors were learned. The fixed-suite evaluator
 measures recovery independently.
 
-The reward already has dense target proximity (weight 4.0), target heading
-(weight 1.0), yaw-rate tracking (weight 0.5), signed target progress (weight
-8.0), and near-target speed penalty (weight -2.0). The proximity term changes
-only slightly between 3.5 cm success and a 5 cm near miss, and it has no
-explicit settled-arrival event. Use the repaired short-goal and settled-stop
-metrics, plus per-term training reward breakdowns, to decide whether an
-arrival/settle bonus or a tighter post-arrival heading term is warranted. Keep
-each reward change in its own ablation and compare against the same actor-only
-transfer and fixed suite.
+The default reward retains target proximity (weight 4.0), target heading
+(weight 1.0), yaw-rate tracking (weight 0.5), signed velocity progress (weight
+8.0), near-target speed penalty (weight -2.0), and a one-shot target-arrival
+bonus with weight 5.0. The proximity term changes only slightly between 3.5 cm
+success and a 5 cm near miss. A separate settled-quality term and
+potential-based progress mode are available for controlled ablations; neither
+is enabled by default.
+
+The 2026-10-11 reward-alignment comparison tested bonus weight 8, settled
+quality weight 8, and timestep-scaled potential progress at scale 20 against
+the current reward at fixed stage 0. All three training arms completed, but no
+final checkpoint passed the existing hard gate. The settled-quality arm
+reduced endpoint distance while failing heading, recovery, and stationary
+quality; the potential-progress arm did not learn target arrival; the larger
+arrival bonus worsened final precision. Keep the selected actor-only transfer
+as the quality floor and use the per-cohort results in
+[the ablation report](reports/reward-alignment-ablation-2026-10-11.md) and
+[its experiment record](experiments/reward_alignment_v1.json) before proposing
+another reward change.
 
 Retention pilots identified a reward escape path: `settled_balance` multiplies
 tilt, speed, angular-rate, heading, height, and two-wheel support scores. When

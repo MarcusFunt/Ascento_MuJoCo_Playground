@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "experiment_id": "generalist_reward_alignment_v1",
-  "status": "protocol_ready",
+  "status": "completed",
   "objective": "Compare single-feature reward changes from the same selected locomotion actor while fixing PPO initialization, mode bit, cohorts, goal stage, seed, environment count, and evaluation scenarios.",
   "source_checkpoint": {
     "run_id": "762230a3d4b4",
@@ -16,7 +16,22 @@
     "policy_preserved_when_obstacle_mode": 0,
     "other_actor_abi_mismatches": "rejected"
   },
-  "fresh_generalist_transfer": null,
+  "fresh_generalist_transfer": {
+    "path": "transfers/ascento_generalist_locomotion_flat/reward_alignment/model_000000.pt",
+    "sha256": "026388004e805de6aa0738e78a975ae0a462ed8ca1e6a74352bd5fc373340fe1",
+    "source_checkpoint_sha256": "cf68c19506dbf3065d026693e8acd75beebad8bf1e3fc81380d8bf1e3724d6eb",
+    "actor": "41D locomotion actor lifted to 42D with zero obstacle-mode input at mode=0; critic and optimizer fresh",
+    "gate_evaluation_id": "20261011T192114Z_roadrunner_generalist_sequence_gate_v1_model_000000",
+    "diagnostic_evaluation_id": "20261011T192747Z_generalist_reward_alignment_v1_model_000000",
+    "hard_gate_status": "PASS",
+    "hard_gate_scenarios": 256,
+    "hard_gate_survival_rate": 1.0,
+    "hard_gate_recovery_rate": 1.0,
+    "hard_gate_target_arrival_rate": 1.0,
+    "hard_gate_final_target_error_p95_m": 0.0055838258704170585,
+    "diagnostic_status": "PASS",
+    "diagnostic_family_failure": "navigation_medium and navigation_long had zero arrivals at the fixed 0.5 Wilson-LCB threshold"
+  },
   "common_training": {
     "task": "Ascento-Generalist-Locomotion-Flat",
     "seed": 20261012,
@@ -39,7 +54,7 @@
     "handling": "waited for natural completion before updating the canonical checkout or starting GPU experiments",
     "final_state": "finished",
     "exit_code": 0,
-    "finished_at": "2026-10-11T18:57:48.225586+00:00",
+    "finished_at": "2026-10-11T20:57:48.225586+02:00",
     "final_checkpoint": {
       "path": "logs/rsl_rl/20261011_135525_fresh-base-turn-curriculum-12h-measured-2026-10-_bd273071/ascento_generalist_locomotion_flat/2026-10-11_13-55-35/model_9799.pt",
       "sha256": "4eec0809dd560f2454ca914a08c8ba559d91ff3dd207318359e5ada65b81ab32"
@@ -55,9 +70,55 @@
         "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT": "0.0",
         "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE": "0"
       },
-      "run_id": null,
-      "checkpoints": {},
-      "evaluations": {}
+      "run_id": "d97329c110a6",
+      "checkpoints": {
+        "100": {
+          "path": "logs/rsl_rl/20261011_214846_reward-alignment-control_d97329c1/ascento_generalist_locomotion_flat/2026-10-11_21-48-56/model_100.pt",
+          "sha256": "d4745dee08ec99ec4b140abd89ec304fe9aefd9f9aff9d54c26af8faa72f65ab"
+        },
+        "200": {
+          "path": "logs/rsl_rl/20261011_214846_reward-alignment-control_d97329c1/ascento_generalist_locomotion_flat/2026-10-11_21-48-56/model_200.pt",
+          "sha256": "b043ea36a2d2a292b88142c61bb2bce5ff4f66bfe82a40dfd39baccb7ab6895f"
+        },
+        "300": {
+          "path": "logs/rsl_rl/20261011_214846_reward-alignment-control_d97329c1/ascento_generalist_locomotion_flat/2026-10-11_21-48-56/model_299.pt",
+          "sha256": "5023fe80128008e405280192e989c50274188d0c130e8c31e9c514d0e93e91c2",
+          "file_iteration_index": 299
+        }
+      },
+      "evaluations": {
+        "diagnostic_300": "20261011T201432Z_generalist_reward_alignment_v1_model_299"
+      },
+      "gate_summary": {
+        "hard_gate_100": "PASS",
+        "hard_gate_200": "FAIL",
+        "hard_gate_300": "FAIL",
+        "final_target_error_p95_m": {
+          "checkpoint_200": 0.06810344196856022,
+          "checkpoint_300": 0.17694008350372314,
+          "checkpoint_100": 0.010435090865939856,
+          "transfer": 0.0055838258704170585
+        },
+        "all_256_scenarios_arrived_and_recovered_at_each_checkpoint": true,
+        "failure_200": "stationary_body_rocking_rms p95 0.0321583 exceeds 0.03",
+        "failures_300": [
+          "final_target_error p95 0.17694 m exceeds 0.10 m",
+          "stationary_tilt_rms p95 0.0659797 exceeds 0.04"
+        ]
+      },
+      "training_summary": {
+        "status": "finished",
+        "exit_code": 0,
+        "completed_iterations": 299,
+        "no_non_finite_updates": true,
+        "final_telemetry": {
+          "mean_reward": 315.4018859863281,
+          "mean_episode_length": 4029.429931640625,
+          "entropy": -10.836735725402832,
+          "kl": 0.03223852068185806,
+          "clip_fraction": 0.058837890625
+        }
+      }
     },
     {
       "arm_id": "bonus_8",
@@ -68,9 +129,74 @@
         "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT": "0.0",
         "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE": "0"
       },
-      "run_id": null,
-      "checkpoints": {},
-      "evaluations": {}
+      "run_id": "bba66457762a",
+      "checkpoints": {
+        "100": {
+          "path": "logs/rsl_rl/20261011_223627_reward-alignment-bonus-8_bba66457/ascento_generalist_locomotion_flat/2026-10-11_22-36-37/model_100.pt",
+          "sha256": "28077f18efc102a6d7ce4a696b36b19e5e14dd1f6ce0201c04a5b198b8eab26b"
+        },
+        "200": {
+          "path": "logs/rsl_rl/20261011_223627_reward-alignment-bonus-8_bba66457/ascento_generalist_locomotion_flat/2026-10-11_22-36-37/model_200.pt",
+          "sha256": "26cbdabd797adeea97dde7c7a9b76216601a6eb47b9d89b592a0930983688c51"
+        },
+        "300": {
+          "path": "logs/rsl_rl/20261011_223627_reward-alignment-bonus-8_bba66457/ascento_generalist_locomotion_flat/2026-10-11_22-36-37/model_299.pt",
+          "sha256": "c34b294cb2eac888067d6e0efa23cb1d9aaf61e26b7bae733354f2678f7a48e2",
+          "file_iteration_index": 299
+        }
+      },
+      "evaluations": {
+        "hard_gate_100": "20261011T205008Z_roadrunner_generalist_sequence_gate_v1_model_100",
+        "hard_gate_200": "20261011T205406Z_roadrunner_generalist_sequence_gate_v1_model_200",
+        "hard_gate_300": "20261011T205906Z_roadrunner_generalist_sequence_gate_v1_model_299",
+        "diagnostic_300": "20261011T222728Z_generalist_reward_alignment_v1_model_299"
+      },
+      "actor_only_transfer": {
+        "path": "transfers/ascento_generalist_locomotion_flat/bonus_8/model_000000.pt",
+        "sha256": "a7596862718cf87af3387a5a2c18f5622b13505c64010619c8c8f0e880b7eca3"
+      },
+      "gate_summary": {
+        "status_by_checkpoint": {
+          "100": "PASS",
+          "200": "FAIL",
+          "300": "FAIL"
+        },
+        "final_target_error_p95_m": {
+          "100": 0.038574487902224064,
+          "200": 0.150432538241148,
+          "300": 0.1962950937449932
+        },
+        "recovery_lcb_at_300": 0.540515032751419,
+        "target_arrival_lcb_at_300": 0.9852161435741286
+      },
+      "training_summary": {
+        "status": "finished",
+        "exit_code": 0,
+        "completed_iterations": 299,
+        "no_non_finite_updates": true,
+        "final_telemetry": {
+          "mean_reward": 330.98651123046875,
+          "mean_episode_length": 4296.669921875,
+          "entropy": -10.474409103393555,
+          "kl": 0.01463717594742775,
+          "clip_fraction": 0.0731608122587204
+        }
+      },
+      "paired_comparison_vs_transfer": {
+        "paired_scenarios": 320,
+        "quality_verdict": "NOT_PROVEN_BETTER",
+        "final_target_error_iqm_delta_m": 0.18918275230171275,
+        "final_target_error_iqm_ci95_m": [
+          0.18852258085076756,
+          0.18971401406725819
+        ],
+        "heading_error_rms_iqm_delta_rad": 0.23802035383414477,
+        "heading_error_rms_iqm_ci95_rad": [
+          0.21924217486346606,
+          0.25518624329502926
+        ],
+        "settled_stop_iqm_delta": -0.7
+      }
     },
     {
       "arm_id": "settled_quality",
@@ -81,9 +207,72 @@
         "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT": "8.0",
         "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE": "0"
       },
-      "run_id": null,
-      "checkpoints": {},
-      "evaluations": {}
+      "run_id": "b8c86ca1d547",
+      "checkpoints": {
+        "250": {
+          "path": "logs/rsl_rl/20261011_230329_reward-alignment-settled-quality_b8c86ca1/ascento_generalist_locomotion_flat/2026-10-11_23-03-39/model_250.pt",
+          "sha256": "1cf9b4b77da5a34fee8ae859f8901538a58d84cd6a3e0897d114359b907ab16d"
+        },
+        "300": {
+          "path": "logs/rsl_rl/20261011_230329_reward-alignment-settled-quality_b8c86ca1/ascento_generalist_locomotion_flat/2026-10-11_23-03-39/model_299.pt",
+          "sha256": "bed3f569ed0d976b1eb5f164d8b250bca3ddf9b7c4ae367d0a8881ecabae9946",
+          "file_iteration_index": 299
+        }
+      },
+      "evaluations": {
+        "hard_gate_250": "20261011T211812Z_roadrunner_generalist_sequence_gate_v1_model_250",
+        "hard_gate_300": "20261011T212233Z_roadrunner_generalist_sequence_gate_v1_model_299",
+        "diagnostic_300": "20261011T212656Z_generalist_reward_alignment_v1_model_299"
+      },
+      "actor_only_transfer": {
+        "path": "transfers/ascento_generalist_locomotion_flat/settled_quality/model_000000.pt",
+        "sha256": "1876c9545d9d8f0e0e07c5662d5a02270fd022d37cd6c63bc45c8489cf2b4dd7"
+      },
+      "checkpoint_schedule_deviation": "Trainer default saved model_0, model_250, and model_299; model_250 and model_299 were evaluated. Checkpoint cadence did not change training updates.",
+      "gate_summary": {
+        "status_by_checkpoint": {
+          "250": "FAIL",
+          "300": "FAIL"
+        },
+        "final_target_error_p95_m": {
+          "250": 0.04489960614591837,
+          "300": 0.03117336193099618
+        },
+        "recovery_lcb_at_300": 0,
+        "target_arrival_lcb_at_300": 0.9852161435741286,
+        "post_target_speed_p95_mps_at_300": 0.08962900191545486,
+        "post_target_heading_p95_rad_at_300": 1.9353154599666595,
+        "stationary_tilt_p95_rad_at_300": 0.06187193486839533,
+        "stationary_body_rocking_p95_rad_at_300": 0.22084699347615241
+      },
+      "training_summary": {
+        "status": "finished",
+        "exit_code": 0,
+        "completed_iterations": 299,
+        "no_non_finite_updates": true,
+        "final_telemetry": {
+          "mean_reward": 402.13177490234375,
+          "mean_episode_length": 5881.5400390625,
+          "entropy": -3.6383466720581055,
+          "kl": 0.021067779511213303,
+          "clip_fraction": 0.1817220151424408
+        }
+      },
+      "paired_comparison_vs_transfer": {
+        "paired_scenarios": 320,
+        "quality_verdict": "NOT_PROVEN_BETTER",
+        "final_target_error_iqm_delta_m": -0.013083058479242026,
+        "final_target_error_iqm_ci95_m": [
+          -0.020920245942106702,
+          -0.007401334500682425
+        ],
+        "heading_error_rms_iqm_delta_rad": 1.7403414614498616,
+        "heading_error_rms_iqm_ci95_rad": [
+          1.735947593485471,
+          1.743908323335345
+        ],
+        "settled_stop_iqm_delta": -0.7
+      }
     },
     {
       "arm_id": "potential_progress",
@@ -95,9 +284,74 @@
         "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT": "0.0",
         "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE": "0"
       },
-      "run_id": null,
-      "checkpoints": {},
-      "evaluations": {}
+      "run_id": "f84b9662f823",
+      "checkpoints": {
+        "100": {
+          "path": "logs/rsl_rl/20261011_234331_reward-alignment-potential-progress_f84b9662/ascento_generalist_locomotion_flat/2026-10-11_23-43-41/model_100.pt",
+          "sha256": "02255cd61e4963b535714bbafb3ff18d991d5ac041419d074944e9783bdc1beb"
+        },
+        "200": {
+          "path": "logs/rsl_rl/20261011_234331_reward-alignment-potential-progress_f84b9662/ascento_generalist_locomotion_flat/2026-10-11_23-43-41/model_200.pt",
+          "sha256": "41d17d5cd24deb5669134ca9db51e0b24d061ea383a810bb2079996969fbe697"
+        },
+        "300": {
+          "path": "logs/rsl_rl/20261011_234331_reward-alignment-potential-progress_f84b9662/ascento_generalist_locomotion_flat/2026-10-11_23-43-41/model_299.pt",
+          "sha256": "0d7a349dc7082084fa59de2a784c305ada5bbda97cbb21c35c739227bbe9ec1a",
+          "file_iteration_index": 299
+        }
+      },
+      "evaluations": {
+        "hard_gate_100": "20261011T215748Z_roadrunner_generalist_sequence_gate_v1_model_100",
+        "hard_gate_200": "20261011T220210Z_roadrunner_generalist_sequence_gate_v1_model_200",
+        "hard_gate_300": "20261011T220627Z_roadrunner_generalist_sequence_gate_v1_model_299",
+        "diagnostic_300": "20261011T221049Z_generalist_reward_alignment_v1_model_299"
+      },
+      "actor_only_transfer": {
+        "path": "transfers/ascento_generalist_locomotion_flat/potential_progress/model_000000.pt",
+        "sha256": "bd00299de2346d21933567e0b7b12136539646417cf07cf3ecd0b6fd3bfda6dc"
+      },
+      "gate_summary": {
+        "status_by_checkpoint": {
+          "100": "FAIL",
+          "200": "FAIL",
+          "300": "FAIL"
+        },
+        "final_target_error_p95_m": {
+          "100": 0.07307878136634827,
+          "200": 0.06047267373651266,
+          "300": 0.08319251984357834
+        },
+        "recovery_lcb_at_300": 0,
+        "target_arrival_lcb_at_300": 0
+      },
+      "training_summary": {
+        "status": "finished",
+        "exit_code": 0,
+        "completed_iterations": 299,
+        "no_non_finite_updates": true,
+        "final_telemetry": {
+          "mean_reward": 178.01,
+          "mean_episode_length": 3035.66,
+          "entropy": -4.4699,
+          "kl": 0.014,
+          "clip_fraction": 0.1348
+        }
+      },
+      "paired_comparison_vs_transfer": {
+        "paired_scenarios": 320,
+        "quality_verdict": "NOT_PROVEN_BETTER",
+        "final_target_error_iqm_delta_m": 0.05571868606602948,
+        "final_target_error_iqm_ci95_m": [
+          0.04547282245493079,
+          0.0660363602039706
+        ],
+        "heading_error_rms_iqm_delta_rad": 0.5024995747255161,
+        "heading_error_rms_iqm_ci95_rad": [
+          0.4699035285616992,
+          0.5322583186934935
+        ],
+        "settled_stop_iqm_delta": -0.7
+      }
     }
   ],
   "evaluation": {
@@ -123,10 +377,33 @@
         "diagnostic_suite",
         "existing_hard_gate"
       ],
-      "each_arm": {
-        "checkpoints_on_existing_hard_gate": [100, 200, 300],
-        "checkpoint_on_diagnostic_suite": 300
-      }
+      "planned_each_arm_hard_gate_checkpoints": [
+        100,
+        200,
+        300
+      ],
+      "actual_hard_gate_checkpoints": {
+        "control": [
+          100,
+          200,
+          300
+        ],
+        "bonus_8": [
+          100,
+          200,
+          300
+        ],
+        "settled_quality": [
+          250,
+          300
+        ],
+        "potential_progress": [
+          100,
+          200,
+          300
+        ]
+      },
+      "diagnostic_checkpoint": 300
     },
     "reported_metrics_by_family": [
       "target_arrived.wilson_lower",
@@ -143,14 +420,12 @@
     "comparison": "Use paired scenario results against the same transfer and across arms; promote no candidate unless it improves the target outcomes without losing the existing hard gate."
   },
   "post_ablation_curriculum": {
-    "status": "pending_fixed_stage_comparison",
+    "status": "not_run_no_promotable_reward_checkpoint",
     "selected_arm": null,
     "start_checkpoint": null,
-    "fixed_goal_mix_stage_override": null,
-    "promotion_rule": "After selecting the reward arm, continue its update-300 checkpoint with the fixed-stage override unset and allow the existing curriculum to promote only from measured recovery and navigation evidence. Stage-0 promotion requires recovery LCB >= 0.85 and short-target arrival LCB >= 0.50. If the current evidence does not clear those thresholds, keep stage 0.",
-    "run_id": null,
-    "checkpoint_sha256": null,
-    "evaluation_ids": {}
+    "fixed_goal_mix_stage_override": 0,
+    "reason": "Every treatment final checkpoint failed the existing hard gate. Continuing with increased target distances would start from an unvalidated policy and confound the reward diagnosis; keep the selected actor transfer as the current quality floor.",
+    "promotion_rule": "Promote target distance only from measured recovery and short-target arrival competence; no final checkpoint passed the existing hard gate."
   },
   "scripted_reward_probe": {
     "artifact": "scripts/reward_probe.py",
@@ -180,6 +455,107 @@
     },
     "ranking_assertions_passed": true
   },
-  "results": null,
-  "conclusion": null
+  "results": {
+    "training_signal": "All four 300-update arms completed with finite telemetry and PPO updates. Scalar return increased but is not comparable across reward scales and did not predict evaluation quality.",
+    "control": "Passed hard gates at update 100, failed stationary body rocking at 200, then failed final target error and tilt at 299. Survival, recovery, and arrival LCB remained 0.9852 at all three checkpoints; final-error p95 rose from 1.04 cm to 17.69 cm.",
+    "bonus_8": "Arrival weight 8 passed at update 100 (3.86 cm final-error p95), then failed final error at 200 (15.04 cm) and multiple recovery/settling gates at 299 (19.63 cm).",
+    "settled_quality": "Quality weight 8 reduced final-error p95 to 3.12 cm at 299, but recovery LCB was 0, settled-stop LCB was 0 in every cohort, heading p95 was 1.94 rad, and stationary quality failed.",
+    "potential_progress": "Potential scale 20 had final-error p95 8.32 cm, but recovery and arrival LCB were 0. The diagnostic suite showed zero arrivals and settled stops in all five cohorts.",
+    "decision": "Promote no treatment. Keep the selected actor-only transfer as the quality floor and hold curriculum at stage 0."
+  },
+  "conclusion": "No tested reward change improved the policy without losing an existing hard gate. Training did not stall: all runs finished with finite telemetry and repeated PPO updates. Returns grew while evaluation quality declined. The current arrival event is not enough to retain precision; a stronger arrival bonus worsened endpoint error, the smooth quality signal improved position while severely damaging heading/recovery/rocking, and the scale-20 potential signal suppressed arrival and recovery. Keep the selected actor-only transfer, hold stage 0, and promote no trained checkpoint.",
+  "curriculum": {
+    "status": "not_run_no_promotable_reward_checkpoint",
+    "selected_arm": null,
+    "start_checkpoint": null,
+    "fixed_goal_mix_stage_override": 0,
+    "reason": "Every treatment final checkpoint failed the existing hard gate. Continuing with increased target distances would start from an unvalidated policy and confound the reward diagnosis; keep the selected actor transfer as the current quality floor."
+  },
+  "launch_attempts": [
+    {
+      "run_id": "4991722f1b44",
+      "dashboard_id": "202c7a067610",
+      "result": "preflight_rejected",
+      "reason": "Bonus-8 reward contract did not match the shared weight-5 transfer; no trainer process started."
+    },
+    {
+      "run_id": "f77ff2626830",
+      "dashboard_id": "c728136120dc",
+      "result": "preflight_rejected",
+      "reason": "Transfer was nested under a noncanonical path; no trainer process started."
+    }
+  ],
+  "comparison_results": {
+    "paired_suite": "generalist_reward_alignment_v1",
+    "scenario_count": 320,
+    "transfer_vs_control": {
+      "final_target_error_iqm_delta_m": 0.13169713097813657,
+      "final_target_error_iqm_ci95_m": [
+        0.1186512752766248,
+        0.1439918238193786
+      ],
+      "heading_error_rms_iqm_delta_rad": 0.00886428402736783,
+      "heading_error_rms_iqm_ci95_rad": [
+        0.0053648466980666856,
+        0.012874714888457674
+      ],
+      "settled_stop_iqm_delta": -0.7
+    },
+    "transfer_vs_bonus_8": {
+      "final_target_error_iqm_delta_m": 0.18918275230171275,
+      "final_target_error_iqm_ci95_m": [
+        0.18852258085076756,
+        0.18971401406725819
+      ],
+      "heading_error_rms_iqm_delta_rad": 0.23802035383414477,
+      "heading_error_rms_iqm_ci95_rad": [
+        0.21924217486346606,
+        0.25518624329502926
+      ],
+      "settled_stop_iqm_delta": -0.7
+    },
+    "transfer_vs_settled_quality": {
+      "final_target_error_iqm_delta_m": -0.013083058479242026,
+      "final_target_error_iqm_ci95_m": [
+        -0.020920245942106702,
+        -0.007401334500682425
+      ],
+      "heading_error_rms_iqm_delta_rad": 1.7403414614498616,
+      "heading_error_rms_iqm_ci95_rad": [
+        1.735947593485471,
+        1.743908323335345
+      ],
+      "settled_stop_iqm_delta": -0.7
+    },
+    "transfer_vs_potential_progress": {
+      "final_target_error_iqm_delta_m": 0.05571868606602948,
+      "final_target_error_iqm_ci95_m": [
+        0.04547282245493079,
+        0.0660363602039706
+      ],
+      "heading_error_rms_iqm_delta_rad": 0.5024995747255161,
+      "heading_error_rms_iqm_ci95_rad": [
+        0.4699035285616992,
+        0.5322583186934935
+      ],
+      "settled_stop_iqm_delta": -0.7
+    }
+  },
+  "evaluation_adjustments": {
+    "settled_quality_checkpoint_schedule": "Default trainer cadence produced model_250 instead of planned model_100/model_200; final model_299 was still trained under matched settings. Paired comparisons and promotion decision use model_299."
+  },
+  "references": [
+    {
+      "title": "Policy Invariance Under Reward Transformations: Theory and Application to Reward Shaping",
+      "url": "https://ai.stanford.edu/~ang/papers/shaping-icml99.pdf"
+    },
+    {
+      "title": "Reverse Curriculum Generation for Reinforcement Learning",
+      "url": "https://proceedings.mlr.press/v80/florensa18a.html"
+    },
+    {
+      "title": "RobotKeyframing: Learning Locomotion with High-Level Objectives",
+      "url": "https://proceedings.mlr.press/v270/zargarbashi25a.html"
+    }
+  ]
 }
