@@ -82,9 +82,9 @@ def apply_training_device(arguments: list[str], device: str) -> list[str]:
     if device == "cpu":
         gpu_ids = "None"
     elif device == "cuda":
-        gpu_ids = "0"
+        gpu_ids = "[0]"
     elif device.startswith("cuda:") and device.removeprefix("cuda:").isdigit():
-        gpu_ids = device.removeprefix("cuda:")
+        gpu_ids = f"[{device.removeprefix('cuda:')}]"
     else:
         raise ValueError(f"unsupported mjlab training device: {device}")
     updated.extend(["--gpu-ids", gpu_ids])

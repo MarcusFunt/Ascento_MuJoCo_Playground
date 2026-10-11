@@ -168,7 +168,7 @@ def test_create_starts_detached_launcher_with_metadata_arguments(monkeypatch, tm
     assert trainer_args == [
         "--env.episode-length-s", "60.0",
         "--agent.max-iterations", "5000",
-        "--gpu-ids", "0",
+        "--gpu-ids", "[0]",
     ]
     separator = command.index("--")
     assert command.index("--env.episode-length-s") > separator

@@ -132,7 +132,7 @@ def test_apply_training_device_uses_mjlab_gpu_ids():
         "--agent.max-iterations",
         "10",
         "--gpu-ids",
-        "0",
+        "[0]",
     ]
     assert apply_training_device(["--device", "cpu"], "cpu") == ["--gpu-ids", "None"]
-    assert apply_training_device(["--gpu-ids", "1"], "cuda:1") == ["--gpu-ids", "1"]
+    assert apply_training_device(["--gpu-ids", "1"], "cuda:1") == ["--gpu-ids", "[1]"]
