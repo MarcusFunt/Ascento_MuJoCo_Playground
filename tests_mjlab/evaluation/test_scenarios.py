@@ -164,6 +164,39 @@ def test_guard_morphology_replay_smoke_suite_is_small_and_diagnostic():
     }
 
 
+def test_generalist_reward_alignment_suite_has_fixed_band_cohort_families():
+    suite = load_suite(Path("benchmarks/suites/generalist_reward_alignment_v1.toml"))
+    scenarios = materialize_suite(suite, step_dt=0.02)
+
+    expected_families = {
+        "precision_short",
+        "recovery_retarget_short",
+        "navigation_short",
+        "navigation_medium",
+        "navigation_long",
+    }
+    assert suite.task == "Ascento-Generalist-Locomotion-Flat"
+    assert suite.root_seed == 20261012
+    assert len(scenarios) == 320
+    assert {scenario.family for scenario in scenarios} == expected_families
+    assert {sum(scenario.family == family for scenario in scenarios) for family in expected_families} == {
+        64
+    }
+    assert suite.gates
+    assert all(not gate.hard for gate in suite.gates)
+    assert {
+        gate.metric for gate in suite.gates
+    } >= {
+        "waypoint_final_stopped",
+        "waypoint_final_error",
+        "waypoint_final_heading_error",
+        "waypoint_final_speed",
+        "target_arrival_time_s",
+        "success",
+    }
+    assert materialize_suite(suite, step_dt=0.02) == scenarios
+
+
 
 def test_waypoint_gate_suite_has_versioned_pose_routes_and_hard_stop_gates():
     from ascento_mjlab.evaluation.runner import task_capabilities

@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "experiment_id": "generalist_reward_alignment_v1",
+  "status": "protocol_ready",
+  "objective": "Compare single-feature reward changes from the same selected locomotion actor while fixing PPO initialization, mode bit, cohorts, goal stage, seed, environment count, and evaluation scenarios.",
+  "source_checkpoint": {
+    "run_id": "762230a3d4b4",
+    "selection_suite": "locomotion_sequence_gate_v1",
+    "path": "checkpoints/locomotion_best_gate_20260922/model_01000.pt",
+    "sha256": "cf68c19506dbf3065d026693e8acd75beebad8bf1e3fc81380d8bf1e3724d6eb"
+  },
+  "fresh_generalist_transfer": null,
+  "common_training": {
+    "task": "Ascento-Generalist-Locomotion-Flat",
+    "seed": 20261012,
+    "num_envs": 512,
+    "iterations": 300,
+    "save_interval": 100,
+    "obstacle_mode": 0,
+    "precision_anchor_fraction": 0.2,
+    "recovery_retarget_anchor_fraction": 0.2,
+    "navigation_goal_mix_stage": 0,
+    "critic_initialization": "fresh",
+    "optimizer_initialization": "fresh",
+    "safety_and_posture_rewards": "unchanged across all arms"
+  },
+  "active_run_to_preserve": {
+    "run_id": "0c8b7bbd79c0",
+    "nested_run_id": "bd2730714479",
+    "status_at_protocol_start": "running",
+    "source_commit": "5c5bb32e5cd7292e28ffa3036962361e26c74803",
+    "handling": "wait for natural completion before updating the canonical checkout or starting GPU experiments"
+  },
+  "arms": [
+    {
+      "arm_id": "control",
+      "environment": {
+        "ASCENTO_GENERALIST_OBSTACLE_MODE": "0",
+        "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE": "velocity",
+        "ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT": "5.0",
+        "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT": "0.0",
+        "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE": "0"
+      },
+      "run_id": null,
+      "checkpoints": {},
+      "evaluations": {}
+    },
+    {
+      "arm_id": "bonus_8",
+      "environment": {
+        "ASCENTO_GENERALIST_OBSTACLE_MODE": "0",
+        "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE": "velocity",
+        "ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT": "8.0",
+        "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT": "0.0",
+        "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE": "0"
+      },
+      "run_id": null,
+      "checkpoints": {},
+      "evaluations": {}
+    },
+    {
+      "arm_id": "settled_quality",
+      "environment": {
+        "ASCENTO_GENERALIST_OBSTACLE_MODE": "0",
+        "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE": "velocity",
+        "ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT": "5.0",
+        "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT": "8.0",
+        "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE": "0"
+      },
+      "run_id": null,
+      "checkpoints": {},
+      "evaluations": {}
+    },
+    {
+      "arm_id": "potential_progress",
+      "environment": {
+        "ASCENTO_GENERALIST_OBSTACLE_MODE": "0",
+        "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE": "potential",
+        "ASCENTO_GENERALIST_POTENTIAL_SCALE": "20.0",
+        "ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT": "5.0",
+        "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT": "0.0",
+        "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE": "0"
+      },
+      "run_id": null,
+      "checkpoints": {},
+      "evaluations": {}
+    }
+  ],
+  "evaluation": {
+    "diagnostic_suite": {
+      "id": "generalist_reward_alignment_v1",
+      "scenario_count": 320,
+      "root_seed": 20261012,
+      "families": {
+        "precision_short": 64,
+        "recovery_retarget_short": 64,
+        "navigation_short": 64,
+        "navigation_medium": 64,
+        "navigation_long": 64
+      },
+      "gates_are_hard": false
+    },
+    "existing_hard_gate": {
+      "id": "roadrunner_generalist_sequence_gate_v1",
+      "scenario_count": 256
+    },
+    "checkpoint_policy": {
+      "transfer": [
+        "diagnostic_suite",
+        "existing_hard_gate"
+      ],
+      "each_arm": {
+        "checkpoints_on_existing_hard_gate": [100, 200, 300],
+        "checkpoint_on_diagnostic_suite": 300
+      }
+    },
+    "reported_metrics_by_family": [
+      "waypoint_final_stopped.wilson_lower",
+      "waypoint_final_error.p95",
+      "waypoint_final_heading_error.p95",
+      "waypoint_final_speed.p95",
+      "target_arrival_time_s.p50",
+      "target_arrival_time_s.p95",
+      "success.wilson_lower",
+      "recovered.wilson_lower",
+      "episode_reward.mean"
+    ],
+    "comparison": "Use paired scenario results against the same transfer and across arms; promote no candidate unless it improves the target outcomes without losing the existing hard gate."
+  },
+  "scripted_reward_probe": {
+    "artifact": "scripts/reward_probe.py",
+    "interpretation": "scripted arithmetic only; not physics simulation or policy-quality evidence",
+    "reward_schema": "v6",
+    "settled_success_total_return": {
+      "control": 119.67791029458445,
+      "bonus_8": 122.67791029458445,
+      "settled_quality": 127.67791029458445
+    },
+    "negative_control_total_returns": {
+      "near_target_overshoot_10cm": {
+        "control": 110.1664003590362,
+        "bonus_8": 110.1664003590362,
+        "settled_quality": 110.1664003590362
+      },
+      "arrive_but_keep_moving": {
+        "control": 50.54288881882002,
+        "bonus_8": 50.54288881882002,
+        "settled_quality": 50.54288881882002
+      },
+      "arrive_but_wrong_heading": {
+        "control": 92.1222989346609,
+        "bonus_8": 92.1222989346609,
+        "settled_quality": 92.1222989346609
+      }
+    },
+    "ranking_assertions_passed": true
+  },
+  "results": null,
+  "conclusion": null
+}

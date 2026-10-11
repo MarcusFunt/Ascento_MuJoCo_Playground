@@ -471,3 +471,55 @@ overwriting prior evidence.
 ## Guard generalist experiment controls
 
 The roadmap keeps `roadrunner_generalist_sequence_gate_v1` as the 256-scenario development screen and freezes `roadrunner_generalist_sequence_promotion_v1` as a separately seeded final promotion suite. Screen intermediate checkpoints only on development suites. Record the exact code commit, task/action/plant contracts, checkpoint SHA-256, suite-definition hash, and resolved-scenario hash for every arm. The selected actor-only transfer and current-code baseline report are frozen in `docs/experiments/ascento_guard_generalist_locomotion_v3.json`; promotion-suite results are reserved for the final checkpoint decision.
+
+### Generalist locomotion reward-alignment ablation
+
+`docs/experiments/reward_alignment_v1.json` records a matched four-arm study for the selected locomotion actor. Each run uses a fresh actor-only Generalist transfer, so the critic, optimizer, iteration count, and environment state start fresh. The current control keeps the velocity progress reward and one-shot settled-arrival bonus at weight 5. Each treatment changes one feature:
+
+| Arm | Progress reward | Settled-arrival event | Smooth settled quality |
+| --- | --- | --- | --- |
+| `control` | velocity, weight 8 | weight 5 | off |
+| `bonus_8` | velocity, weight 8 | weight 8 | off |
+| `settled_quality` | velocity, weight 8 | weight 5 | weight 8 |
+| `potential_progress` | `gamma*Phi(next)-Phi(current)`, `Phi=-20*distance` | weight 5 | off |
+
+Potential progress reads gamma from the Generalist PPO configuration. It divides the per-transition value by `env.step_dt` to account for the reward manager’s timestep scaling, refreshes its cache after reset, and masks target reassignment. The default remains the existing velocity reward. The settled-quality term uses smooth scores inside the evaluator’s 0.10 m position, 0.20 rad heading, and 0.08 m/s speed envelope, also requiring the evaluator’s tilt, angular-rate, height, and two-wheel support checks. It is bounded to 0.35 seconds of credited dwell per target attempt. The existing one-shot event remains in place.
+
+All arms hold the Generalist curriculum at navigation stage 0 with `ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE=0`, preserve the 20% precision and 20% recovery/retarget cohorts, and set `ASCENTO_GENERALIST_OBSTACLE_MODE=0`. The fixed-seed 320-scenario diagnostic suite splits 64 scenarios each into `precision_short`, `recovery_retarget_short`, and short, medium, and long navigation. Its soft gates report settled-stop rate, final position/heading/speed, arrival time, survival, and recovery by family. The existing `roadrunner_generalist_sequence_gate_v1` remains the hard acceptance gate.
+
+Wait for the active training run to finish naturally before updating the canonical checkout or using the GPU. Create the same actor-only transfer once and evaluate it on both suites:
+
+```bash
+ascento tools initialize-transfer -- \
+  --source checkpoints/locomotion_best_gate_20260922/model_01000.pt \
+  --task Ascento-Generalist-Locomotion-Flat \
+  --output transfers/ascento_generalist_locomotion_flat/reward_alignment/model_000000.pt
+
+ascento evaluate run \
+  --checkpoint transfers/ascento_generalist_locomotion_flat/reward_alignment/model_000000.pt \
+  --suite roadrunner_generalist_sequence_gate_v1 --batch-size 256 --device cuda:0
+ascento evaluate run \
+  --checkpoint transfers/ascento_generalist_locomotion_flat/reward_alignment/model_000000.pt \
+  --suite generalist_reward_alignment_v1 --batch-size 256 --device cuda:0
+```
+
+Start arms sequentially with seed `20261012`, 512 environments, 300 updates, and saves every 100 updates. Use the arm overrides from the JSON record plus these common flags:
+
+```bash
+ASCENTO_GENERALIST_OBSTACLE_MODE=0 \
+ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE=0 \
+ASCENTO_GENERALIST_PROGRESS_REWARD_MODE=velocity \
+ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT=5.0 \
+ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT=0.0 \
+ascento run start --task Ascento-Generalist-Locomotion-Flat \
+  --display-name "reward alignment control" --purpose ablation \
+  --parent-run-id 762230a3d4b4 \
+  --parent-checkpoint transfers/ascento_generalist_locomotion_flat/reward_alignment/model_000000.pt \
+  --envs 512 --iterations 300 --seed 20261012 --foreground --interval 60 --json -- \
+  --agent.resume True --agent.load-run _resume_parent \
+  --agent.load-checkpoint model_000000.pt --agent.save-interval 100
+```
+
+For `bonus_8`, change only the achievement weight to `8.0`. For `settled_quality`, keep the achievement weight at `5.0` and change the quality weight to `8.0`. For `potential_progress`, keep both settle weights at their control values and set `ASCENTO_GENERALIST_PROGRESS_REWARD_MODE=potential`. Evaluate updates 100, 200, and 300 on the existing hard gate; evaluate the transfer and update 300 on the diagnostic suite. Compare per-family settled-arrival rate, final-error p95, heading error, arrival time, survival, and recovery. Record run IDs, checkpoint and suite hashes, returns, and paired deltas in `docs/experiments/reward_alignment_v1.json`.
+
+The deterministic `scripts/reward_probe.py` checks reward arithmetic for settled success, a 10 cm miss, a moving arrival, and a bad-heading arrival under the control, bonus-8, and quality-8 configurations. This probe catches arithmetic regressions; it does not establish what a learned policy will do. Potential-based shaping follows the policy-invariant form from [Ng, Harada, and Russell (1999)](https://ai.stanford.edu/~ang/papers/shaping-icml99.pdf). Progress target difficulty only after measured competence supports it; the stage-0 long-target results do not justify advancing the goal mix.

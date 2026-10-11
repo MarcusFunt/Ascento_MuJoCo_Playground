@@ -56,7 +56,7 @@ Expected: failures identify the missing potential reward/config or fixed-stage b
 Run: `env CUDA_VISIBLE_DEVICES= PYTHONPATH=src $HOME/.cache/ascento-mjlab/cu128/bin/python -m pytest -q tests_mjlab/test_reward_contract.py tests_mjlab/test_locomotion_curriculum.py -k 'potential_target_progress or fixed_goal_mix_stage'`
 
 Expected: all selected tests pass.
-- [ ] **Step 5: Commit** as `feat: add generalist potential progress ablation`.
+- [x] **Step 5: Commit** as `feat: add generalist potential progress ablation`.
 
 ### Task 2: Add bounded smooth settled-quality credit and bonus override
 
@@ -97,14 +97,14 @@ Expected: focused tests pass and the probe reports settled success as the top-ra
 - Consumes: the policy output of Task 1/2 and the evaluator's per-family target, heading, survival, recovery, and arrival-time metrics.
 - Produces: fixed families `precision_short`, `recovery_retarget_short`, `navigation_short`, `navigation_medium`, and `navigation_long`, each with 64 scenarios; experiment matrix arms `control`, `bonus_8`, `settled_quality`, and `potential_progress`.
 
-- [ ] **Step 1: Write failing suite/config test** `test_generalist_reward_alignment_suite_has_fixed_band_cohort_families` for five family labels, 320 total scenarios, fixed root seed, and diagnostic-only gates.
-- [ ] **Step 2: Run the tests and observe the expected failure.**
+- [x] **Step 1: Write failing suite/config test** `test_generalist_reward_alignment_suite_has_fixed_band_cohort_families` for five family labels, 320 total scenarios, fixed root seed, and diagnostic-only gates.
+- [x] **Step 2: Run the tests and observe the expected failure.**
 
 Run: `env CUDA_VISIBLE_DEVICES= PYTHONPATH=src $HOME/.cache/ascento-mjlab/cu128/bin/python -m pytest -q tests_mjlab/evaluation/test_scenarios.py -k generalist_reward_alignment_suite`
 
 Expected: the test cannot find/materialize the new suite; no unrelated test failure.
-- [ ] **Step 3: Add the suite, experiment protocol, arm environment overrides, and reproducible CLI instructions.** Use the existing `roadrunner_generalist_sequence_gate_v1` as the strict gate alongside the new family-sliced diagnostic suite.
-- [ ] **Step 4: Run suite parsing/materialization tests and update docs; commit** as `docs: add reward alignment ablation protocol`.
+- [x] **Step 3: Add the suite, experiment protocol, arm environment overrides, and reproducible CLI instructions.** Use the existing `roadrunner_generalist_sequence_gate_v1` as the strict gate alongside the new family-sliced diagnostic suite.
+- [x] **Step 4: Run suite parsing/materialization tests and update docs; commit** as `docs: add reward alignment ablation protocol`.
 
 Run: `env CUDA_VISIBLE_DEVICES= PYTHONPATH=src $HOME/.cache/ascento-mjlab/cu128/bin/python -m pytest -q tests_mjlab/evaluation/test_scenarios.py -k generalist_reward_alignment_suite`
 
