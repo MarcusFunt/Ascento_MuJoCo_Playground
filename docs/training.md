@@ -497,10 +497,10 @@ ascento tools initialize-transfer -- \
 
 ascento evaluate run \
   --checkpoint transfers/ascento_generalist_locomotion_flat/reward_alignment/model_000000.pt \
-  --suite roadrunner_generalist_sequence_gate_v1 --batch-size 256 --device cuda:0
+  --suite roadrunner_generalist_sequence_gate_v1 --batch-size 256 --device cuda:0 --obstacle-mode 0
 ascento evaluate run \
   --checkpoint transfers/ascento_generalist_locomotion_flat/reward_alignment/model_000000.pt \
-  --suite generalist_reward_alignment_v1 --batch-size 256 --device cuda:0
+  --suite generalist_reward_alignment_v1 --batch-size 256 --device cuda:0 --obstacle-mode 0
 ```
 
 Start arms sequentially with seed `20261012`, 512 environments, 300 updates, and saves every 100 updates. Use the arm overrides from the JSON record plus these common flags:
@@ -520,7 +520,7 @@ ascento run start --task Ascento-Generalist-Locomotion-Flat \
   --agent.load-checkpoint model_000000.pt --agent.save-interval 100
 ```
 
-For `bonus_8`, change only the achievement weight to `8.0`. For `settled_quality`, keep the achievement weight at `5.0` and change the quality weight to `8.0`. For `potential_progress`, keep both settle weights at their control values and set `ASCENTO_GENERALIST_PROGRESS_REWARD_MODE=potential`. Evaluate updates 100, 200, and 300 on the existing hard gate; evaluate the transfer and update 300 on the diagnostic suite. Compare per-family settled-arrival rate, final-error p95, heading error, arrival time, survival, and recovery. Record run IDs, checkpoint and suite hashes, returns, and paired deltas in `docs/experiments/reward_alignment_v1.json`.
+For `bonus_8`, change only the achievement weight to `8.0`. For `settled_quality`, keep the achievement weight at `5.0` and change the quality weight to `8.0`. For `potential_progress`, keep both settle weights at their control values and set `ASCENTO_GENERALIST_PROGRESS_REWARD_MODE=potential`. Evaluate updates 100, 200, and 300 on the existing hard gate; evaluate the transfer and update 300 on the diagnostic suite, always passing `--obstacle-mode 0`. Compare per-family target-arrival and settled-stop rates, final-error p95, heading error, arrival time, survival, and recovery. Record run IDs, checkpoint and suite hashes, returns, and paired deltas in `docs/experiments/reward_alignment_v1.json`.
 
 After that comparison selects a reward configuration, continue its update-300 checkpoint with `ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE` unset. The existing scheduler can then increase target distance only after its measured recovery lower bound reaches 0.85 and its short-arrival lower bound reaches 0.50. If those thresholds are not met, keep stage 0 and report the observed evidence before changing target difficulty.
 
