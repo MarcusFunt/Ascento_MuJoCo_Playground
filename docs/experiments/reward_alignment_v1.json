@@ -9,6 +9,13 @@
     "path": "checkpoints/locomotion_best_gate_20260922/model_01000.pt",
     "sha256": "cf68c19506dbf3065d026693e8acd75beebad8bf1e3fc81380d8bf1e3724d6eb"
   },
+  "actor_transfer": {
+    "source_actor_observation_dim": 41,
+    "target_actor_observation_dim": 42,
+    "extension": "append one zero-weight obstacle_mode input and neutral normalizer slot",
+    "policy_preserved_when_obstacle_mode": 0,
+    "other_actor_abi_mismatches": "rejected"
+  },
   "fresh_generalist_transfer": null,
   "common_training": {
     "task": "Ascento-Generalist-Locomotion-Flat",

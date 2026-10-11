@@ -112,6 +112,54 @@ def test_actor_transfer_allows_new_reward_and_event_contracts_but_not_actor_abi_
     assert "actor observations" in compatibility.reason
 
 
+def test_locomotion_actor_transfer_allows_only_a_zero_mode_channel_appended_last():
+    from mjlab.tasks.registry import load_env_cfg
+
+    import ascento_mjlab.task_contract as task_contract
+
+    classify_extension = getattr(task_contract, "classify_zero_obstacle_mode_actor_extension", None)
+    assert callable(classify_extension)
+
+    source_reference = current_task_contract_for_task("Ascento-Locomotion-Flat")
+    source = _legacy_null_task_id(source_reference)
+    target = current_task_contract_for_task("Ascento-Generalist-Locomotion-Flat")
+    source_order = tuple(
+        load_env_cfg("Ascento-Locomotion-Flat", play=False).observations["actor"].terms
+    )
+    target_order = tuple(
+        load_env_cfg("Ascento-Generalist-Locomotion-Flat", play=False).observations["actor"].terms
+    )
+
+    assert not classify_actor_transfer_compatibility(source, target).compatible
+    compatible = classify_extension(
+        source,
+        target,
+        source_reference_contract=source_reference,
+        source_actor_term_order=source_order,
+        target_actor_term_order=target_order,
+        obstacle_mode=0,
+    )
+    assert compatible.compatible is True
+    assert "mode 0" in compatible.reason
+
+    assert not classify_extension(
+        source,
+        target,
+        source_reference_contract=source_reference,
+        source_actor_term_order=source_order,
+        target_actor_term_order=target_order,
+        obstacle_mode=1,
+    ).compatible
+    assert not classify_extension(
+        source,
+        target,
+        source_reference_contract=source_reference,
+        source_actor_term_order=source_order,
+        target_actor_term_order=target_order[:-1],
+        obstacle_mode=0,
+    ).compatible
+
+
 def test_runtime_contract_recovery_requires_one_exact_registered_topology():
     from mjlab.tasks.registry import load_env_cfg
 

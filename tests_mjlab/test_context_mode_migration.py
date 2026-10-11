@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from rsl_rl.models.mlp_model import MLPModel
 from tensordict import TensorDict
 
 import ascento_mjlab.semantic_normalization as normalization
@@ -132,6 +133,26 @@ def test_context_mode_checkpoint_migration_preserves_mode_zero_model_outputs(
     )
     assert migrated["infos"]["task_contract"] == target_contract
     assert migrated["optimizer_state_dict"] == payload["optimizer_state_dict"]
+
+
+def test_actor_only_zero_mode_lift_preserves_empirical_policy_outputs():
+    extend_actor = getattr(normalization, "extend_actor_state_dict_with_zero_obstacle_mode", None)
+    assert callable(extend_actor)
+
+    torch.manual_seed(3817)
+    source = _model(MLPModel, obs_set="actor", obs_dim=41)
+    target = _model(MLPModel, obs_set="actor", obs_dim=42)
+    source_state = source.state_dict()
+    lifted_state = extend_actor(source_state)
+    target.load_state_dict(lifted_state, strict=True)
+
+    raw_old = torch.randn((193, 41)) * 1.7
+    raw_new = torch.cat((raw_old, torch.zeros((193, 1))), dim=1)
+    source_output = source(TensorDict({"actor": raw_old}, batch_size=[193]))
+    target_output = target(TensorDict({"actor": raw_new}, batch_size=[193]))
+
+    torch.testing.assert_close(target_output, source_output, rtol=1e-6, atol=1e-6)
+    assert source_state["mlp.0.weight"].shape == (16, 41)
 
 
 def test_context_mode_migration_rejects_nonzero_iteration_and_wrong_contract():

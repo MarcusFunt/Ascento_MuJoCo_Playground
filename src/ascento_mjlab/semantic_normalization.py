@@ -357,6 +357,16 @@ def _insert_mode_channel(
     return result
 
 
+def extend_actor_state_dict_with_zero_obstacle_mode(
+    state_dict: Mapping[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    """Lift a 41D locomotion actor without changing its mode-zero policy."""
+    weight = state_dict.get("mlp.0.weight")
+    if not isinstance(weight, torch.Tensor) or weight.ndim != 2 or weight.shape[1] != _MODE_INDEX:
+        raise ValueError("zero obstacle-mode actor lift requires a 41D first-layer input")
+    return _insert_mode_channel(state_dict, index=_MODE_INDEX)
+
+
 def migrate_context_mode_checkpoint_payload(
     payload: Mapping[str, Any], *, target_task_contract: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -423,6 +433,7 @@ __all__ = [
     "configure_rl_cfg_for_normalizer_contract",
     "configure_model_normalizer_for_contract",
     "context_mode_normalizer_contract",
+    "extend_actor_state_dict_with_zero_obstacle_mode",
     "migrate_checkpoint_payload",
     "migrate_context_mode_checkpoint_payload",
     "migrate_semantic_state_dict",

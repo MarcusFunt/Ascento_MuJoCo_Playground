@@ -18,10 +18,15 @@ from .retention_replay import (
     load_anchor_replay,
     validate_anchor_replay_contract,
 )
-from .semantic_normalization import model_normalizer_contract, require_model_normalizer_contract
+from .semantic_normalization import (
+    extend_actor_state_dict_with_zero_obstacle_mode,
+    model_normalizer_contract,
+    require_model_normalizer_contract,
+)
 from .task_contract import (
     canonical_task_cfg_for_runtime_cfg,
     classify_actor_transfer_compatibility,
+    classify_zero_obstacle_mode_actor_extension,
     current_task_contract,
 )
 
@@ -177,10 +182,10 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
     def initialize_from_compatible_actor(self, source_checkpoint: str | Path) -> dict[str, Any]:
         """Initialize only actor weights/normalization for a new signed task.
 
-        This does not weaken normal checkpoint loading. Plant and structured
-        action contracts must still match, then a separate actor-ABI comparison
-        proves that the actor observation topology, action topology, control
-        timestep, and reward-dt convention are identical. Critic, optimizer,
+        Plant and structured action contracts must still match. Exact actor
+        ABI matches transfer directly; the sole supported extension appends a
+        zero-valued Generalist obstacle-mode input to the selected locomotion
+        actor without changing its mode-zero function. Critic, optimizer,
         iteration, and environment state remain the fresh target-task values.
         """
         source = Path(source_checkpoint).expanduser().resolve()
@@ -195,16 +200,53 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
         require_current_plant_contract(infos.get("plant_contract"))
         require_current_action_contract(infos.get("action_contract"))
         require_model_normalizer_contract(infos, self.alg.actor)
-        compatibility = classify_actor_transfer_compatibility(
-            infos.get("task_contract"), current_task_contract(self.env.unwrapped.cfg)
-        )
+        source_contract = infos.get("task_contract")
+        target_cfg = canonical_task_cfg_for_runtime_cfg(self.env.unwrapped.cfg)
+        target_contract = current_task_contract(target_cfg)
+        compatibility = classify_actor_transfer_compatibility(source_contract, target_contract)
+        transfer_payload = payload
+        mode_extension = False
         if not compatibility.compatible:
-            raise ValueError(f"actor transfer rejected: {compatibility.reason}")
-        if "actor_state_dict" not in payload:
+            from mjlab.tasks.registry import load_env_cfg
+
+            from .mdp.observations import obstacle_mode
+
+            source_reference_cfg = load_env_cfg("Ascento-Locomotion-Flat", play=False)
+            source_reference_contract = current_task_contract(source_reference_cfg)
+            mode_values = obstacle_mode(self.env.unwrapped)
+            if not torch.all(mode_values == 0):
+                raise ValueError(
+                    "actor transfer rejected: zero-mode actor extension requires obstacle mode 0"
+                )
+            compatibility = classify_zero_obstacle_mode_actor_extension(
+                source_contract,
+                target_contract,
+                source_reference_contract=source_reference_contract,
+                source_actor_term_order=tuple(source_reference_cfg.observations["actor"].terms),
+                target_actor_term_order=tuple(target_cfg.observations["actor"].terms),
+                obstacle_mode=0,
+            )
+            if not compatibility.compatible:
+                raise ValueError(f"actor transfer rejected: {compatibility.reason}")
+            actor_state = payload.get("actor_state_dict")
+            if not isinstance(actor_state, dict):
+                raise ValueError("source checkpoint lacks actor weights")
+            lifted_actor_state = extend_actor_state_dict_with_zero_obstacle_mode(actor_state)
+            target_actor_state = self.alg.actor.state_dict()
+            if set(lifted_actor_state) != set(target_actor_state) or any(
+                lifted_actor_state[name].shape != target_actor_state[name].shape
+                for name in target_actor_state
+            ):
+                raise ValueError(
+                    "actor transfer rejected: zero-mode lift does not match the target actor state"
+                )
+            transfer_payload = {**payload, "actor_state_dict": lifted_actor_state}
+            mode_extension = True
+        if "actor_state_dict" not in transfer_payload:
             raise ValueError("source checkpoint lacks actor weights")
 
         self.alg.load(
-            payload,
+            transfer_payload,
             load_cfg={
                 "actor": True,
                 "critic": False,
@@ -218,12 +260,20 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
         self.env.unwrapped.common_step_counter = 0
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
         return {
-            "kind": "compatible_actor_transfer",
+            "kind": (
+                "zero_mode_extended_actor_transfer"
+                if mode_extension
+                else "compatible_actor_transfer"
+            ),
             "source_checkpoint": str(source),
             "source_checkpoint_sha256": digest,
             "source_task_contract": infos["task_contract"],
-            "target_task_contract": current_task_contract(self.env.unwrapped.cfg),
+            "target_task_contract": target_contract,
             "actor_compatibility": compatibility.to_dict(),
-            "copied": ["actor_weights", "actor_observation_normalization"],
+            "copied": [
+                "actor_weights",
+                "actor_observation_normalization",
+                *(["zero_obstacle_mode_input"] if mode_extension else []),
+            ],
             "fresh": ["critic", "optimizer", "iteration", "environment_state"],
         }

@@ -476,6 +476,8 @@ The roadmap keeps `roadrunner_generalist_sequence_gate_v1` as the 256-scenario d
 
 `docs/experiments/reward_alignment_v1.json` records a matched four-arm study for the selected locomotion actor. Each run uses a fresh actor-only Generalist transfer, so the critic, optimizer, iteration count, and environment state start fresh. The current control keeps the velocity progress reward and one-shot settled-arrival bonus at weight 5. Each treatment changes one feature:
 
+The selected locomotion actor has a 41D observation input. Generalist appends one fixed `obstacle_mode` scalar, so the actor-transfer initializer adds a zero first-layer weight and a neutral normalizer slot for that appended channel. It accepts this lift only when the source exactly matches the registered flat-locomotion actor ABI, the Generalist mode channel is last, and its value is 0. The mode-zero policy therefore starts with the same outputs; all other actor ABI mismatches remain rejected.
+
 | Arm | Progress reward | Settled-arrival event | Smooth settled quality |
 | --- | --- | --- | --- |
 | `control` | velocity, weight 8 | weight 5 | off |

@@ -16,7 +16,7 @@ import math
 from dataclasses import dataclass, fields, is_dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .physics import REWARD_SCHEMA_VERSION
 
@@ -83,6 +83,7 @@ class ActorTransferCompatibility:
             "target_actor_abi_sha256": self.target_actor_abi_sha256,
         }
 
+
 def _callable_name(value: Any) -> str:
     module = getattr(value, "__module__", value.__class__.__module__)
     qualname = getattr(value, "__qualname__", value.__class__.__qualname__)
@@ -104,12 +105,12 @@ def _canonical(value: Any) -> Any:
     if callable(value):
         return {"callable": _callable_name(value)}
     if is_dataclass(value) and not isinstance(value, type):
-        return {
-            field.name: _canonical(getattr(value, field.name))
-            for field in fields(value)
-        }
+        return {field.name: _canonical(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
-        return {str(key): _canonical(item) for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))}
+        return {
+            str(key): _canonical(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
     if isinstance(value, (tuple, list)):
         return [_canonical(item) for item in value]
     if isinstance(value, set):
@@ -128,10 +129,7 @@ def task_topology(cfg: Any) -> dict[str, Any]:
         "task_id": getattr(cfg, "task_id", None),
         "decimation": int(cfg.decimation),
         "scale_rewards_by_dt": bool(getattr(cfg, "scale_rewards_by_dt", False)),
-        "observations": {
-            str(name): _canonical(group)
-            for name, group in observations.items()
-        },
+        "observations": {str(name): _canonical(group) for name, group in observations.items()},
         "actions": _terms(getattr(cfg, "actions", None)),
         "commands": _terms(getattr(cfg, "commands", None)),
         "rewards": _terms(getattr(cfg, "rewards", None)),
@@ -275,6 +273,127 @@ def classify_actor_transfer_compatibility(
         "actor observations, actions, and control timestep exactly match",
         source_sha,
         target_sha,
+    )
+
+
+def classify_zero_obstacle_mode_actor_extension(
+    source_contract: Mapping[str, Any] | None,
+    target_contract: Mapping[str, Any] | None,
+    *,
+    source_reference_contract: Mapping[str, Any] | None,
+    source_actor_term_order: Sequence[str],
+    target_actor_term_order: Sequence[str],
+    obstacle_mode: int,
+) -> ActorTransferCompatibility:
+    """Allow a policy-preserving locomotion-to-Generalist mode-zero lift.
+
+    The source must match the registered flat-locomotion actor ABI. The
+    Generalist actor may append exactly its fixed ``obstacle_mode`` scalar,
+    with that scalar configured to zero. Callers must then append a zero
+    first-layer weight and a neutral normalizer channel before loading.
+    """
+    exact = classify_actor_transfer_compatibility(source_contract, target_contract)
+
+    def reject(reason: str) -> ActorTransferCompatibility:
+        return ActorTransferCompatibility(
+            False,
+            reason,
+            exact.source_actor_abi_sha256,
+            exact.target_actor_abi_sha256,
+        )
+
+    if obstacle_mode != 0:
+        return reject("zero-mode actor extension requires obstacle mode 0")
+    if not isinstance(source_contract, Mapping) or not isinstance(target_contract, Mapping):
+        return reject("source and target actor task contracts are required")
+    if not isinstance(source_reference_contract, Mapping):
+        return reject("registered locomotion actor contract is required")
+
+    source_reference_topology = source_reference_contract.get("topology")
+    target_task_topology = target_contract.get("topology")
+    if not isinstance(source_reference_topology, Mapping) or not isinstance(
+        target_task_topology, Mapping
+    ):
+        return reject("source and target task contracts must contain signed topologies")
+    source_reference_task = source_reference_topology.get("task_id")
+    target_task = target_task_topology.get("task_id")
+    if source_reference_task != "Ascento-Locomotion-Flat":
+        return reject("zero-mode extension is limited to the registered flat-locomotion actor")
+    if target_task != "Ascento-Generalist-Locomotion-Flat":
+        return reject("zero-mode extension is limited to Generalist flat locomotion")
+
+    source_matches_reference = classify_actor_transfer_compatibility(
+        source_contract, source_reference_contract
+    )
+    if not source_matches_reference.compatible:
+        return reject("source actor does not exactly match the registered locomotion ABI")
+
+    target_topology = target_contract.get("topology")
+    if not isinstance(target_topology, Mapping):
+        return reject("target task contract lacks a signed topology")
+    observations = target_topology.get("observations")
+    target_actor_group = observations.get("actor") if isinstance(observations, Mapping) else None
+    target_terms = (
+        target_actor_group.get("terms") if isinstance(target_actor_group, Mapping) else None
+    )
+    if not isinstance(target_terms, Mapping) or "obstacle_mode" not in target_terms:
+        return reject("target actor contract lacks the obstacle_mode observation")
+
+    expected_mode_term = {
+        "func": {"callable": "ascento_mjlab.mdp.observations.obstacle_mode"},
+        "params": {},
+        "noise": None,
+        "clip": None,
+        "scale": None,
+        "delay_min_lag": 0,
+        "delay_max_lag": 0,
+        "delay_per_env": True,
+        "delay_hold_prob": 0.0,
+        "delay_update_period": 0,
+        "delay_per_env_phase": True,
+        "history_length": 0,
+        "flatten_history_dim": True,
+    }
+    if target_terms["obstacle_mode"] != expected_mode_term:
+        return reject("target obstacle_mode observation differs from the fixed scalar contract")
+
+    source_order = tuple(source_actor_term_order)
+    target_order = tuple(target_actor_term_order)
+    source_actor = _actor_transfer_topology(source_contract)
+    target_actor_abi = _actor_transfer_topology(target_contract)
+    if source_actor is None or target_actor_abi is None:
+        return reject("source or target task lacks a signed actor ABI")
+    source_terms = source_actor["actor_observations"].get("terms", {})
+    target_actor_terms = target_actor_abi["actor_observations"].get("terms", {})
+    if set(source_order) != set(source_terms) or len(source_order) != len(source_terms):
+        return reject("registered locomotion observation order does not match the source contract")
+    if set(target_order) != set(target_actor_terms) or len(target_order) != len(target_actor_terms):
+        return reject("Generalist observation order does not match the target contract")
+    if target_order != (*source_order, "obstacle_mode"):
+        return reject("Generalist must append obstacle_mode after the locomotion observations")
+
+    stripped_topology = {
+        **dict(target_topology),
+        "observations": {
+            **dict(observations),
+            "actor": {
+                **dict(target_actor_group),
+                "terms": {
+                    name: term for name, term in target_terms.items() if name != "obstacle_mode"
+                },
+            },
+        },
+    }
+    stripped_contract = {**dict(target_contract), "topology": stripped_topology}
+    stripped_match = classify_actor_transfer_compatibility(source_contract, stripped_contract)
+    if not stripped_match.compatible:
+        return reject("removing only obstacle_mode does not restore the source actor ABI")
+
+    return ActorTransferCompatibility(
+        True,
+        "locomotion actor ABI preserved with an appended zero obstacle_mode input (mode 0)",
+        exact.source_actor_abi_sha256,
+        exact.target_actor_abi_sha256,
     )
 
 
