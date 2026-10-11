@@ -53,18 +53,41 @@ def training_device(arguments: list[str]) -> str:
 
 
 def apply_training_device(arguments: list[str], device: str) -> list[str]:
-    """Return trainer arguments with one explicit resolved device option."""
-    updated = list(arguments)
-    names = ("--device", "--env.device", "--agent.device")
-    for index, argument in enumerate(updated):
-        if argument in names and index + 1 < len(updated):
-            updated[index + 1] = device
-            return updated
-        for name in names:
-            if argument.startswith(name + "="):
-                updated[index] = f"{name}={device}"
-                return updated
-    updated.extend(["--device", device])
+    """Map the dashboard's device selection to mjlab's supported GPU option.
+
+    Current mjlab selects hardware with ``--gpu-ids`` and rejects a standalone
+    ``--device`` flag. The trainer maps the selected physical GPU to its local
+    ``cuda:0`` before constructing the environment.
+    """
+    updated: list[str] = []
+    index = 0
+    device_flags = ("--device", "--env.device", "--agent.device")
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument in device_flags:
+            index += 2
+            continue
+        if any(argument.startswith(f"{flag}=") for flag in device_flags):
+            index += 1
+            continue
+        if argument == "--gpu-ids":
+            index += 2
+            continue
+        if argument.startswith("--gpu-ids="):
+            index += 1
+            continue
+        updated.append(argument)
+        index += 1
+
+    if device == "cpu":
+        gpu_ids = "None"
+    elif device == "cuda":
+        gpu_ids = "0"
+    elif device.startswith("cuda:") and device.removeprefix("cuda:").isdigit():
+        gpu_ids = device.removeprefix("cuda:")
+    else:
+        raise ValueError(f"unsupported mjlab training device: {device}")
+    updated.extend(["--gpu-ids", gpu_ids])
     return updated
 
 
