@@ -15,12 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from dashboard.config import REPO_ROOT
-from dashboard.health import (
-    discover_dashboard_runs,
-    run_status_path,
-    summarize_dashboard_progress,
-    summarize_dashboard_run,
-)
+from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
 from dashboard.monitor import invalidate_discovery_cache
 from dashboard.provenance import working_tree_state
 from dashboard.runtime_policy import apply_training_device, runtime_identity, training_device
@@ -103,7 +98,6 @@ class RunService:
                 metadata.get("tags") if isinstance(metadata.get("tags"), list) else []
             ),
             "purpose": metadata.get("purpose") or "",
-            "experiment_id": metadata.get("experiment_id"),
             "parent_run_id": metadata.get("parent_run_id"),
             "parent_checkpoint": metadata.get("parent_checkpoint"),
             "max_speed_mps": metadata.get("max_speed_mps"),
@@ -187,10 +181,13 @@ class RunService:
     def progress_index(self, run_id: str) -> dict[str, Any]:
         """Return a cheap live snapshot without full compatibility contracts."""
         ref = self.resolve(run_id)
-        summary = summarize_dashboard_progress(
+        summary = summarize_dashboard_run(
             ref.path,
             self.artifact_root,
             stale_after_seconds=self.stale_after_seconds,
+            detailed=False,
+            include_errors=False,
+            include_artifacts=False,
         )
         return self.annotate_index(summary, ref.path)
 
@@ -305,7 +302,6 @@ class RunService:
                     "notes": str(request.get("notes") or "").strip(),
                     "tags": _clean_tags(request.get("tags")),
                     "purpose": str(request.get("purpose") or "").strip(),
-                    "experiment_id": str(request.get("experiment_id") or "").strip() or None,
                     "parent_run_id": str(parent_run_id) if parent_run_id else None,
                     "parent_checkpoint": str(request.get("parent_checkpoint") or "").strip(),
                     "max_speed_mps": max_speed_mps,

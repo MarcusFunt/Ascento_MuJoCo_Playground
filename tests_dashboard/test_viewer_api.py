@@ -12,28 +12,9 @@ def _load_app(monkeypatch, artifact_root):
     return importlib.reload(dashboard_app)
 
 
-def _request(module, *, control: bool) -> Request:
-    headers = [(b"host", b"testserver"), (b"origin", b"http://testserver")]
-    if not control:
-        headers.append((b"x-ascento-control", b"1"))
-    cookies = {}
-    if control:
-        token = module.configured_token()
-        cookies[module.CONTROL_COOKIE_NAME] = module.issue_session(token)
-        headers.append((b"cookie", f"{module.CONTROL_COOKIE_NAME}={cookies[module.CONTROL_COOKIE_NAME]}".encode()))
-    return Request({
-        "type": "http",
-        "http_version": "1.1",
-        "method": "POST",
-        "scheme": "http",
-        "path": "/api/test",
-        "raw_path": b"/api/test",
-        "query_string": b"",
-        "root_path": "",
-        "server": ("testserver", 80),
-        "client": ("testclient", 50000),
-        "headers": headers,
-    })
+def _request(*, control: bool) -> Request:
+    headers = [(b"x-ascento-control", b"1")] if control else []
+    return Request({"type": "http", "headers": headers})
 
 
 def test_viewer_routes_are_registered(monkeypatch, tmp_path):
@@ -65,28 +46,28 @@ def test_viewer_routes_are_registered(monkeypatch, tmp_path):
     assert ("/api/viewers/{viewer_id}/introspection/stream", "GET") in methods
 
 
-def test_viewer_start_requires_authenticated_control_session(monkeypatch, tmp_path):
+def test_viewer_start_requires_control_header(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
 
     with pytest.raises(HTTPException) as exc:
         module.start_viewer(
             module.ViewerCreateRequest(run_id="run"),
-            _request(module, control=False),
+            _request(control=False),
         )
 
     assert exc.value.status_code == 403
 
 
-def test_manual_capture_route_requires_authenticated_control_session(monkeypatch, tmp_path):
+def test_manual_capture_route_requires_control_header(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        module.request_viewer_introspection_capture("viewer", _request(module, control=False))
+        module.request_viewer_introspection_capture("viewer", _request(control=False))
 
     assert exc.value.status_code == 403
 
 
-def test_policy_explanation_route_requires_authenticated_control_session(monkeypatch, tmp_path):
+def test_policy_explanation_route_requires_control_header(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
     payload = module.ViewerExplanationRequest(
         checkpoint="model_100.pt",
@@ -97,14 +78,13 @@ def test_policy_explanation_route_requires_authenticated_control_session(monkeyp
     )
 
     with pytest.raises(HTTPException) as exc:
-        module.request_viewer_introspection_explanation("viewer", payload, _request(module, control=False))
+        module.request_viewer_introspection_explanation("viewer", payload, _request(control=False))
 
     assert exc.value.status_code == 403
 
 
 def test_viewer_start_preserves_checkpoint_follow_and_device(monkeypatch, tmp_path):
     module = _load_app(monkeypatch, tmp_path)
-    monkeypatch.setenv("ASCENTO_CONTROL_TOKEN", "viewer-api-control-token-that-is-32chars")
     captured = {}
     monkeypatch.setattr(
         module.VIEWER_SERVICE,
@@ -119,7 +99,7 @@ def test_viewer_start_preserves_checkpoint_follow_and_device(monkeypatch, tmp_pa
             follow=True,
             device="cuda:0",
         ),
-        _request(module, control=True),
+        _request(control=True),
     )
 
     assert result["id"] == "viewer"

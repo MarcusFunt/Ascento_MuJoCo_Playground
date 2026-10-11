@@ -57,7 +57,7 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
   }, [viewer?.port, viewer?.state])
 
   return (
-    <section className="rounded-xl border border-border bg-panel p-6">
+    <section className="rounded-xl border border-border bg-panel p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.1em] text-muted"><Box size={14} /> Policy viewer</div>
@@ -149,7 +149,7 @@ export function ViewerCard({ runId, checkpointPath }: { runId: string; checkpoin
           </div>
           <div className="mt-4 flex flex-wrap gap-3">
             {viewerUrl ? (
-              <a href={viewerUrl} target="_blank" rel="noreferrer" className="control-focus inline-flex h-10 items-center gap-2 rounded-lg border border-foreground bg-foreground px-4 text-sm font-semibold text-background hover:bg-[#dfe2e5]">
+              <a href={viewerUrl} target="_blank" rel="noreferrer" className="control-focus inline-flex h-11 items-center gap-2 rounded-lg border border-foreground bg-foreground px-4 text-sm font-semibold text-background hover:bg-[#dfe2e5]">
                 Open 3D viewer <ExternalLink size={15} />
               </a>
             ) : <Button variant="secondary" disabled>Viewer starting…</Button>}

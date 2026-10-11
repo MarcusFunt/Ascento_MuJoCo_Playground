@@ -31,10 +31,11 @@ export function CommandPalette() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="control-focus flex h-10 items-center gap-2 rounded-lg border border-border bg-raised px-3 text-sm text-secondary hover:bg-hover hover:text-foreground"
+        aria-label="Search dashboard"
+        className="control-focus flex h-11 w-11 items-center justify-center gap-2 rounded-lg border border-border bg-raised px-0 text-sm text-secondary hover:bg-hover hover:text-foreground sm:w-auto sm:px-3"
       >
         <Search size={16} />
-        <span className="hidden sm:inline">Search</span>
+        <span className="sr-only sm:not-sr-only">Search</span>
         <kbd className="ml-2 hidden rounded border border-border-strong bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted md:inline">Ctrl K</kbd>
       </button>
 

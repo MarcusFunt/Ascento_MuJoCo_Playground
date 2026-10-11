@@ -47,8 +47,8 @@ export function RunsPage() {
       />
 
       <section className="overflow-hidden rounded-xl border border-border bg-panel">
-        <div className="flex flex-wrap items-end gap-4 border-b border-border p-5">
-          <label className="min-w-[260px] flex-1">
+        <div className="flex flex-wrap items-end gap-3 border-b border-border p-4 sm:gap-4 sm:p-5">
+          <label className="w-full min-w-0 flex-1 sm:min-w-[260px]">
             <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.06em] text-muted">Find a run</span>
             <div className="relative">
               <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -68,10 +68,10 @@ export function RunsPage() {
         {runs.error ? <div className="m-5 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{runs.error.message}</div> : null}
         <RunTable runs={visible} compareIds={compareIds} onToggleCompare={toggleCompare} />
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-border p-4">
+        <div className="flex flex-wrap items-center gap-2 border-t border-border p-3 sm:gap-3 sm:p-4">
           <span className="mr-auto text-sm text-muted">{compareIds.length} selected for comparison</span>
-          {compareIds.length ? <Button size="sm" variant="ghost" onClick={() => { setCompareIds([]); compare.reset() }}>Clear</Button> : null}
-          <Button size="sm" disabled={compareIds.length < 2 || compare.isPending} onClick={() => compare.mutate()}>
+          {compareIds.length ? <Button size="sm" className="min-h-11" variant="ghost" onClick={() => { setCompareIds([]); compare.reset() }}>Clear</Button> : null}
+          <Button size="sm" className="min-h-11" disabled={compareIds.length < 2 || compare.isPending} onClick={() => compare.mutate()}>
             <GitCompareArrows size={15} /> Compare selected
           </Button>
         </div>
@@ -80,10 +80,35 @@ export function RunsPage() {
       {compare.error ? <div className="mt-6 rounded-xl border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{compare.error.message}</div> : null}
 
       {comparisonRuns.length ? (
-        <section className="mt-6 rounded-xl border border-border bg-panel p-6">
+        <section className="mt-6 rounded-xl border border-border bg-panel p-4 sm:p-6">
           <div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Comparison</div>
           <h2 className="mt-1 text-xl font-semibold">Latest normalized telemetry</h2>
-          <div className="mt-5 overflow-x-auto">
+          <div className="mt-5 space-y-3 lg:hidden">
+            {comparisonRuns.map((run: any) => (
+              <article key={run.id} className="rounded-lg border border-border bg-background/35 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <strong className="min-w-0 break-words text-sm">{run.display_name}</strong>
+                  {run.id === (compare.data as any)?.baseline_id ? <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-muted">Baseline</span> : null}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border">
+                  {[
+                    ['Reward', fmtNumber(run.latest_metrics?.reward, 4)],
+                    ['Δ reward', fmtNumber(run.delta_from_baseline?.reward, 4)],
+                    ['Episode length', fmtNumber(run.latest_metrics?.episode_length, 2)],
+                    ['PPO loss', fmtNumber(run.latest_metrics?.ppo_loss, 6)],
+                    ['KL', fmtNumber(run.latest_metrics?.kl, 6)],
+                    ['Iteration', fmtNumber(run.iteration, 0)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="min-w-0 bg-panel p-3">
+                      <span className="block text-[10px] font-bold uppercase tracking-[0.06em] text-muted">{label}</span>
+                      <strong className="numeric mt-1 block truncate text-sm text-foreground">{value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="mt-5 hidden overflow-x-auto lg:block">
             <table className="w-full border-collapse text-left text-sm">
               <thead className="border-b border-border text-xs uppercase tracking-[0.06em] text-muted">
                 <tr><th className="px-3 py-3">Run</th><th className="px-3 py-3">Reward</th><th className="px-3 py-3">Δ reward</th><th className="px-3 py-3">Episode length</th><th className="px-3 py-3">PPO loss</th><th className="px-3 py-3">KL</th><th className="px-3 py-3">Iteration</th></tr>

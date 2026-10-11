@@ -57,7 +57,7 @@ export function AnalyzePage() {
         title="Analyze"
         description="Zoomable training history, curriculum context and the live trainer log."
         actions={
-          <div className="min-w-[280px]">
+          <div className="w-full min-w-0 sm:w-auto sm:min-w-[280px]">
             <SelectInput value={selectedId} onChange={(event) => selectRun(event.target.value)}>
               {!selectedId ? <option value="">No runs</option> : null}
               {(runs.data?.runs || []).map((run) => <option key={run.id} value={run.id}>{run.display_name}</option>)}
@@ -70,10 +70,10 @@ export function AnalyzePage() {
         <div className="rounded-xl border border-border bg-panel p-10 text-center text-muted">No training runs are available.</div>
       ) : (
         <div className="space-y-6">
-          <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-panel p-5">
+          <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-panel p-4 sm:p-5">
             <div>
               <div className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{String(detail.data?.run_info?.task || detail.data?.stage || 'Run')}</div>
-              <h2 className="mt-1 text-xl font-semibold">{detail.data?.display_name || detail.data?.name || 'Loading…'}</h2>
+              <h2 className="mt-1 break-words text-xl font-semibold">{detail.data?.display_name || detail.data?.name || 'Loading…'}</h2>
             </div>
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted">
               <span>Iteration <strong className="numeric text-foreground">{fmtNumber(detail.data?.telemetry?.iteration, 0)}</strong></span>

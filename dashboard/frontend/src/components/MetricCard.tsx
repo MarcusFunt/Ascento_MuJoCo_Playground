@@ -30,7 +30,7 @@ export function MetricCard({
   }[tone]
   return (
     <section className="min-w-0 border-t border-border pt-4">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col items-start gap-1 sm:flex-row sm:justify-between sm:gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.09em] text-muted">
             {label}
@@ -43,9 +43,9 @@ export function MetricCard({
               </Tooltip>
             ) : null}
           </div>
-          <div className={cn('numeric mt-2 text-[32px] font-semibold leading-none tracking-[-0.04em]', toneClass)}>{value}</div>
+          <div className={cn('numeric mt-2 text-[25px] font-semibold leading-none tracking-[-0.04em] sm:text-[32px]', toneClass)}>{value}</div>
         </div>
-        {secondary ? <div className="max-w-[42%] text-right text-xs leading-relaxed text-muted">{secondary}</div> : null}
+        {secondary ? <div className="max-w-full text-left text-[11px] leading-relaxed text-muted sm:max-w-[42%] sm:text-right sm:text-xs">{secondary}</div> : null}
       </div>
       {progress !== undefined ? (
         <Progress value={progress} className="mt-5 h-1" />

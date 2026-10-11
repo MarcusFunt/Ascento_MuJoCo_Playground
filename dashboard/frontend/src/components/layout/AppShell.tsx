@@ -5,10 +5,6 @@ import {
   ChartNoAxesCombined,
   ChevronLeft,
   ChevronRight,
-  ClipboardCheck,
-  Eye,
-  FlaskConical,
-  Film,
   Gauge,
   ListTree,
   Settings,
@@ -17,14 +13,9 @@ import { api } from '../../api'
 import { cn } from '../../lib/utils'
 import { StateBadge } from '../StateBadge'
 import { CommandPalette } from '../CommandPalette'
-import { ControlAccess } from '../ControlAccess'
 
 const navigation = [
   { label: 'Overview', to: '/' as const, icon: Gauge },
-  { label: 'Experiments', to: '/experiments' as const, icon: FlaskConical },
-  { label: 'Evaluations', to: '/evaluations' as const, icon: ClipboardCheck },
-  { label: 'Visualizer', to: '/visualizer' as const, icon: Eye },
-  { label: 'Captures', to: '/captures' as const, icon: Film },
   { label: 'Runs', to: '/runs' as const, icon: ListTree },
   { label: 'Analyze', to: '/analyze' as const, icon: ChartNoAxesCombined },
   { label: 'System', to: '/system' as const, icon: Settings },
@@ -36,24 +27,10 @@ export function AppShell() {
   const overview = useQuery({
     queryKey: ['overview'],
     queryFn: api.overview,
-    refetchInterval: 15_000,
+    refetchInterval: 5_000,
     staleTime: 2_000,
   })
   const active = overview.data?.active_run
-  const health = useQuery({
-    queryKey: ['health'],
-    queryFn: api.health,
-    refetchInterval: 30_000,
-  })
-  const systemHealth = health.data
-  const unhealthyComponents = Object.entries(systemHealth?.components || {})
-    .filter(([, component]) => component.status === 'degraded' || component.status === 'unavailable')
-    .map(([name]) => name)
-  const healthTone = systemHealth?.status === 'healthy'
-    ? 'border-success/25 bg-success/5 text-success'
-    : systemHealth?.status === 'unavailable'
-      ? 'border-danger/40 bg-danger/10 text-danger'
-      : 'border-warning/35 bg-warning/5 text-warning'
 
   const toggle = () => {
     setCollapsed((value) => {
@@ -111,51 +88,48 @@ export function AppShell() {
       </aside>
 
       <div className={cn('transition-[padding] duration-200', collapsed ? 'lg:pl-[72px]' : 'lg:pl-[230px]')}>
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/90 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
-          <div className="min-w-0">
+        <header className="sticky top-0 z-30 flex min-h-[calc(4rem_+_env(safe-area-inset-top))] items-center justify-between gap-3 border-b border-border bg-background/90 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl sm:px-6 lg:px-8">
+          <div className="flex min-w-0 flex-1 items-center">
             {active ? (
-              <Link to="/runs/$runId" params={{ runId: active.id }} className="control-focus flex min-w-0 items-center gap-3 rounded">
+              <Link to="/runs/$runId" params={{ runId: active.id }} className="control-focus flex min-h-11 min-w-0 items-center gap-2 rounded sm:gap-3">
                 <StateBadge state={active.state} stale={active.stale} />
-                <span className="hidden min-w-0 truncate text-sm font-semibold sm:block">{active.display_name}</span>
+                <span className="min-w-0 max-w-[42vw] truncate text-xs font-semibold sm:max-w-[24rem] sm:text-sm">{active.display_name}</span>
               </Link>
             ) : (
-              <span className="text-sm text-muted">
-                {systemHealth?.components?.supervisor?.status === 'unavailable'
-                  ? 'No indexed active run · host state unverified'
-                  : systemHealth
-                    ? 'No active training'
-                    : 'Checking training state…'}
-              </span>
+              <span className="truncate text-sm text-muted">No active training</span>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <nav className="flex lg:hidden">
-              {navigation.slice(0, 4).map((item) => (
-                <Link key={item.to} to={item.to} className="control-focus rounded-lg p-2 text-muted hover:bg-hover hover:text-foreground" aria-label={item.label}>
-                  <item.icon size={18} />
-                </Link>
-              ))}
-            </nav>
-            <ControlAccess />
             <CommandPalette />
           </div>
         </header>
-        <div className={`flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 text-xs sm:px-6 lg:px-8 ${healthTone}`} role="status" aria-live="polite">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <strong className="uppercase tracking-[0.08em]">
-              {health.isError ? 'Health check unavailable' : systemHealth?.status || 'Checking service health'}
-            </strong>
-            {unhealthyComponents.length ? <span>Needs attention: {unhealthyComponents.join(', ')}</span> : null}
-            {systemHealth?.status === 'healthy' ? <span>Dashboard services are healthy</span> : null}
-          </div>
-          <Link to="/system" className="control-focus rounded font-semibold underline underline-offset-2">System details</Link>
-        </div>
-        <main className="mx-auto w-full max-w-[1680px] px-4 py-7 sm:px-6 lg:px-8 lg:py-9">
+        <main className="mx-auto w-full max-w-[1680px] px-4 pt-6 pb-[calc(6rem_+_env(safe-area-inset-bottom))] sm:px-6 sm:pt-7 lg:px-8 lg:pt-9 lg:pb-9">
           <Suspense fallback={<div className="h-[420px] animate-pulse rounded-xl border border-border bg-panel" />}>
             <Outlet />
           </Suspense>
         </main>
       </div>
+
+      <nav className="mobile-nav fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-sidebar/95 backdrop-blur-xl lg:hidden" aria-label="Primary navigation">
+        {navigation.map((item) => {
+          const activeRoute = item.to === '/' ? pathname === '/' : pathname.startsWith(item.to)
+          const Icon = item.icon
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              aria-current={activeRoute ? 'page' : undefined}
+              className={cn(
+                'control-focus flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg px-1 py-1 text-[10px] font-semibold leading-none transition-colors',
+                activeRoute ? 'bg-hover text-foreground' : 'text-muted hover:bg-hover hover:text-foreground',
+              )}
+            >
+              <Icon size={18} aria-hidden="true" />
+              <span className="truncate">{item.label}</span>
+            </Link>
+          )
+        })}
+      </nav>
     </div>
   )
 }

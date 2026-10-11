@@ -139,7 +139,46 @@ export function RunTable({
 
   return (
     <div>
-      <div className="overflow-x-auto overscroll-x-contain">
+      <div className="divide-y divide-border lg:hidden">
+        {table.getRowModel().rows.map((row) => {
+          const run = row.original
+          return (
+            <article key={row.id} className="flex items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4">
+              <label className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg" aria-label={`Select ${run.display_name} for comparison`}>
+                <input
+                  aria-label={`Compare ${run.display_name}`}
+                  className="h-5 w-5 accent-foreground"
+                  type="checkbox"
+                  checked={compareIds.includes(run.id)}
+                  onChange={() => onToggleCompare(run.id)}
+                />
+              </label>
+              <button
+                type="button"
+                className="control-focus min-w-0 flex-1 rounded-lg py-1 text-left"
+                onClick={() => void navigate({ to: '/runs/$runId', params: { runId: run.id } })}
+              >
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <strong className="min-w-0 truncate text-sm font-semibold text-foreground">{run.display_name}</strong>
+                  <StateBadge state={run.state} stale={run.stale} />
+                </div>
+                <div className="mt-1 truncate text-xs text-muted">
+                  {taskLabel(run)}{run.tags?.length ? ` · ${run.tags.slice(0, 2).join(' · ')}` : ''}
+                </div>
+                <div className="mt-2 flex items-center gap-3 text-xs text-secondary">
+                  <span>Iter <strong className="numeric text-foreground">{fmtNumber(run.iteration, 0)}</strong></span>
+                  <span>Reward <strong className="numeric text-foreground">{fmtNumber(run.reward, 4)}</strong></span>
+                  <span className="numeric ml-auto text-muted">{fmtPercent(run.percent_complete, 1)}</span>
+                </div>
+                <Progress value={Number(run.percent_complete || 0)} className="mt-2 h-1" />
+              </button>
+            </article>
+          )
+        })}
+        {runs.length === 0 ? <p className="px-4 py-12 text-center text-sm text-muted">No runs match these filters.</p> : null}
+      </div>
+
+      <div className="hidden overflow-x-auto overscroll-x-contain lg:block">
       <Table className="min-w-[560px] md:min-w-0">
         <TableHeader>
           {table.getHeaderGroups().map((group) => (
@@ -180,7 +219,7 @@ export function RunTable({
         </TableBody>
       </Table>
       </div>
-      <p className="mt-2 px-4 text-xs text-muted lg:hidden">The table prioritizes run status and scores here; swipe sideways for any hidden details.</p>
+      <p className="mt-2 px-4 text-xs text-muted lg:hidden">Tap a run for details, or select it to compare.</p>
     </div>
   )
 }

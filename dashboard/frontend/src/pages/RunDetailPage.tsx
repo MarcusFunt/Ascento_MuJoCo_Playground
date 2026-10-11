@@ -53,14 +53,14 @@ export function RunDetailPage() {
         description={run.notes || run.name}
         actions={
           <>
-            <Link to="/analyze/$runId" params={{ runId }} className="control-focus inline-flex h-10 items-center gap-2 rounded-lg border border-border-strong bg-raised px-4 text-sm font-semibold hover:bg-hover"><ChartNoAxesCombined size={16} /> Analyze</Link>
+            <Link to="/analyze/$runId" params={{ runId }} className="control-focus inline-flex h-11 items-center gap-2 rounded-lg border border-border-strong bg-raised px-4 text-sm font-semibold hover:bg-hover"><ChartNoAxesCombined size={16} /> Analyze</Link>
             <Button onClick={() => setEditOpen(true)}><Pencil size={15} /> Edit</Button>
             {active ? <Button variant="danger" disabled={stop.isPending || run.state === 'stopping'} onClick={() => stop.mutate()}><Square size={14} /> {run.state === 'stopping' ? 'Stopping…' : 'Graceful stop'}</Button> : null}
           </>
         }
       />
 
-      <section className="mb-6 rounded-xl border border-border bg-panel p-6">
+      <section className="mb-6 rounded-xl border border-border bg-panel p-4 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <StateBadge state={run.state} stale={run.stale} />
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted">
@@ -73,7 +73,7 @@ export function RunDetailPage() {
           <Progress value={percent} className="h-2 flex-1" />
           <strong className="numeric text-sm">{fmtPercent(percent, 1)}</strong>
         </div>
-        <div className="mt-5 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border xl:grid-cols-4">
           {[
             ['Reward', fmtNumber(latest.reward, 4)],
             ['Episode length', fmtNumber(latest.episode_length, 1)],
@@ -119,7 +119,7 @@ export function RunDetailPage() {
           captureLoading={introspection.captureLoading}
         />
 
-        <section className="rounded-xl border border-border bg-panel p-6">
+        <section className="rounded-xl border border-border bg-panel p-4 sm:p-6">
           <div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Provenance & contracts</div>
           <div className="mt-5 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
             {[

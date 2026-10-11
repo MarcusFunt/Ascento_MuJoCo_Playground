@@ -8,10 +8,6 @@ const RunsPage = lazy(() => import('./pages/RunsPage').then((module) => ({ defau
 const RunDetailPage = lazy(() => import('./pages/RunDetailPage').then((module) => ({ default: module.RunDetailPage })))
 const AnalyzePage = lazy(() => import('./pages/AnalyzePage').then((module) => ({ default: module.AnalyzePage })))
 const SystemPage = lazy(() => import('./pages/SystemPage').then((module) => ({ default: module.SystemPage })))
-const EvaluationsPage = lazy(() => import('./pages/EvaluationsPage').then((module) => ({ default: module.EvaluationsPage })))
-const ExperimentsPage = lazy(() => import('./pages/ExperimentsPage').then((module) => ({ default: module.ExperimentsPage })))
-const VisualizerPage = lazy(() => import('./pages/VisualizerPage').then((module) => ({ default: module.VisualizerPage })))
-const CapturesPage = lazy(() => import('./pages/CapturesPage').then((module) => ({ default: module.CapturesPage })))
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -54,48 +50,6 @@ const systemRoute = createRoute({
   component: SystemPage,
 })
 
-const evaluationsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/evaluations',
-  component: EvaluationsPage,
-})
-
-const evaluationDetailRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/evaluations/$evaluationId',
-  component: EvaluationsPage,
-})
-
-const experimentsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/experiments',
-  component: ExperimentsPage,
-})
-
-const experimentDetailRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/experiments/$experimentId',
-  component: ExperimentsPage,
-})
-
-const visualizerRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/visualizer',
-  component: VisualizerPage,
-})
-
-const visualizerRunRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/visualizer/$runId',
-  component: VisualizerPage,
-})
-
-const capturesRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/captures',
-  component: CapturesPage,
-})
-
 const routeTree = rootRoute.addChildren([
   overviewRoute,
   runsRoute,
@@ -103,13 +57,6 @@ const routeTree = rootRoute.addChildren([
   analyzeRoute,
   analyzeRunRoute,
   systemRoute,
-  evaluationsRoute,
-  evaluationDetailRoute,
-  experimentsRoute,
-  experimentDetailRoute,
-  visualizerRoute,
-  visualizerRunRoute,
-  capturesRoute,
 ])
 
 export const router = createRouter({

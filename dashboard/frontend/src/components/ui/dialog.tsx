@@ -19,17 +19,17 @@ export function DialogContent({
   return (
     <BaseDialog.Portal>
       <BaseDialog.Backdrop className="fixed inset-0 z-50 bg-black/70 backdrop-blur-[2px] transition-opacity" />
-      <BaseDialog.Viewport className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-[8vh]">
+      <BaseDialog.Viewport className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain px-3 py-4 [padding-top:max(1rem,env(safe-area-inset-top))] [padding-bottom:max(1rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-[8vh]">
         <BaseDialog.Popup
           className={cn(
-            'relative w-full max-w-2xl rounded-xl border border-border-strong bg-panel p-6 shadow-2xl shadow-black/50 outline-none',
+            'relative max-h-[calc(100dvh_-_2rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] w-full max-w-2xl overflow-y-auto overscroll-contain rounded-xl border border-border-strong bg-panel p-4 shadow-2xl shadow-black/50 outline-none sm:max-h-[84vh] sm:p-6',
             className,
           )}
         >
           {children}
           <BaseDialog.Close
             aria-label="Close"
-            className="control-focus absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-foreground"
+            className="control-focus absolute right-3 top-3 inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-foreground sm:right-4 sm:top-4"
           >
             <X size={18} />
           </BaseDialog.Close>

@@ -10,7 +10,6 @@ export function SystemPage() {
   const queryClient = useQueryClient()
   const status = useQuery({ queryKey: ['system'], queryFn: () => api.system(true), refetchInterval: 10_000 })
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 15_000 })
-  const runtime = useQuery({ queryKey: ['runtime-identity'], queryFn: api.runtimeIdentity, refetchInterval: 30_000 })
   const update = useMutation({
     mutationFn: api.updateSystem,
     onSuccess: async () => {
@@ -22,12 +21,11 @@ export function SystemPage() {
   const repository = value.repository || {}
   const tailscale = value.tailscale || {}
   const updateState = value.update || {}
-  const activeRuns = value.active_runs
+  const activeRuns = value.active_runs || []
   const blockers = value.update_blockers || []
   const incoming = Array.isArray(repository.incoming_commits) ? repository.incoming_commits : []
   const updateRunning = updateState.status === 'running'
   const updateAvailable = Boolean(repository.update_available)
-  const tailscaleStatus = tailscale.status || (tailscale.connected === true ? 'healthy' : tailscale.connected === false ? 'degraded' : 'unknown')
 
   return (
     <>
@@ -40,7 +38,7 @@ export function SystemPage() {
 
       {status.error ? <div className="mb-6 rounded-xl border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{status.error.message}</div> : null}
 
-      <section className="rounded-xl border border-border bg-panel p-6 lg:p-7">
+      <section className="rounded-xl border border-border bg-panel p-4 sm:p-6 lg:p-7">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
             <div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Repository state</div>
@@ -73,48 +71,28 @@ export function SystemPage() {
           {repository.remote_error ? <Warning>{String(repository.remote_error)}</Warning> : null}
         </SystemCard>
 
-        <SystemCard title="Tailnet access" icon={tailscale.connected === true ? <ShieldCheck size={16} /> : <Unplug size={16} />}>
+        <SystemCard title="Tailnet access" icon={tailscale.connected ? <ShieldCheck size={16} /> : <Unplug size={16} />}>
           <div className="mb-4">
-            <Badge className={tailscaleStatus === 'healthy' ? 'border-success/40 bg-success/10 text-success' : 'border-warning/40 bg-warning/10 text-warning'}>
-              {tailscaleStatus === 'healthy' ? 'Connected' : tailscaleStatus === 'degraded' ? 'Disconnected' : 'Unknown'}
+            <Badge className={tailscale.connected ? 'border-success/40 bg-success/10 text-success' : 'border-warning/40 bg-warning/10 text-warning'}>
+              {tailscale.connected ? 'Connected' : tailscale.enabled ? 'Disconnected' : 'Not enrolled'}
             </Badge>
           </div>
           <KeyValue rows={[
             ['MagicDNS', tailscale.dns_name],
             ['Tailscale IP', Array.isArray(tailscale.ips) ? tailscale.ips.join(', ') : '—'],
           ]} />
-          {tailscale.url ? <a href={String(tailscale.url)} target="_blank" rel="noreferrer" className="control-focus mt-4 inline-flex items-center gap-2 rounded-lg text-sm font-semibold text-secondary hover:text-foreground">Open remote dashboard <ExternalLink size={14} /></a> : null}
+          {tailscale.url ? <a href={String(tailscale.url)} target="_blank" rel="noreferrer" className="control-focus mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm font-semibold text-secondary hover:bg-hover hover:text-foreground">Open remote dashboard <ExternalLink size={14} /></a> : null}
           {tailscale.error ? <Warning>{String(tailscale.error)}</Warning> : null}
         </SystemCard>
 
         <SystemCard title="Dashboard index" icon={<ShieldCheck size={16} />}>
           <KeyValue rows={[
-            ['Overall service', health.data?.status || (health.isError ? 'unavailable' : 'checking')],
-            ['API readiness', health.data?.ready ? 'ready' : health.data ? 'unavailable' : 'checking'],
+            ['API', health.data?.ok ? 'healthy' : health.data ? 'degraded' : 'checking'],
             ['Database', health.data?.database?.available ? 'connected' : health.data?.database?.enabled ? 'filesystem fallback' : 'optional'],
-            ['Host supervisor', health.data?.components?.supervisor?.status || 'checking'],
             ['Backend', health.data?.database?.backend || '—'],
             ['Artifact root', health.data?.artifact_root || '—'],
           ]} />
           {health.data?.database?.error ? <Warning>{String(health.data.database.error)}</Warning> : null}
-        </SystemCard>
-
-        <SystemCard title="Runtime source and deployment" icon={<RefreshCw size={16} />}>
-          <KeyValue rows={[
-            ['Mounted source', runtime.data?.checkout?.root],
-            ['Source branch / HEAD', `${runtime.data?.checkout?.branch || '—'} / ${shortCommit(runtime.data?.checkout?.commit)}`],
-            ['Source origin/main', shortCommit(runtime.data?.checkout?.origin_main)],
-            ['Source working tree', runtime.data?.checkout?.dirty === false ? 'clean' : runtime.data?.checkout?.dirty === true ? 'dirty' : 'unknown'],
-            ['Packaged image', shortCommit(runtime.data?.packaged_image?.commit)],
-            ['Reported API build', shortCommit(runtime.data?.reported_api?.commit)],
-            ['Image branch / compute', `${runtime.data?.packaged_image?.branch || '—'} / ${runtime.data?.packaged_image?.compute || '—'}`],
-            ['Build manifest', shortCommit(runtime.data?.packaged_image?.manifest_commit)],
-            ['Latest indexed run', runtime.data?.latest_indexed_run?.name || 'none indexed'],
-            ['Latest run source', shortCommit(runtime.data?.latest_indexed_run?.commit)],
-          ]} />
-          {runtime.isError ? <Warning>Runtime identity could not be read: {runtime.error.message}</Warning> : null}
-          {runtime.data?.comparisons?.checkout_matches_image === false ? <Warning>The mounted source revision and packaged image revision differ. Managed launches remain blocked until they match.</Warning> : null}
-          {runtime.data?.comparisons?.checkout_matches_origin_main === false ? <Warning>The mounted source checkout does not match origin/main.</Warning> : null}
         </SystemCard>
 
         <SystemCard title="Last update" icon={<UploadCloud size={16} />}>
@@ -130,20 +108,14 @@ export function SystemPage() {
       </div>
 
       {blockers.length ? (
-        <section className="mt-6 rounded-xl border border-warning/30 bg-warning/5 p-6">
+        <section className="mt-6 rounded-xl border border-warning/30 bg-warning/5 p-4 sm:p-6">
           <div className="text-xs font-bold uppercase tracking-[0.1em] text-warning">Why update is blocked</div>
           <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-secondary">{blockers.map((item: string) => <li key={item}>{item}</li>)}</ul>
         </section>
       ) : null}
 
-      {activeRuns === null ? (
-        <section className="mt-6 rounded-xl border border-warning/30 bg-warning/5 p-6" role="status">
-          <div className="text-xs font-bold uppercase tracking-[0.1em] text-warning">Active-run status unknown</div>
-          <p className="mt-2 text-sm text-secondary">The host supervisor is unavailable, so the dashboard cannot verify whether training, evaluation, viewer or render processes are active.</p>
-          {value.error ? <p className="mt-2 break-words text-xs text-muted">{String(value.error)}</p> : null}
-        </section>
-      ) : Array.isArray(activeRuns) && activeRuns.length ? (
-        <section className="mt-6 rounded-xl border border-border bg-panel p-6">
+      {activeRuns.length ? (
+        <section className="mt-6 rounded-xl border border-border bg-panel p-4 sm:p-6">
           <div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Active runs</div>
           <p className="mt-2 text-sm text-muted">Repository updates remain disabled while training is active so a rebuild cannot terminate a run.</p>
           <div className="mt-4 divide-y divide-border">
@@ -158,7 +130,7 @@ export function SystemPage() {
       ) : null}
 
       {incoming.length ? (
-        <section className="mt-6 rounded-xl border border-border bg-panel p-6">
+        <section className="mt-6 rounded-xl border border-border bg-panel p-4 sm:p-6">
           <div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Incoming commits</div>
           <div className="mt-4 divide-y divide-border">
             {incoming.map((commit: any) => (
@@ -176,7 +148,7 @@ export function SystemPage() {
 
 function SystemCard({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-border bg-panel p-6">
+    <section className="rounded-xl border border-border bg-panel p-4 sm:p-6">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-[17px] font-semibold">{title}</h2>
         <span className="text-muted">{icon}</span>
@@ -190,7 +162,7 @@ function KeyValue({ rows }: { rows: Array<[string, unknown]> }) {
   return (
     <dl className="divide-y divide-border">
       {rows.map(([label, raw]) => (
-        <div key={label} className="grid grid-cols-[140px_1fr] gap-4 py-2.5 text-sm first:pt-0 last:pb-0">
+        <div key={label} className="grid grid-cols-[minmax(7rem,0.8fr)_minmax(0,1fr)] gap-3 py-2.5 text-sm first:pt-0 last:pb-0 sm:grid-cols-[140px_1fr] sm:gap-4">
           <dt className="text-muted">{label}</dt>
           <dd className="m-0 min-w-0 break-words text-right text-secondary">{raw === null || raw === undefined || raw === '' ? '—' : String(raw)}</dd>
         </div>
