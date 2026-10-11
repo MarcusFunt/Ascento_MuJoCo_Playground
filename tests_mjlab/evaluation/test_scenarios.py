@@ -167,6 +167,7 @@ def test_guard_morphology_replay_smoke_suite_is_small_and_diagnostic():
 def test_generalist_reward_alignment_suite_has_fixed_band_cohort_families():
     suite = load_suite(Path("benchmarks/suites/generalist_reward_alignment_v1.toml"))
     scenarios = materialize_suite(suite, step_dt=0.02)
+    from ascento_mjlab.evaluation.runner import _waypoint_command_steps, task_capabilities
 
     expected_families = {
         "precision_short",
@@ -177,6 +178,8 @@ def test_generalist_reward_alignment_suite_has_fixed_band_cohort_families():
     }
     assert suite.task == "Ascento-Generalist-Locomotion-Flat"
     assert suite.root_seed == 20261012
+    assert "command:world_target_offset" in suite.required_capabilities
+    assert "command:world_target_offset" in task_capabilities(suite.task)
     assert len(scenarios) == 320
     assert {scenario.family for scenario in scenarios} == expected_families
     assert {sum(scenario.family == family for scenario in scenarios) for family in expected_families} == {
@@ -196,6 +199,10 @@ def test_generalist_reward_alignment_suite_has_fixed_band_cohort_families():
         "success",
     }
     assert materialize_suite(suite, step_dt=0.02) == scenarios
+    precision_scenario = next(
+        scenario for scenario in scenarios if scenario.family == "precision_short"
+    )
+    assert _waypoint_command_steps(precision_scenario) == [150]
 
 
 

@@ -66,7 +66,14 @@ def task_capabilities(task: str) -> set[str]:
     if "Balance" in task:
         capabilities.add("balance")
     if "Locomotion" in task:
-        capabilities.update({"locomotion", "command:world_target_pose", "waypoint_dwell"})
+        capabilities.update(
+            {
+                "locomotion",
+                "command:world_target_pose",
+                "command:world_target_offset",
+                "waypoint_dwell",
+            }
+        )
     if "Speed" in task:
         capabilities.update({"command:speed", "speed_tracking"})
     if "Velocity" in task:
@@ -308,6 +315,15 @@ def _apply_world_target_pose(
         target_yaw[env_id] = torch.atan2(
             torch.sin(target_yaw.new_tensor(yaw)), torch.cos(target_yaw.new_tensor(yaw))
         )
+
+
+def _waypoint_command_steps(scenario: ScenarioSpec) -> list[int]:
+    """Return all target-command steps that participate in waypoint accounting."""
+    return [
+        point.step
+        for point in scenario.commands
+        if point.name in {"world_target_pose", "world_target_offset"}
+    ]
 
 
 def _apply_commands(
@@ -778,11 +794,10 @@ def _run_batch(
     # target_arrived metric, which records a single radius crossing.  The v2
     # gate requires sustained arrival at every command and a fresh final stop.
     waypoint_steps_by_env = [
-        [point.step for point in scenario.commands if point.name == "world_target_pose"]
-        for scenario in scenarios
+        _waypoint_command_steps(scenario) for scenario in scenarios
     ]
     if any(len(steps) != len(set(steps)) for steps in waypoint_steps_by_env):
-        raise ValueError("A scenario cannot command two world target poses on one step")
+        raise ValueError("A scenario cannot command two world targets on one step")
     waypoint_count = torch.tensor(
         [len(steps) for steps in waypoint_steps_by_env], dtype=torch.long, device=dev
     )
@@ -791,7 +806,7 @@ def _run_batch(
     for env_id, steps in enumerate(waypoint_steps_by_env):
         for command_step in steps:
             if not 0 <= command_step < scenarios[env_id].horizon_steps:
-                raise ValueError("World target pose must fall within its scenario horizon")
+                raise ValueError("World target command must fall within its scenario horizon")
             waypoint_schedule.setdefault(command_step, []).append(env_id)
     waypoint_active = torch.zeros(count, dtype=torch.bool, device=dev)
     waypoint_confirmed = torch.zeros(count, dtype=torch.bool, device=dev)

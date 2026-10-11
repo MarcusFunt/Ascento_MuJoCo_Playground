@@ -8,7 +8,7 @@ required_capabilities = [
   "exact_reset",
   "force_disturbance",
   "deterministic_policy",
-  "command:world_target_pose",
+  "command:world_target_offset",
   "waypoint_dwell",
 ]
 
