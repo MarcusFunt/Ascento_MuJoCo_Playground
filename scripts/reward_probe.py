@@ -10,12 +10,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import torch
 
+from ascento_mjlab.physics import REWARD_SCHEMA_VERSION
 from ascento_mjlab.tasks.generalist_locomotion.env_cfg import (
     ascento_generalist_locomotion_env_cfg,
 )
@@ -107,6 +109,7 @@ def _make_probe_env() -> SimpleNamespace:
             "target_xy": torch.zeros((1, 2)),
             "target_yaw": torch.zeros((1,)),
         },
+        ascento_generalist_episode_metrics={"attempt_id": torch.ones((1,), dtype=torch.long)},
     )
     return env
 
@@ -116,17 +119,21 @@ def _state_for(case_id: str, step: int, steps: int, target_distance_m: float) ->
     travel_s = {
         "successful_15cm_arrival_and_settle": 1.0,
         "near_target_overshoot": 0.7,
+        "arrive_but_keep_moving": 1.0,
         "arrive_but_wrong_heading": 1.0,
         "arrive_but_keep_rocking": 1.0,
         "medium_target_success": 3.0,
         "long_target_success": 10.0,
     }[case_id]
 
-    if case_id == "near_target_overshoot":
+    if case_id in {"near_target_overshoot", "arrive_but_keep_moving"}:
         overshoot_distance = max(0.10, target_distance_m * 0.40)
         if time_s <= travel_s:
             x = target_distance_m * time_s / travel_s
             vx = target_distance_m / travel_s
+        elif case_id == "arrive_but_keep_moving":
+            vx = 0.12
+            x = target_distance_m + vx * (time_s - travel_s)
         elif time_s <= travel_s + 0.30:
             overshoot_time = time_s - travel_s
             x = target_distance_m + overshoot_distance * overshoot_time / 0.30
@@ -225,11 +232,17 @@ def _apply_state(env: SimpleNamespace, state: dict[str, float]) -> None:
     data.qfrc_actuator = requested * 0.75
 
 
-def _integrate_case(case_id: str, distance_m: float, duration_s: float) -> dict[str, Any]:
+def _integrate_case(
+    case_id: str,
+    distance_m: float,
+    duration_s: float,
+    cfg=None,
+) -> dict[str, Any]:
     env = _make_probe_env()
     env.ascento_world_target_state["target_xy"][0] = torch.tensor([distance_m, 0.0])
     env.ascento_world_target_state["target_yaw"][0] = 0.0
-    cfg = ascento_generalist_locomotion_env_cfg(play=True, num_envs=1)
+    if cfg is None:
+        cfg = ascento_generalist_locomotion_env_cfg(play=True, num_envs=1)
     term_states: dict[str, Any] = {}
     integrated: dict[str, float] = {name: 0.0 for name in cfg.rewards}
     steps = round(duration_s / DT)
@@ -266,25 +279,86 @@ def _integrate_case(case_id: str, distance_m: float, duration_s: float) -> dict[
     }
 
 
+def _config_for_reward_arm(achievement_weight: float, quality_weight: float):
+    keys = (
+        "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE",
+        "ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT",
+        "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT",
+    )
+    previous = {key: os.environ.get(key) for key in keys}
+    os.environ[keys[0]] = "velocity"
+    os.environ[keys[1]] = str(achievement_weight)
+    os.environ[keys[2]] = str(quality_weight)
+    try:
+        return ascento_generalist_locomotion_env_cfg(play=False, num_envs=1)
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def build_report() -> dict[str, Any]:
     probes = (
         ("successful_15cm_arrival_and_settle", 0.15, 11.0),
         ("near_target_overshoot", 0.15, 11.0),
+        ("arrive_but_keep_moving", 0.15, 11.0),
         ("arrive_but_wrong_heading", 0.15, 11.0),
         ("arrive_but_keep_rocking", 0.15, 11.0),
         ("medium_target_success", 0.75, 11.0),
         ("long_target_success", 2.50, 11.0),
     )
+    arms = []
+    for arm_id, achievement_weight, quality_weight in (
+        ("control", 5.0, 0.0),
+        ("settle_bonus_8", 8.0, 0.0),
+        ("settled_quality_8", 5.0, 8.0),
+    ):
+        cfg = _config_for_reward_arm(achievement_weight, quality_weight)
+        cases = [
+            _integrate_case(case_id, distance_m, duration_s, cfg=cfg)
+            for case_id, distance_m, duration_s in probes
+        ]
+        by_id = {case["case_id"]: case for case in cases}
+        success_return = by_id["successful_15cm_arrival_and_settle"][
+            "weighted_integrated_return_total"
+        ]
+        comparisons = {
+            case_id: by_id[case_id]["weighted_integrated_return_total"]
+            for case_id in (
+                "near_target_overshoot",
+                "arrive_but_keep_moving",
+                "arrive_but_wrong_heading",
+            )
+        }
+        failing_comparisons = {
+            case_id: value for case_id, value in comparisons.items() if success_return <= value
+        }
+        if failing_comparisons:
+            raise AssertionError(
+                f"{arm_id} does not rank settled success above its negative controls: "
+                f"success={success_return:.6f}, controls={failing_comparisons}"
+            )
+        arms.append(
+            {
+                "arm_id": arm_id,
+                "achievement_weight": achievement_weight,
+                "settled_quality_weight": quality_weight,
+                "settled_success_return": success_return,
+                "negative_control_returns": comparisons,
+                "settled_success_outranks_controls": True,
+                "cases": cases,
+            }
+        )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "probe_type": "scripted_state_trajectories_not_policy_rollouts",
         "timestep_s": DT,
         "task": "Ascento-Generalist-Locomotion-Flat",
-        "reward_schema": "v3",
-        "cases": [
-            _integrate_case(case_id, distance_m, duration_s)
-            for case_id, distance_m, duration_s in probes
-        ],
+        "reward_schema": REWARD_SCHEMA_VERSION,
+        "cases": arms[0]["cases"],
+        "arms": arms,
         "interpretation_limit": (
             "This isolates the configured reward arithmetic over hand-authored states. "
             "It does not establish dynamic feasibility or learned-policy performance."

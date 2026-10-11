@@ -321,4 +321,100 @@ def test_generalist_arrival_settle_bonus_changes_reward_contract():
     term = cfg.rewards["target_arrival_settled_stop"]
     assert term.weight == pytest.approx(5.0)
     assert term.params["hold_s"] == pytest.approx(0.35)
-    assert REWARD_SCHEMA_VERSION == "v5"
+    assert REWARD_SCHEMA_VERSION == "v6"
+
+
+def _settled_quality_env(*, step_dt=0.01):
+    env = _env(step_dt=step_dt)
+    env.num_envs = 1
+    env.device = torch.device("cpu")
+    robot = env.scene["robot"]
+    robot.data.root_link_pos_w[:] = torch.tensor([[0.0, 0.0, 0.75]])
+    robot.data.root_link_lin_vel_w.zero_()
+    robot.data.root_link_lin_vel_b.zero_()
+    robot.data.root_link_ang_vel_b.zero_()
+    robot.data.root_link_quat_w = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    robot.data.projected_gravity_b[:] = torch.tensor([[0.0, 0.0, -1.0]])
+    env.ascento_world_target_state = {
+        "target_xy": torch.tensor([[0.05, 0.0]]),
+        "target_yaw": torch.tensor([0.0]),
+    }
+    env.ascento_generalist_episode_metrics = {"attempt_id": torch.tensor([1])}
+    return env
+
+
+def test_generalist_settled_quality_is_smooth_inside_evaluator_envelope():
+    from ascento_mjlab.mdp import rewards as reward_terms
+
+    quality_type = getattr(reward_terms, "GeneralistTargetSettledQuality", None)
+    assert callable(quality_type)
+    env = _settled_quality_env()
+    term = quality_type(None, env)
+
+    mid_envelope = term(env).item() * env.step_dt
+    env.scene["robot"].data.root_link_pos_w[0, 0] = 0.025
+    closer_to_target = term(env).item() * env.step_dt
+    assert 0.0 < mid_envelope < 1.0
+    assert closer_to_target > mid_envelope
+
+
+def test_generalist_settled_quality_rejects_miss_motion_and_bad_heading():
+    from ascento_mjlab.mdp import rewards as reward_terms
+
+    quality_type = getattr(reward_terms, "GeneralistTargetSettledQuality", None)
+    assert callable(quality_type)
+    env = _settled_quality_env()
+    term = quality_type(None, env)
+
+    env.ascento_world_target_state["target_xy"][0, 0] = 0.10
+    assert term(env).item() == pytest.approx(0.0)
+
+    env = _settled_quality_env()
+    term = quality_type(None, env)
+    env.scene["robot"].data.root_link_lin_vel_w[0, 0] = 0.081
+    env.scene["robot"].data.root_link_lin_vel_b[0, 0] = 0.081
+    assert term(env).item() == pytest.approx(0.0)
+
+    env = _settled_quality_env()
+    term = quality_type(None, env)
+    yaw = 0.201
+    env.scene["robot"].data.root_link_quat_w = torch.tensor(
+        [[torch.cos(torch.tensor(yaw / 2.0)), 0.0, 0.0, torch.sin(torch.tensor(yaw / 2.0))]]
+    )
+    assert term(env).item() == pytest.approx(0.0)
+
+
+def test_generalist_settled_quality_credit_is_capped_per_attempt():
+    from ascento_mjlab.mdp import rewards as reward_terms
+
+    quality_type = getattr(reward_terms, "GeneralistTargetSettledQuality", None)
+    assert callable(quality_type)
+    env = _settled_quality_env()
+    env.ascento_world_target_state["target_xy"].zero_()
+    term = quality_type(None, env)
+
+    first_attempt = [term(env).item() for _ in range(50)]
+    assert sum(first_attempt) * env.step_dt == pytest.approx(1.0)
+    assert [value * env.step_dt for value in first_attempt[35:]] == pytest.approx([0.0] * 15)
+
+    env.ascento_generalist_episode_metrics["attempt_id"][0] = 2
+    second_attempt = [term(env).item() for _ in range(50)]
+    assert sum(second_attempt) * env.step_dt == pytest.approx(1.0)
+
+
+def test_generalist_target_quality_and_success_bonus_weights_are_independent(monkeypatch):
+    from ascento_mjlab.tasks.generalist_locomotion.env_cfg import (
+        ascento_generalist_locomotion_env_cfg,
+    )
+
+    monkeypatch.setenv("ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT", "8")
+    monkeypatch.delenv("ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT", raising=False)
+    bonus_only = ascento_generalist_locomotion_env_cfg(play=False, num_envs=2)
+    assert bonus_only.rewards["target_arrival_settled_stop"].weight == pytest.approx(8.0)
+    assert "target_settled_quality" not in bonus_only.rewards
+
+    monkeypatch.setenv("ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT", "5")
+    monkeypatch.setenv("ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT", "8")
+    quality_only = ascento_generalist_locomotion_env_cfg(play=False, num_envs=2)
+    assert quality_only.rewards["target_arrival_settled_stop"].weight == pytest.approx(5.0)
+    assert quality_only.rewards["target_settled_quality"].weight == pytest.approx(8.0)

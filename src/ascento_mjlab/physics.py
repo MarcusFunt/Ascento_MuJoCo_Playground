@@ -32,6 +32,6 @@ class PhysicsProfile:
 
 
 PHYSICS_PROFILE = PhysicsProfile()
-REWARD_SCHEMA_VERSION = "v5"
+REWARD_SCHEMA_VERSION = "v6"
 
 __all__ = ["PHYSICS_PROFILE", "PhysicsProfile", "REWARD_SCHEMA_VERSION"]

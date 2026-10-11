@@ -160,6 +160,30 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
                 "asset_cfg": velocity_term.params["asset_cfg"],
             },
         )
+    target_quality_weight = float(
+        os.environ.get("ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT", "0.0")
+    )
+    if not math.isfinite(target_quality_weight) or target_quality_weight < 0.0:
+        raise ValueError(
+            "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT must be finite and nonnegative"
+        )
+    if not play and target_quality_weight > 0.0:
+        cfg.rewards["target_settled_quality"] = RewardTermCfg(
+            func=ascento_mdp.rewards.GeneralistTargetSettledQuality,
+            weight=target_quality_weight,
+            params={
+                "hold_s": 0.35,
+                "target_height_m": 0.75,
+                "height_tolerance_m": 0.05,
+                "max_target_error_m": 0.10,
+                "max_heading_error_rad": 0.20,
+                "max_planar_speed_mps": 0.08,
+                "max_tilt_rad": 0.08,
+                "max_angular_xy_radps": 0.25,
+                "max_yaw_rate_radps": 0.25,
+                "asset_cfg": cfg.rewards["world_target_progress"].params["asset_cfg"],
+            },
+        )
     quarter_turn_heading_fraction = float(
         os.environ.get("ASCENTO_GENERALIST_QUARTER_TURN_HEADING_FRACTION", "0.20")
     )

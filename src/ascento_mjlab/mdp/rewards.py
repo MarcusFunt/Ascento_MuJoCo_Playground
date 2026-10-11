@@ -354,6 +354,135 @@ class GeneralistTargetArrivalSettledStopBonus:
         return newly_completed.to(dtype=asset.data.root_link_pos_w.dtype) / float(env.step_dt)
 
 
+class GeneralistTargetSettledQuality:
+    """Give bounded smooth credit while a target arrival is inside its stop envelope.
+
+    The quality score approaches zero smoothly at each evaluator boundary. Its
+    cumulative credited dwell is capped at ``hold_s`` per target attempt, so
+    the configured weight is also the maximum integrated quality reward.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+        del cfg
+        self._env = env
+        self._credited_s = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+        self._last_target_xy = world_target_xy(env).clone()
+        self._last_target_yaw = world_target_yaw(env).clone()
+        self._last_attempt_id = self._attempt_ids(env)
+
+    @staticmethod
+    def _attempt_ids(env: ManagerBasedRlEnv) -> torch.Tensor | None:
+        metrics = getattr(env, "ascento_generalist_episode_metrics", None)
+        attempt_ids = metrics.get("attempt_id") if isinstance(metrics, dict) else None
+        if isinstance(attempt_ids, torch.Tensor) and attempt_ids.shape == (env.num_envs,):
+            return attempt_ids.to(device=env.device, dtype=torch.long).clone()
+        return None
+
+    @staticmethod
+    def _smooth_inside(value: torch.Tensor, limit: float) -> torch.Tensor:
+        progress = torch.clamp(1.0 - value / float(limit), min=0.0, max=1.0)
+        return progress.square() * (3.0 - 2.0 * progress)
+
+    def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+        """Clear the per-attempt budget after reset events assign the new target."""
+        env = self._env
+        if env_ids is None:
+            env_ids = slice(None)
+        self._credited_s[env_ids] = 0.0
+        self._last_target_xy[env_ids] = world_target_xy(env)[env_ids]
+        self._last_target_yaw[env_ids] = world_target_yaw(env)[env_ids]
+        attempt_ids = self._attempt_ids(env)
+        if attempt_ids is not None:
+            if self._last_attempt_id is None:
+                self._last_attempt_id = attempt_ids
+            else:
+                self._last_attempt_id[env_ids] = attempt_ids[env_ids]
+
+    def __call__(
+        self,
+        env: ManagerBasedRlEnv,
+        hold_s: float = 0.35,
+        target_height_m: float = 0.75,
+        height_tolerance_m: float = 0.05,
+        max_target_error_m: float = 0.10,
+        max_heading_error_rad: float = 0.20,
+        max_planar_speed_mps: float = 0.08,
+        max_tilt_rad: float = 0.08,
+        max_angular_xy_radps: float = 0.25,
+        max_yaw_rate_radps: float = 0.25,
+        asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    ) -> torch.Tensor:
+        limits = (
+            hold_s,
+            height_tolerance_m,
+            max_target_error_m,
+            max_heading_error_rad,
+            max_planar_speed_mps,
+            max_tilt_rad,
+            max_angular_xy_radps,
+            max_yaw_rate_radps,
+        )
+        if any(not math.isfinite(value) or value <= 0.0 for value in limits):
+            raise ValueError("settled-quality hold and envelope limits must be finite and positive")
+        if not math.isfinite(env.step_dt) or env.step_dt <= 0.0:
+            raise ValueError("env.step_dt must be finite and positive")
+
+        asset: Entity = env.scene[asset_cfg.name]
+        target_xy = world_target_xy(env)
+        target_yaw = world_target_yaw(env)
+        changed = torch.linalg.vector_norm(target_xy - self._last_target_xy, dim=1) > 1.0e-6
+        changed |= wrapped_angle_difference(target_yaw, self._last_target_yaw).abs() > 1.0e-6
+        attempt_ids = self._attempt_ids(env)
+        if attempt_ids is not None:
+            if self._last_attempt_id is None:
+                self._last_attempt_id = attempt_ids
+            else:
+                changed |= attempt_ids != self._last_attempt_id
+                self._last_attempt_id.copy_(attempt_ids)
+        self._credited_s[changed] = 0.0
+
+        target_error = torch.linalg.vector_norm(
+            asset.data.root_link_pos_w[:, :2] - target_xy, dim=1
+        )
+        current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
+        heading_error = wrapped_angle_difference(target_yaw, current_yaw).abs()
+        planar_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_b[:, :2], dim=1)
+        angular_xy = torch.linalg.vector_norm(asset.data.root_link_ang_vel_b[:, :2], dim=1)
+        yaw_rate = asset.data.root_link_ang_vel_b[:, 2].abs()
+        tilt = projected_gravity_tilt(asset.data.projected_gravity_b)
+        height_error = (asset.data.root_link_pos_w[:, 2] - float(target_height_m)).abs()
+        left = env.scene["left_wheel_contact"].data.found
+        right = env.scene["right_wheel_contact"].data.found
+        assert left is not None and right is not None
+        both_supported = left.flatten(start_dim=1).any(dim=1) & right.flatten(
+            start_dim=1
+        ).any(dim=1)
+
+        quality = (
+            self._smooth_inside(target_error, max_target_error_m)
+            * self._smooth_inside(heading_error, max_heading_error_rad)
+            * self._smooth_inside(planar_speed, max_planar_speed_mps)
+            * self._smooth_inside(tilt, max_tilt_rad)
+            * self._smooth_inside(angular_xy, max_angular_xy_radps)
+            * self._smooth_inside(yaw_rate, max_yaw_rate_radps)
+            * self._smooth_inside(height_error, height_tolerance_m)
+            * both_supported.to(dtype=asset.data.root_link_pos_w.dtype)
+        )
+        remaining_s = torch.clamp(float(hold_s) - self._credited_s, min=0.0)
+        remaining_s = torch.where(
+            remaining_s <= 1.0e-6, torch.zeros_like(remaining_s), remaining_s
+        )
+        credit_s = torch.minimum(
+            remaining_s,
+            torch.full_like(remaining_s, float(env.step_dt)),
+        )
+        credit_s = torch.where((quality > 0.0) & ~changed, credit_s, torch.zeros_like(credit_s))
+        self._credited_s.add_(credit_s)
+        self._last_target_xy.copy_(target_xy)
+        self._last_target_yaw.copy_(target_yaw)
+        return quality * credit_s / (float(hold_s) * float(env.step_dt))
+
+
 def track_world_target_speed(
     env: ManagerBasedRlEnv,
     command_name: str = "speed",

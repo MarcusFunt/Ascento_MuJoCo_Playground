@@ -71,15 +71,15 @@ Expected: all selected tests pass.
 - Consumes: the evaluator waypoint stop envelope (`0.10 m`, `0.20 rad`, `0.08 m/s`, upright/support/posture limits) and existing one-shot settled-stop event.
 - Produces: opt-in `ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT`, bounded `GeneralistTargetSettledQuality`, and a separate `ASCENTO_GENERALIST_TARGET_ACHIEVEMENT_WEIGHT=8` arm.
 
-- [ ] **Step 1: Write failing tests** named `test_generalist_settled_quality_is_smooth_inside_evaluator_envelope`, `test_generalist_settled_quality_rejects_miss_motion_and_bad_heading`, `test_generalist_settled_quality_credit_is_capped_per_attempt`, and `test_generalist_target_quality_and_success_bonus_weights_are_independent`. Assert zero quality at 10 cm, with speed above 0.08 m/s, or heading above 0.20 rad; assert full credit is bounded to one 0.35 s window.
-- [ ] **Step 2: Run focused tests and observe the expected failures.**
+- [x] **Step 1: Write failing tests** named `test_generalist_settled_quality_is_smooth_inside_evaluator_envelope`, `test_generalist_settled_quality_rejects_miss_motion_and_bad_heading`, `test_generalist_settled_quality_credit_is_capped_per_attempt`, and `test_generalist_target_quality_and_success_bonus_weights_are_independent`. Assert zero quality at 10 cm, with speed above 0.08 m/s, or heading above 0.20 rad; assert full credit is bounded to one 0.35 s window.
+- [x] **Step 2: Run focused tests and observe the expected failures.**
 
 Run: `env CUDA_VISIBLE_DEVICES= PYTHONPATH=src $HOME/.cache/ascento-mjlab/cu128/bin/python -m pytest -q tests_mjlab/test_reward_contract.py -k 'generalist_settled_quality or target_quality_and_success_bonus'`
 
 Expected: failures identify the missing quality term/config, not test collection/import errors.
-- [ ] **Step 3: Implement smooth quality credit, cap it to one held window per target, preserve the existing one-shot event, and bump the reward schema.** Keep safety/posture weights unchanged.
-- [ ] **Step 4: Extend the deterministic reward probe to assert settled success outranks the miss, moving arrival, and bad-heading arrival under each relevant arm.**
-- [ ] **Step 5: Run reward tests and the probe; commit** as `feat: add bounded settled quality reward ablation`.
+- [x] **Step 3: Implement smooth quality credit, cap it to one held window per target, preserve the existing one-shot event, and bump the reward schema.** Keep safety/posture weights unchanged.
+- [x] **Step 4: Extend the deterministic reward probe to assert settled success outranks the miss, moving arrival, and bad-heading arrival under each relevant arm.**
+- [x] **Step 5: Run reward tests and the probe; commit** as `feat: add bounded settled quality reward ablation`.
 
 Run: `env CUDA_VISIBLE_DEVICES= PYTHONPATH=src $HOME/.cache/ascento-mjlab/cu128/bin/python -m pytest -q tests_mjlab/test_reward_contract.py && env CUDA_VISIBLE_DEVICES= PYTHONPATH=src $HOME/.cache/ascento-mjlab/cu128/bin/python scripts/reward_probe.py`
 
