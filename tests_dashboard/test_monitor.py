@@ -33,6 +33,41 @@ def test_load_jsonl_reads_only_the_requested_tail(tmp_path):
     assert [record["iteration"] for record in records] == [9_997, 9_998, 9_999]
 
 
+def test_load_jsonl_full_history_only_parses_new_records_after_append(monkeypatch, tmp_path):
+    from dashboard import monitor
+
+    path = tmp_path / "telemetry.jsonl"
+    path.write_text('{"iteration": 1}\n{"iteration": 2}\n', encoding="utf-8")
+    original_loads = monitor.json.loads
+    parsed_lines = []
+
+    def track_loads(line):
+        parsed_lines.append(line)
+        return original_loads(line)
+
+    monkeypatch.setattr(monitor.json, "loads", track_loads)
+
+    assert [record["iteration"] for record in load_jsonl(path)] == [1, 2]
+    assert len(parsed_lines) == 2
+
+    parsed_lines.clear()
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write('{"iteration": 3}\n')
+
+    assert [record["iteration"] for record in load_jsonl(path)] == [1, 2, 3]
+    assert len(parsed_lines) == 1
+
+
+def test_load_jsonl_full_history_reloads_after_truncation(tmp_path):
+    path = tmp_path / "telemetry.jsonl"
+    path.write_text('{"iteration": 1}\n{"iteration": 2}\n', encoding="utf-8")
+    assert [record["iteration"] for record in load_jsonl(path)] == [1, 2]
+
+    path.write_text('{"iteration": 9}\n', encoding="utf-8")
+
+    assert [record["iteration"] for record in load_jsonl(path)] == [9]
+
+
 def test_log_records_supply_recent_rsl_rl_metrics_without_tensorboard(tmp_path):
     log = tmp_path / "training.log"
     log.write_text(

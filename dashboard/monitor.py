@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha1
@@ -46,11 +48,24 @@ class _TensorboardFileCache:
     records: dict[int, dict[str, Any]]
 
 
+@dataclass
+class _JsonlFileCache:
+    device: int
+    inode: int
+    modified_ns: int
+    offset: int
+    pending: bytes
+    records: list[dict[str, Any]]
+
+
 _TENSORBOARD_CACHE: dict[Path, _TensorboardFileCache] = {}
 _TENSORBOARD_RECORD_CACHE: dict[
     Path, tuple[tuple[tuple[str, int, int, int], ...], int | None, list[dict[str, Any]]]
 ] = {}
 _TENSORBOARD_LOCK = threading.Lock()
+_JSONL_CACHE: OrderedDict[Path, _JsonlFileCache] = OrderedDict()
+_JSONL_LOCK = threading.Lock()
+_JSONL_CACHE_MAX_FILES = 32
 _DISCOVERY_CACHE: dict[Path, tuple[float, list["RunRef"]]] = {}
 _DISCOVERY_LOCK = threading.Lock()
 _DISCOVERY_CACHE_TTL_S = 2.0
@@ -86,6 +101,7 @@ def load_json(path: Path) -> dict[str, Any] | None:
 
 
 def load_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
+    """Load a bounded tail or incrementally refresh a cached full history."""
     if not path.is_file():
         return []
 
@@ -102,11 +118,57 @@ def load_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
 
     if limit is not None:
         return parse_lines(tail_lines(path, limit)) if limit > 0 else []
+
+    cache_path = path.expanduser().resolve()
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            return parse_lines(handle)
+        signature = cache_path.stat()
     except OSError:
         return []
+    with _JSONL_LOCK:
+        cached = _JSONL_CACHE.get(cache_path)
+        reset = (
+            cached is None
+            or cached.device != signature.st_dev
+            or cached.inode != signature.st_ino
+            or signature.st_size < cached.offset
+            or (signature.st_size == cached.offset and signature.st_mtime_ns != cached.modified_ns)
+        )
+        if reset:
+            cached = _JsonlFileCache(
+                device=signature.st_dev,
+                inode=signature.st_ino,
+                modified_ns=signature.st_mtime_ns,
+                offset=0,
+                pending=b"",
+                records=[],
+            )
+            _JSONL_CACHE[cache_path] = cached
+
+        if signature.st_size > cached.offset:
+            try:
+                with cache_path.open("rb") as handle:
+                    handle.seek(cached.offset)
+                    chunk = handle.read()
+                    opened_signature = os.fstat(handle.fileno())
+            except OSError:
+                return list(cached.records)
+
+            data = cached.pending + chunk
+            final_newline = data.rfind(b"\n")
+            if final_newline >= 0:
+                completed, cached.pending = data[: final_newline + 1], data[final_newline + 1 :]
+                cached.records.extend(parse_lines(completed.decode("utf-8", errors="replace").splitlines()))
+            else:
+                cached.pending = data
+            cached.offset += len(chunk)
+            cached.device = opened_signature.st_dev
+            cached.inode = opened_signature.st_ino
+            cached.modified_ns = opened_signature.st_mtime_ns
+
+        _JSONL_CACHE.move_to_end(cache_path)
+        while len(_JSONL_CACHE) > _JSONL_CACHE_MAX_FILES:
+            _JSONL_CACHE.popitem(last=False)
+        return list(cached.records)
 
 
 def _training_limit(run_dir: Path) -> int | None:
