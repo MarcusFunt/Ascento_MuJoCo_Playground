@@ -27,8 +27,9 @@ Relative to v2 (per-second reward-manager weights except impulse bonuses):
 | Settled-stop completion (one-shot) | 8.0 | **30.0** | Reward genuine full-dwell completion |
 | Bounded settled quality | absent | **6.0 total maximum per attempt** | Dense feedback for good near-goal position/heading, two-wheel support, quiet velocity, tilt, angular motion and height |
 | Pending-goal time cost | absent | **-1.70/s**, rising to **-3.00/s** by 8 s | Make indefinite noncompletion unprofitable; clock resets on target-attempt change, not entering goal circle |
+| Failure termination | absent | **-200 once** (not at timeout) | Prevent deliberate falls/early reset as a loophole around increasing time cost |
 
-The **maximum positive passive rate** from the six listed balance/heading terms is only **1.40/s**, below the **minimum unfinished-attempt cost** of **1.70/s**. All other unlisted safety and effort penalties remain negative. The bounded settled-quality credit cannot be collected indefinitely. Therefore the parked-in-circle strategy no longer has a positive indefinite reward rate, even when all passive rewards are ideal.
+The **maximum positive passive rate** from the six listed balance/heading terms is only **1.40/s**, below the **minimum unfinished-attempt cost** of **1.70/s**. All other unlisted safety and effort penalties remain negative. A one-time non-timeout failure penalty of 200 units avoids the unintended alternative of intentionally falling to escape the increasing time cost; this must be assessed for excessive risk aversion in learned behavior. The bounded settled-quality credit cannot be collected indefinitely. Therefore the parked-in-circle strategy no longer has a positive indefinite reward rate, even when all passive rewards are ideal.
 
 ### Technical implementation
 
@@ -43,7 +44,7 @@ New tests: `tests_mjlab/test_goal_settle_v3.py`. They check registration and con
 **Code/unit passing is not navigation success**. Before choosing v3 for longer training:
 
 1. Run the focused tests and lint; exercise a short fresh-initialized PPO pilot on v3 and a **matched v2 control**, same random seed, target mix, optimizer, env count and evaluation suite. Do not resume a v2 optimizer/checkpoint directly into v3; initialize a separately signed v3 checkpoint if actor transfer is desired.
-2. Evaluate fixed physical trajectories: goal 11–15 cm away; 25 cm straight; 50 cm straight; 50 cm lateral offset; initial position already inside the 10 cm circle, alternating single-wheel support and yaw-rate perturbations. Compare **actual settled completions**, dwell time, target error, straight/lateral travel, falls, and wheel contacts, not mean training reward.
+2. Evaluate fixed physical trajectories: goal 11–15 cm away; deliberate fall/early-reset attempts; 25 cm straight; 50 cm straight; 50 cm lateral offset; initial position already inside the 10 cm circle, alternating single-wheel support and yaw-rate perturbations. Compare **actual settled completions**, dwell time, target error, straight/lateral travel, falls, and wheel contacts, not mean training reward.
 3. Audit reward-component time series: `pending_goal_time_cost`, `target_settled_quality`, `target_arrival_settled_stop`, `world_target_progress`, and `generalist_curriculum_goal_mix_stage`. The success criterion is **more completed target attempts, better settled behavior, and no collapse of balance**, not a larger scalar return.
 4. **Rollback** if v3 parks near the circle without completing, falls frequently, regresses short-goal evaluation, or fails longer waypoint travel. Do not promote merely because the summed return changed (reward scales are intentionally different).
 
