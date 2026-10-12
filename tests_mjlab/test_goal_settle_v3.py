@@ -160,6 +160,24 @@ def test_oscillating_inside_circle_does_not_receive_completion_reward():
                      max_heading_error_rad=0.20).item() == 0.0 for _ in range(100))
 
 
+def test_failure_impulse_deters_early_reset_without_punishing_timeout():
+    env = sample_env()
+    env.termination_manager = SimpleNamespace(
+        terminated=torch.tensor([False]),
+        time_outs=torch.tensor([False]),
+    )
+    assert rewards.generalist_failure_termination_impulse(env).item() == 0.0
+    env.termination_manager.time_outs[:] = True
+    assert rewards.generalist_failure_termination_impulse(env).item() == 0.0
+    env.termination_manager.terminated[:] = True
+    assert (
+        rewards.generalist_failure_termination_impulse(env).item() * env.step_dt
+        == pytest.approx(1.0)
+    )
+    cfg = ascento_generalist_goal_settle_v3_env_cfg(num_envs=2)
+    assert cfg.rewards["failure_termination_impulse"].weight == -200.0
+
+
 def test_progress_remains_signed_and_zero_when_parked():
     env = sample_env(target_distance=0.15, velocity=0.1)
     forward = rewards.goal_settle_progress_velocity(env).item()
