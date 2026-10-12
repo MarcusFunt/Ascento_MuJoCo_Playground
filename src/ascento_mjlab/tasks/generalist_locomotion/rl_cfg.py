@@ -76,3 +76,7 @@ AscentoGeneralistLocomotionRlCfg = configure_generalist_normalizer_profile(
 # Independent experiment logs while retaining the exact PPO hyperparameters.
 AscentoGeneralistGoalSettleV2RlCfg = deepcopy(AscentoGeneralistLocomotionRlCfg)
 AscentoGeneralistGoalSettleV2RlCfg.experiment_name = "ascento_generalist_goal_settle_v2_flat"
+
+
+AscentoGeneralistGoalSettleV3RlCfg = deepcopy(AscentoGeneralistLocomotionRlCfg)
+AscentoGeneralistGoalSettleV3RlCfg.experiment_name = "ascento_generalist_goal_settle_v3_flat"

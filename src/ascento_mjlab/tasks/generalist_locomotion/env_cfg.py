@@ -516,3 +516,79 @@ def ascento_generalist_goal_settle_v2_env_cfg(play: bool = False, num_envs: int 
         )
     cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V2-Flat"
     return cfg
+
+
+def ascento_generalist_goal_settle_v3_env_cfg(play: bool = False, num_envs: int = 512):
+    """Opt-in completion-first navigation: do not pay indefinitely for balancing.
+
+    v1/v2 are preserved for checkpoint reproducibility. The 42D observation,
+    6-action controller, obstacle modes, goal ranges, and completion gates stay
+    the same as v2. Completion, not circle occupancy, resets the attempt clock.
+    """
+    cfg = ascento_generalist_goal_settle_v2_env_cfg(play=play, num_envs=num_envs)
+    if not play:
+        # The maximum passive rates below total 1.40/s, while an unfinished
+        # target costs at least 1.70/s. This prevents perpetual static
+        # balancing from being a positive-return strategy. Falling remains
+        # discouraged through termination and the existing motion penalties.
+        passive_weights = {
+            "alive": 0.15,
+            "upright": 0.45,
+            "height": 0.20,
+            "world_target_heading": 0.25,
+            "track_world_target_yaw_rate": 0.10,
+            "settled_balance": 0.25,
+        }
+        for name, weight in passive_weights.items():
+            term = cfg.rewards[name]
+            cfg.rewards[name] = RewardTermCfg(
+                func=term.func, weight=weight, params=dict(term.params)
+            )
+
+        # Positive progress still requires actually closing distance; reverse
+        # motion is penalized. The approach incentive remains active near goal.
+        progress = cfg.rewards["world_target_progress"]
+        cfg.rewards["world_target_progress"] = RewardTermCfg(
+            func=progress.func, weight=14.0, params=dict(progress.params)
+        )
+        speed = cfg.rewards["world_target_speed_penalty"]
+        cfg.rewards["world_target_speed_penalty"] = RewardTermCfg(
+            func=speed.func, weight=-3.0, params=dict(speed.params)
+        )
+
+        # Bounded quality credit provides a smooth physical settling signal.
+        # It can pay at most 6 units per attempt, never per second forever.
+        cfg.rewards["target_settled_quality"] = RewardTermCfg(
+            func=ascento_mdp.rewards.GeneralistTargetSettledQuality,
+            weight=6.0,
+            params={
+                "hold_s": 0.50,
+                "max_target_error_m": 0.10,
+                "max_heading_error_rad": 0.20,
+                "max_planar_speed_mps": 0.08,
+            },
+        )
+        completion = cfg.rewards["target_arrival_settled_stop"]
+        cfg.rewards["target_arrival_settled_stop"] = RewardTermCfg(
+            func=completion.func,
+            weight=30.0,
+            params=dict(completion.params),
+        )
+        cfg.rewards["pending_goal_time_cost"] = RewardTermCfg(
+            func=ascento_mdp.rewards.GeneralistPendingGoalTimeCost,
+            weight=-1.0,
+            params={
+                "base_rate": 1.70,
+                "ramp_rate": 1.30,
+                "ramp_seconds": 8.0,
+            },
+        )
+        # Without this, the negative pending-time return could make falling
+        # early preferable to finishing a difficult target. Timeout is not
+        # a failure; only true termination receives this one-time impulse.
+        cfg.rewards["failure_termination_impulse"] = RewardTermCfg(
+            func=ascento_mdp.rewards.generalist_failure_termination_impulse,
+            weight=-200.0,
+        )
+    cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V3-Flat"
+    return cfg
