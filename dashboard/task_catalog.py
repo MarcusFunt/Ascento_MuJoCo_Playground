@@ -50,6 +50,12 @@ _TASKS: tuple[dict[str, Any], ...] = (
         "supports_horizon": False,
     },
     {
+        "id": "Ascento-Generalist-Locomotion-Goal-Settle-V3-Flat",
+        "label": "Goal-settle v3 (completion first)",
+        "description": "Opt-in navigation task with finite settling credit, unfinished-attempt costs, and verified settled-stop completion.",
+        "supports_horizon": False,
+    },
+    {
         "id": "Ascento-Locomotion-Gate-Hold-Flat",
         "label": "Locomotion (gate hold)",
         "description": "Locomotion with a held reset target for the gate-like training subset.",
