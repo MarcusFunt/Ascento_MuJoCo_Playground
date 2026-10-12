@@ -388,3 +388,23 @@ def test_read_only_monitor_validation_does_not_create_missing_artifact_root(tmp_
 
     assert missing_root.exists() is False
     assert any("does not exist yet" in warning for warning in warnings)
+
+
+
+def test_parent_resume_preflight_failure_is_durable_not_stuck_starting(tmp_path):
+    import json
+
+    from dashboard import launch
+
+    status_path = tmp_path / "run_status.json"
+    log_path = tmp_path / "training.log"
+    status_path.write_text(json.dumps({"state": "starting", "run_id": "invalid-parent"}))
+    launch.report_preflight_failure(
+        status_path, log_path, "checkpoint task topology is incompatible"
+    )
+    state = json.loads(status_path.read_text())
+    assert state["state"] == "error"
+    assert state["exit_code"] == 2
+    assert "incompatible" in state["launch_error"]
+    assert state["finished_at"]
+    assert "DASHBOARD_PREFLIGHT_ERROR" in log_path.read_text()
