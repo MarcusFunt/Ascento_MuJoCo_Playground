@@ -30,6 +30,7 @@ from dashboard.health import (
     load_dashboard_records,
 )
 from dashboard.monitor import load_training_records, tail_lines, training_log_path
+from dashboard.replays import export_replay, list_replays, replay_file
 from dashboard.run_service import RunService
 from dashboard.supervisor_client import (
     SupervisorClient,
@@ -75,6 +76,14 @@ _OVERVIEW_CACHE: tuple[float, dict] | None = None
 _OVERVIEW_CACHE_GENERATION = 0
 
 app = FastAPI(title="Ascento Control", version="3.0")
+# Register concrete paths directly so existing route introspection stays stable.
+app.add_api_route("/api/replays", list_replays, methods=["GET"], tags=["replays"])
+app.add_api_route(
+    "/api/replays/files/{recording:path}", replay_file, methods=["GET"], tags=["replays"]
+)
+app.add_api_route(
+    "/api/replays/export/{recording:path}", export_replay, methods=["POST"], tags=["replays"]
+)
 
 
 class RunCreateRequest(BaseModel):
@@ -472,8 +481,9 @@ def blender_render_file(asset_path: str):
         raise HTTPException(status_code=404, detail="render asset not found") from error
     if not candidate.is_file():
         raise HTTPException(status_code=404, detail="render asset not found")
-    if candidate.suffix.lower() not in BLENDER_RENDER_ASSET_SUFFIXES and not candidate.name.endswith(
-        ".manifest.json"
+    if (
+        candidate.suffix.lower() not in BLENDER_RENDER_ASSET_SUFFIXES
+        and not candidate.name.endswith(".manifest.json")
     ):
         raise HTTPException(status_code=404, detail="render asset type is not served")
     return FileResponse(candidate)
@@ -627,6 +637,7 @@ def overview():
             if generation == _OVERVIEW_CACHE_GENERATION:
                 _OVERVIEW_CACHE = (time.monotonic(), response)
         return response
+
 
 @app.get("/api/runs")
 def runs():
@@ -814,9 +825,7 @@ def viewer_waypoints(viewer_id: str):
 
 
 @app.post("/api/viewers/{viewer_id}/waypoints", status_code=202)
-def command_viewer_waypoint(
-    viewer_id: str, payload: ViewerWaypointRequest, request: Request
-):
+def command_viewer_waypoint(viewer_id: str, payload: ViewerWaypointRequest, request: Request):
     if request.headers.get("x-ascento-control") != "1":
         raise HTTPException(status_code=403, detail="missing dashboard control header")
     try:

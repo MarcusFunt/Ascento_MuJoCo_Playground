@@ -272,7 +272,10 @@ def test_locomotion_episode_length_can_be_extended_without_reward_changes(monkey
     cfg = ascento_locomotion_env_cfg()
 
     assert cfg.episode_length_s == pytest.approx(120.0)
-    assert cfg.rewards["world_target_proximity"].weight == pytest.approx(4.0)
+    # Long episodes must retain progress shaping, not the removed proximity term.
+    assert "world_target_proximity" not in cfg.rewards
+    assert cfg.rewards["world_target_progress"].weight == pytest.approx(8.0)
+    assert cfg.rewards["world_target_speed_penalty"].weight == pytest.approx(-2.0)
 
 
 def test_speed_selectable_locomotion_task_is_registered():
@@ -296,7 +299,6 @@ def test_speed_selectable_locomotion_has_a_normalized_speed_command():
     assert critic_term == actor_term
 
 
-
 def test_gate_hold_locomotion_task_reuses_base_training_contract():
     from ascento_mjlab.tasks.locomotion.env_cfg import ascento_locomotion_gate_hold_env_cfg
 
@@ -308,7 +310,6 @@ def test_gate_hold_locomotion_task_reuses_base_training_contract():
     assert reset.func.__name__ == "initialize_gate_hold_locomotion_target"
     assert reset.params["gate_like_fraction"] == sequence.params["gate_like_fraction"]
     assert sequence.params["gate_like_initial_hold"] is True
-
 
 
 @pytest.mark.parametrize(

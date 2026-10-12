@@ -6,6 +6,7 @@ import { CurriculumRail } from '../components/CurriculumRail'
 import { BlenderRenderGallery } from '../components/BlenderRenderGallery'
 import { LiveLog } from '../components/LiveLog'
 import { PageHeader } from '../components/PageHeader'
+import { RerunReplayPanel } from '../components/RerunReplayPanel'
 import { TelemetryChart } from '../components/TelemetryChart'
 import { SelectInput } from '../components/ui/input'
 import { fmtNumber } from '../lib/utils'
@@ -65,6 +66,10 @@ export function AnalyzePage() {
           </div>
         }
       />
+
+      <div className="mb-6">
+        <RerunReplayPanel />
+      </div>
 
       {!selectedId ? (
         <div className="rounded-xl border border-border bg-panel p-10 text-center text-muted">No training runs are available.</div>
