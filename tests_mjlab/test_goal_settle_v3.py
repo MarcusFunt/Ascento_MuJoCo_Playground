@@ -191,19 +191,19 @@ def test_progress_remains_signed_and_zero_when_parked():
 def test_real_mjlab_v3_reward_manager_recomposes_step_rewards():
     from mjlab.envs import ManagerBasedRlEnv
 
-    cfg = ascento_generalist_goal_settle_v3_env_cfg(num_envs=2)
+    cfg = ascento_generalist_goal_settle_v3_env_cfg(num_envs=3)
     env = ManagerBasedRlEnv(cfg, device="cpu")
     try:
         obs, _ = env.reset()
-        assert obs["actor"].shape == (2, 42)
+        assert obs["actor"].shape == (3, 42)
         for _ in range(5):
-            _, reward, terminated, truncated, _ = env.step(torch.zeros((2, 6)))
+            _, reward, terminated, truncated, _ = env.step(torch.zeros((3, 6)))
             weighted_rates = env.reward_manager._step_reward
             assert torch.isfinite(weighted_rates).all()
             assert torch.isfinite(reward).all()
             assert torch.allclose(
                 reward, weighted_rates.sum(dim=1) * env.step_dt, atol=1e-7, rtol=1e-5
             )
-            assert terminated.shape == truncated.shape == (2,)
+            assert terminated.shape == truncated.shape == (3,)
     finally:
         env.close()
