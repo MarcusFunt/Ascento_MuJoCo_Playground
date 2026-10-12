@@ -13,6 +13,8 @@ from ascento_mjlab.geometry import projected_gravity_tilt
 from ascento_mjlab.physics import PHYSICS_PROFILE
 
 from .events import (
+    GENERALIST_SETTLED_HEADING_VALID_THRESHOLD_RAD,
+    GENERALIST_TARGET_ARRIVAL_DISTANCE_M,
     world_target_xy,
     world_target_yaw,
     wrapped_angle_difference,
@@ -272,14 +274,14 @@ class GeneralistTargetArrivalSettledStopBonus:
         self,
         env: ManagerBasedRlEnv,
         hold_s: float = 0.35,
-        target_reached_distance_m: float = 0.035,
+        target_reached_distance_m: float = GENERALIST_TARGET_ARRIVAL_DISTANCE_M,
         target_height_m: float = 0.75,
         height_tolerance_m: float = 0.05,
         max_tilt_rad: float = 0.08,
         max_planar_speed_mps: float = 0.10,
         max_angular_xy_radps: float = 0.25,
         max_yaw_rate_radps: float = 0.25,
-        max_heading_error_rad: float = 0.15,
+        max_heading_error_rad: float = GENERALIST_SETTLED_HEADING_VALID_THRESHOLD_RAD,
         asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
     ) -> torch.Tensor:
         if hold_s <= 0.0 or target_reached_distance_m <= 0.0:
@@ -522,6 +524,18 @@ def world_target_heading(
     # focused on supported balancing, as in the position target objective.
     upright_factor = torch.clamp(-asset.data.projected_gravity_b[:, 2], min=0.0, max=1.0)
     return torch.exp(-torch.square(error) / (std * std)) * upright_factor
+
+
+def world_target_heading_linear(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Provide a steady directional reward across the full heading error range."""
+    asset: Entity = env.scene[asset_cfg.name]
+    current_yaw = yaw_from_quaternion_wxyz(asset.data.root_link_quat_w)
+    error = wrapped_angle_difference(world_target_yaw(env), current_yaw).abs()
+    upright_factor = torch.clamp(-asset.data.projected_gravity_b[:, 2], min=0.0, max=1.0)
+    return torch.clamp(1.0 - error / math.pi, min=0.0, max=1.0) * upright_factor
 
 
 def track_world_target_yaw_rate(

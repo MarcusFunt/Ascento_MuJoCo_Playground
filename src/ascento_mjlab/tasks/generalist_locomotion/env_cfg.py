@@ -131,7 +131,15 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
         cfg.rewards["target_arrival_settled_stop"] = RewardTermCfg(
             func=ascento_mdp.rewards.GeneralistTargetArrivalSettledStopBonus,
             weight=target_achievement_weight,
-            params={"hold_s": 0.35, "target_reached_distance_m": 0.035},
+            params={
+                "hold_s": 0.35,
+                "target_reached_distance_m": (
+                    ascento_mdp.events.GENERALIST_TARGET_ARRIVAL_DISTANCE_M
+                ),
+                "max_heading_error_rad": (
+                    ascento_mdp.events.GENERALIST_SETTLED_HEADING_VALID_THRESHOLD_RAD
+                ),
+            },
         )
     progress_reward_mode = os.environ.get(
         "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE", "velocity"
@@ -235,6 +243,12 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
                 )
         cfg.events["repeated_random_world_targets"].params.update(
             {
+                "target_reached_distance_m": (
+                    ascento_mdp.events.GENERALIST_TARGET_ARRIVAL_DISTANCE_M
+                ),
+                "target_heading_tolerance_rad": (
+                    ascento_mdp.events.GENERALIST_SETTLED_HEADING_VALID_THRESHOLD_RAD
+                ),
                 **goal_band_params,
                 **fixed_cohort_params,
                 **(

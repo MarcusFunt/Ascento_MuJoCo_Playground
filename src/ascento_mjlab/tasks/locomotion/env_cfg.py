@@ -32,6 +32,21 @@ def ascento_locomotion_env_cfg(play: bool = False, num_envs: int = 512):
     cfg = ascento_balance_quiet_env_cfg(play=play, num_envs=num_envs)
     cfg.scene.env_spacing = 10.0
     cfg.events.pop("balance_push", None)
+    # Proximity attraction pays for stopping near a waypoint, even when the
+    # approach and settled-arrival rewards favor continued progress or accuracy.
+    cfg.rewards.pop("world_target_proximity", None)
+    heading_term = cfg.rewards["world_target_heading"]
+    cfg.rewards["world_target_heading"] = RewardTermCfg(
+        func=ascento_mdp.rewards.world_target_heading_linear,
+        weight=heading_term.weight,
+        params={"asset_cfg": ROBOT_CFG},
+    )
+    yaw_rate_term = cfg.rewards["track_world_target_yaw_rate"]
+    cfg.rewards["track_world_target_yaw_rate"] = RewardTermCfg(
+        func=yaw_rate_term.func,
+        weight=yaw_rate_term.weight,
+        params={**dict(yaw_rate_term.params), "std": 1.0},
+    )
     cfg.events["initialize_world_target"] = EventTermCfg(
         func=ascento_mdp.events.initialize_random_world_target,
         mode="reset",

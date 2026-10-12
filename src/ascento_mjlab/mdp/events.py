@@ -1632,6 +1632,7 @@ class RepeatedRandomWorldTargetSequence:
         *,
         target_reached_distance_m: float = 0.04,
         target_hold_s: float = 0.35,
+        target_heading_tolerance_rad: float = 0.35,
         min_target_distance_m: float = 0.15,
         max_target_distance_m: float = 0.35,
         curriculum_start_min_target_distance_m: float | None = None,
@@ -1701,6 +1702,11 @@ class RepeatedRandomWorldTargetSequence:
             raise ValueError("target_reached_distance_m must be positive")
         if target_hold_s <= 0.0:
             raise ValueError("target_hold_s must be positive")
+        if (
+            not math.isfinite(target_heading_tolerance_rad)
+            or not 0.0 < target_heading_tolerance_rad <= math.pi
+        ):
+            raise ValueError("target_heading_tolerance_rad must be finite and in (0, pi]")
         if not 0.0 <= gate_like_fraction <= 1.0:
             raise ValueError("gate_like_fraction must be in [0, 1]")
         if stratified_goal_mix:
@@ -1930,7 +1936,12 @@ class RepeatedRandomWorldTargetSequence:
             asset.data.root_link_pos_w[measurement_ids, :2] - world_target_xy(env)[measurement_ids],
             dim=1,
         )
-        settled = _is_settled_for_locomotion(env, asset, measurement_ids)
+        settled = _is_settled_for_locomotion(
+            env,
+            asset,
+            measurement_ids,
+            max_heading_error_rad=target_heading_tolerance_rad,
+        )
         at_target = (distance <= target_reached_distance_m) & settled
         self._settled_at_target_s[measurement_ids] = torch.where(
             at_target,
@@ -2351,7 +2362,13 @@ def _resolved_env_ids_placeholder(
     return env_ids.reshape(-1).to(dtype=torch.long, device=device)
 
 
-def _is_settled_for_locomotion(env, asset, ids: torch.Tensor) -> torch.Tensor:
+def _is_settled_for_locomotion(
+    env,
+    asset,
+    ids: torch.Tensor,
+    *,
+    max_heading_error_rad: float = 0.35,
+) -> torch.Tensor:
     """Boolean low-motion/support envelope matching ``settled_balance``."""
     tilt = torch.acos((-asset.data.projected_gravity_b[ids, 2]).clamp(-1.0, 1.0))
     planar_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_b[ids, :2], dim=1)
@@ -2366,7 +2383,7 @@ def _is_settled_for_locomotion(env, asset, ids: torch.Tensor) -> torch.Tensor:
         (tilt <= 0.08)
         & (planar_speed <= 0.10)
         & (angular_speed <= 0.25)
-        & (heading_error <= 0.35)
+        & (heading_error <= max_heading_error_rad)
         & (height_error <= 0.05)
         & left
         & right
