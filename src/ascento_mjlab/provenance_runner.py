@@ -12,6 +12,7 @@ from mjlab.rl import MjlabOnPolicyRunner
 
 from .checkpoint_contract import require_current_checkpoint_contracts
 from .control_contract import current_action_contract, require_current_action_contract
+from .live_training_monitor import install_training_monitor
 from .plant_contract import current_plant_contract, require_current_plant_contract
 from .retention_replay import (
     canonical_sha256,
@@ -38,6 +39,10 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        # Only real training runs have a persistent log_dir. Viewer/evaluation
+        # runners do not attach telemetry, and PPO owns the simulation clock.
+        log_dir = kwargs.get("log_dir", args[2] if len(args) > 2 else None)
+        self._live_monitor = install_training_monitor(self, log_dir)
         replay_path = os.environ.get("ASCENTO_GENERALIST_REFERENCE_REPLAY_PATH", "").strip()
         coefficient = float(os.environ.get("ASCENTO_GENERALIST_REFERENCE_REPLAY_WEIGHT", "0"))
         if not torch.isfinite(torch.tensor(coefficient)) or coefficient < 0.0:
@@ -74,6 +79,14 @@ class AscentoProvenanceRunner(MjlabOnPolicyRunner):
         )
         batch_size = int(os.environ.get("ASCENTO_GENERALIST_REFERENCE_REPLAY_BATCH_SIZE", "256"))
         configure_replay(dataset, coefficient=coefficient, batch_size=batch_size)
+
+    def learn(self, *args: Any, **kwargs: Any) -> None:
+        try:
+            return super().learn(*args, **kwargs)
+        finally:
+            monitor = getattr(self, "_live_monitor", None)
+            if monitor is not None:
+                monitor.close()
 
     def _num_steps_per_env(self) -> int:
         """Return rollout length across supported RSL-RL runner versions."""

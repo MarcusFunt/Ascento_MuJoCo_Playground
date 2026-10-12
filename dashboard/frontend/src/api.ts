@@ -28,6 +28,37 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
   return body as T
 }
 
+export type LivePpoEnvironment = {
+  environment_id: number
+  episode_step: number
+  reset: boolean
+  position_xyz: number[]
+  quaternion_wxyz: number[]
+  velocity_xy: number[]
+  speed_mps: number
+  target_xy: number[] | null
+  target_distance_m: number | null
+  closing_speed_mps: number | null
+  speed_command_mps: number | null
+  tilt_deg: number
+  root_height_m: number
+  joint_positions_rad: number[]
+  wheel_contacts: { left: boolean | null; right: boolean | null }
+  step_reward: number
+  reward_terms_rate: Record<string, number>
+}
+export type LivePpoFrame = {
+  available: boolean
+  source?: string
+  schema_version?: number
+  sampled_at: number
+  sequence: number
+  global_step: number
+  capture_overhead_ms: number
+  dropped_display_frames?: number
+  environments: LivePpoEnvironment[]
+}
+
 export type ReplayEntry = {
   name: string
   source: string | null
@@ -36,6 +67,10 @@ export type ReplayEntry = {
 }
 
 export const api = {
+  livePpoLatest: (runId: string) =>
+    fetchJson<LivePpoFrame>('/api/runs/' + encodeURIComponent(runId) + '/live-monitor'),
+  livePpoStreamUrl: (runId: string) =>
+    '/api/runs/' + encodeURIComponent(runId) + '/live-monitor/stream',
   replays: () => fetchJson<{ replays: ReplayEntry[] }>('/api/replays'),
   exportReplay: (source: string) =>
     fetchJson<{ name: string; rrd_url: string; bytes: number }>(
