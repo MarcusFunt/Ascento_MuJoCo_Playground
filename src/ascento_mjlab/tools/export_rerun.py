@@ -12,7 +12,7 @@ from typing import Any
 import mujoco
 import numpy as np
 
-import mjlab  # noqa: F401 - initialize task plugin registry before robot_cfg import
+import mjlab  # isort: skip  # noqa: F401 - initialize task registry first
 from ascento_mjlab.robot_cfg import JOINT_NAMES, ROBOT_XML
 
 
