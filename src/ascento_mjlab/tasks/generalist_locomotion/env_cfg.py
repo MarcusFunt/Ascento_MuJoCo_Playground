@@ -583,5 +583,12 @@ def ascento_generalist_goal_settle_v3_env_cfg(play: bool = False, num_envs: int 
                 "ramp_seconds": 8.0,
             },
         )
+        # Without this, the negative pending-time return could make falling
+        # early preferable to finishing a difficult target. Timeout is not
+        # a failure; only true termination receives this one-time impulse.
+        cfg.rewards["failure_termination_impulse"] = RewardTermCfg(
+            func=ascento_mdp.rewards.generalist_failure_termination_impulse,
+            weight=-200.0,
+        )
     cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V3-Flat"
     return cfg
