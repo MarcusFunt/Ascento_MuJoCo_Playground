@@ -121,7 +121,9 @@ def test_pending_clock_ignores_inactive_recovery_hold():
     assert cost(env).item() == 0.0
 
 
-@pytest.mark.parametrize("base,ramp,seconds", [(-1, 1, 8), (1, -1, 8), (1, 1, 0), (1, 1, float("nan"))])
+@pytest.mark.parametrize(
+    "base,ramp,seconds", [(-1, 1, 8), (1, -1, 8), (1, 1, 0), (1, 1, float("nan"))]
+)
 def test_pending_cost_rejects_invalid_config(base, ramp, seconds):
     env = sample_env()
     cost = rewards.GeneralistPendingGoalTimeCost(None, env)
@@ -147,17 +149,23 @@ def test_oscillating_inside_circle_does_not_receive_completion_reward():
     for step in range(500):
         # Never hold two-wheel support continuously for the required 0.5s.
         env.scene["right_wheel_contact"].data.found[:] = step % 20 < 10
-        assert bonus(env, hold_s=0.50, target_reached_distance_m=0.10,
-                     max_heading_error_rad=0.20).item() == 0.0
+        assert (
+            bonus(
+                env, hold_s=0.50, target_reached_distance_m=0.10, max_heading_error_rad=0.20
+            ).item()
+            == 0.0
+        )
     env.scene["right_wheel_contact"].data.found[:] = True
     paid = [
-        bonus(env, hold_s=0.50, target_reached_distance_m=0.10,
-              max_heading_error_rad=0.20).item()
+        bonus(env, hold_s=0.50, target_reached_distance_m=0.10, max_heading_error_rad=0.20).item()
         for _ in range(60)
     ]
     assert sum(paid) * env.step_dt == pytest.approx(1.0)
-    assert all(bonus(env, hold_s=0.50, target_reached_distance_m=0.10,
-                     max_heading_error_rad=0.20).item() == 0.0 for _ in range(100))
+    assert all(
+        bonus(env, hold_s=0.50, target_reached_distance_m=0.10, max_heading_error_rad=0.20).item()
+        == 0.0
+        for _ in range(100)
+    )
 
 
 def test_failure_impulse_deters_early_reset_without_punishing_timeout():
@@ -170,10 +178,9 @@ def test_failure_impulse_deters_early_reset_without_punishing_timeout():
     env.termination_manager.time_outs[:] = True
     assert rewards.generalist_failure_termination_impulse(env).item() == 0.0
     env.termination_manager.terminated[:] = True
-    assert (
-        rewards.generalist_failure_termination_impulse(env).item() * env.step_dt
-        == pytest.approx(1.0)
-    )
+    assert rewards.generalist_failure_termination_impulse(
+        env
+    ).item() * env.step_dt == pytest.approx(1.0)
     cfg = ascento_generalist_goal_settle_v3_env_cfg(num_envs=2)
     assert cfg.rewards["failure_termination_impulse"].weight == -200.0
 
