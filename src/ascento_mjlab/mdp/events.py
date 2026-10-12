@@ -1667,6 +1667,7 @@ class RepeatedRandomWorldTargetSequence:
         gate_like_initial_hold: bool = False,
         quarter_turn_heading_fraction: float | None = None,
         fixed_goal_mix_stage: int | None = None,
+        navigation_stage_independent_of_recovery: bool = False,
         asset_cfg: SceneEntityCfg,
     ) -> None:
         if fixed_goal_mix_stage is not None:
@@ -1746,7 +1747,10 @@ class RepeatedRandomWorldTargetSequence:
             raise ValueError("gate push requires 0 < min_delta_v <= max_delta_v")
         if not 0.0 < gate_min_target_distance_m <= gate_max_target_distance_m:
             raise ValueError("gate target distance requires 0 < min <= max")
-        if quarter_turn_heading_fraction is not None and not 0.0 <= quarter_turn_heading_fraction <= 1.0:
+        if (
+            quarter_turn_heading_fraction is not None
+            and not 0.0 <= quarter_turn_heading_fraction <= 1.0
+        ):
             raise ValueError("quarter_turn_heading_fraction must be in [0, 1]")
         minimum_attempts = (
             int(minimum_attempts_per_window)
@@ -1765,7 +1769,10 @@ class RepeatedRandomWorldTargetSequence:
             if self._fixed_cohort_ids is None:
                 if gate_like_initial_hold:
                     assigned = getattr(env, "ascento_locomotion_gate_like", None)
-                    if not isinstance(assigned, torch.Tensor) or assigned.shape != self._gate_like.shape:
+                    if (
+                        not isinstance(assigned, torch.Tensor)
+                        or assigned.shape != self._gate_like.shape
+                    ):
                         raise RuntimeError("gate-like initial hold requires reset episode labels")
                     self._gate_like[new_ids] = assigned[new_ids]
                 else:
@@ -1926,6 +1933,7 @@ class RepeatedRandomWorldTargetSequence:
                 minimum_attempts=minimum_attempts,
                 gate_recovery_lcb_threshold=gate_recovery_lcb_threshold,
                 target_arrival_lcb_threshold=target_arrival_lcb_threshold,
+                navigation_stage_independent_of_recovery=navigation_stage_independent_of_recovery,
             )
 
         regular_ids = ids[~self._gate_like[ids]]
@@ -2101,6 +2109,7 @@ class RepeatedRandomWorldTargetSequence:
         minimum_attempts: int,
         gate_recovery_lcb_threshold: float,
         target_arrival_lcb_threshold: float,
+        navigation_stage_independent_of_recovery: bool = False,
     ) -> None:
         done_ids = env.termination_manager.dones.nonzero(as_tuple=False).flatten()
         if done_ids.numel() == 0:
@@ -2219,7 +2228,10 @@ class RepeatedRandomWorldTargetSequence:
             long_episodes=int(self._goal_mix_state["window_long_attempts"]),
             minimum_attempts=minimum_attempts,
             demotion_streak=int(self._goal_mix_state["demotion_streak"]),
-            promotion_gate_lcb_threshold=gate_recovery_lcb_threshold,
+            promotion_gate_lcb_threshold=(
+                0.0 if navigation_stage_independent_of_recovery else gate_recovery_lcb_threshold
+            ),
+            demotion_gate_lcb_threshold=(0.0 if navigation_stage_independent_of_recovery else 0.70),
             promotion_target_lcb_threshold=target_arrival_lcb_threshold,
         )
         self._goal_mix_state["demotion_streak"] = demotion_streak
@@ -2468,7 +2480,10 @@ def _set_bounded_random_world_targets(
             raise ValueError(
                 "target_distances_m must provide one positive distance per environment"
             )
-    if quarter_turn_heading_fraction is not None and not 0.0 <= quarter_turn_heading_fraction <= 1.0:
+    if (
+        quarter_turn_heading_fraction is not None
+        and not 0.0 <= quarter_turn_heading_fraction <= 1.0
+    ):
         raise ValueError("quarter_turn_heading_fraction must be in [0, 1]")
 
     current = asset.data.root_link_pos_w[ids, :2]

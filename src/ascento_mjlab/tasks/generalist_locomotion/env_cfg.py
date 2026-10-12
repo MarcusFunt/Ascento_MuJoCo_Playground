@@ -141,9 +141,9 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
                 ),
             },
         )
-    progress_reward_mode = os.environ.get(
-        "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE", "velocity"
-    ).strip().lower()
+    progress_reward_mode = (
+        os.environ.get("ASCENTO_GENERALIST_PROGRESS_REWARD_MODE", "velocity").strip().lower()
+    )
     if progress_reward_mode not in {"velocity", "potential"}:
         raise ValueError(
             "ASCENTO_GENERALIST_PROGRESS_REWARD_MODE must be 'velocity' or 'potential'"
@@ -155,9 +155,7 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
 
         potential_scale = float(os.environ.get("ASCENTO_GENERALIST_POTENTIAL_SCALE", "20.0"))
         if not math.isfinite(potential_scale) or potential_scale <= 0.0:
-            raise ValueError(
-                "ASCENTO_GENERALIST_POTENTIAL_SCALE must be finite and positive"
-            )
+            raise ValueError("ASCENTO_GENERALIST_POTENTIAL_SCALE must be finite and positive")
         velocity_term = cfg.rewards["world_target_progress"]
         cfg.rewards["world_target_progress"] = RewardTermCfg(
             func=ascento_mdp.rewards.PotentialBasedTargetDistanceReward,
@@ -168,13 +166,9 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
                 "asset_cfg": velocity_term.params["asset_cfg"],
             },
         )
-    target_quality_weight = float(
-        os.environ.get("ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT", "0.0")
-    )
+    target_quality_weight = float(os.environ.get("ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT", "0.0"))
     if not math.isfinite(target_quality_weight) or target_quality_weight < 0.0:
-        raise ValueError(
-            "ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT must be finite and nonnegative"
-        )
+        raise ValueError("ASCENTO_GENERALIST_TARGET_QUALITY_WEIGHT must be finite and nonnegative")
     if not play and target_quality_weight > 0.0:
         cfg.rewards["target_settled_quality"] = RewardTermCfg(
             func=ascento_mdp.rewards.GeneralistTargetSettledQuality,
@@ -195,10 +189,11 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
     quarter_turn_heading_fraction = float(
         os.environ.get("ASCENTO_GENERALIST_QUARTER_TURN_HEADING_FRACTION", "0.20")
     )
-    if not math.isfinite(quarter_turn_heading_fraction) or not 0.0 <= quarter_turn_heading_fraction <= 1.0:
-        raise ValueError(
-            "generalist quarter-turn heading fraction must be finite and in [0, 1]"
-        )
+    if (
+        not math.isfinite(quarter_turn_heading_fraction)
+        or not 0.0 <= quarter_turn_heading_fraction <= 1.0
+    ):
+        raise ValueError("generalist quarter-turn heading fraction must be finite and in [0, 1]")
     goal_band_params = {
         "stratified_goal_mix": not play,
         "short_min_distance_m": 0.15,
@@ -210,9 +205,7 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
         "initial_long_goal_fraction": 0.10,
         "medium_goal_fraction": 0.25,
         "max_long_goal_fraction": 0.40,
-        "quarter_turn_heading_fraction": (
-            quarter_turn_heading_fraction if not play else None
-        ),
+        "quarter_turn_heading_fraction": (quarter_turn_heading_fraction if not play else None),
     }
     fixed_cohort_params = {
         "precision_anchor_fraction": precision_anchor_fraction,
@@ -226,9 +219,7 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
         }
     )
     if not play:
-        fixed_goal_mix_stage_value = os.environ.get(
-            "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE"
-        )
+        fixed_goal_mix_stage_value = os.environ.get("ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE")
         fixed_goal_mix_stage = None
         if fixed_goal_mix_stage_value is not None:
             try:
@@ -238,9 +229,7 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
                     "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE must be 0, 1, or 2"
                 ) from exc
             if fixed_goal_mix_stage not in (0, 1, 2):
-                raise ValueError(
-                    "ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE must be 0, 1, or 2"
-                )
+                raise ValueError("ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE must be 0, 1, or 2")
         cfg.events["repeated_random_world_targets"].params.update(
             {
                 "target_reached_distance_m": (
@@ -439,7 +428,6 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
     return cfg
 
 
-
 def ascento_generalist_goal_settle_v2_env_cfg(play: bool = False, num_envs: int = 512):
     """Experimental approach-to-settle reward/arrival topology; never mutates v1.
 
@@ -591,4 +579,31 @@ def ascento_generalist_goal_settle_v3_env_cfg(play: bool = False, num_envs: int 
             weight=-200.0,
         )
     cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V3-Flat"
+    return cfg
+
+
+def ascento_generalist_goal_settle_v4_env_cfg(play: bool = False, num_envs: int = 512):
+    """Completion-first v4 with critic-safe failure shaping.
+
+    Preserve v2 and v3 reward contracts and their checkpoint provenance.
+    Keep v3's per-target pending cost, signed progress, capped settling quality,
+    and one-shot 0.5 s completion. Avoid its -200 failure impulse, which
+    destabilized the value function in matched 50-update training.
+    """
+    cfg = ascento_generalist_goal_settle_v3_env_cfg(play=play, num_envs=num_envs)
+    if not play:
+        # The old gate required >=85% push recovery before *navigation*
+        # targets could grow, even when short-waypoint success exceeded 95%.
+        # Keep the recovery cohort and independent telemetry, but let the
+        # goal-distance curriculum follow navigation competence.
+        cfg.events["repeated_random_world_targets"].params[
+            "navigation_stage_independent_of_recovery"
+        ] = True
+        failure = cfg.rewards["failure_termination_impulse"]
+        cfg.rewards["failure_termination_impulse"] = RewardTermCfg(
+            func=failure.func,
+            weight=-30.0,
+            params=dict(failure.params),
+        )
+    cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V4-Flat"
     return cfg
