@@ -317,10 +317,18 @@ def decorate_records(records: list[dict[str, Any]], run_dir: Path) -> list[dict[
     return decorated
 
 
-def load_dashboard_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
+def load_dashboard_records(
+    run_dir: Path,
+    limit: int | None = 2000,
+    *,
+    fast: bool = False,
+) -> list[dict[str, Any]]:
     # Load enough recent history to compute a stable rolling iteration rate.
     raw_limit = None if limit is None else max(limit, 32)
-    records = decorate_records(monitor.load_training_records(run_dir, limit=raw_limit), run_dir)
+    records = decorate_records(
+        monitor.load_training_records(run_dir, limit=raw_limit, fast=fast),
+        run_dir,
+    )
     return records[-limit:] if limit is not None else records
 
 
@@ -668,6 +676,7 @@ def summarize_dashboard_run(
     include_telemetry: bool = True,
     include_errors: bool = True,
     include_artifacts: bool = True,
+    fast_telemetry: bool = False,
     now: float | None = None,
 ) -> dict[str, Any]:
     now = time.time() if now is None else now
@@ -675,11 +684,20 @@ def summarize_dashboard_run(
         run_dir,
         root,
         now=now,
-        include_telemetry=include_telemetry,
+        # Telemetry is loaded once below with the requested fast/history source.
+        include_telemetry=False,
         include_errors=include_errors,
         include_artifacts=include_artifacts,
     )
-    records = load_dashboard_records(run_dir, limit=500 if detailed else 1) if include_telemetry else []
+    records = (
+        load_dashboard_records(
+            run_dir,
+            limit=500 if detailed else 1,
+            fast=fast_telemetry,
+        )
+        if include_telemetry
+        else []
+    )
     latest = records[-1] if records else None
     status_file = run_status_path(run_dir, root)
     status = _json(status_file) or base.get("status") or {}

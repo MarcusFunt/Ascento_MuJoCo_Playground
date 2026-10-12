@@ -13,7 +13,8 @@ export function BlenderRenderGallery() {
   const renders = useQuery({
     queryKey: ['blender-renders'],
     queryFn: api.blenderRenders,
-    refetchInterval: 20_000,
+    refetchInterval: 60_000,
+    staleTime: 60_000,
   })
   const items = renders.data?.renders || []
 
@@ -55,7 +56,7 @@ export function BlenderRenderGallery() {
             return (
               <article key={render.manifest_path || title} className="min-w-0 overflow-hidden rounded-lg border border-border bg-background/35">
                 {video?.url ? (
-                  <video className="aspect-video w-full bg-black object-contain" controls preload="metadata">
+                  <video className="aspect-video w-full bg-black object-contain" controls preload="none">
                     <source src={video.url} type="video/mp4" />
                   </video>
                 ) : preview?.url ? (

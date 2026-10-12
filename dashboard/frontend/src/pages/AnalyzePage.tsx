@@ -33,10 +33,10 @@ const ADVANCED = [
 export function AnalyzePage() {
   const params = useParams({ strict: false }) as { runId?: string }
   const navigate = useNavigate()
-  const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 10_000 })
+  const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 15_000, staleTime: 10_000 })
   const selectedId = params.runId || runs.data?.runs.find((run) => ['starting', 'running', 'stopping'].includes(run.state))?.id || runs.data?.runs[0]?.id || ''
-  const detail = useQuery({ queryKey: ['run', selectedId], queryFn: () => api.run(selectedId), enabled: Boolean(selectedId), refetchInterval: 10_000 })
-  const telemetry = useQuery({ queryKey: ['telemetry', selectedId], queryFn: () => api.telemetry(selectedId, 900), enabled: Boolean(selectedId), refetchInterval: 15_000 })
+  const selectedRun = runs.data?.runs.find((run) => run.id === selectedId)
+  const telemetry = useQuery({ queryKey: ['telemetry', selectedId], queryFn: () => api.telemetry(selectedId, 450), enabled: Boolean(selectedId), refetchInterval: 30_000 })
   const curriculum = useQuery({ queryKey: ['curriculum', selectedId], queryFn: () => api.curriculum(selectedId), enabled: Boolean(selectedId), refetchInterval: 10_000 })
 
   const records = telemetry.data?.records || []
@@ -72,11 +72,11 @@ export function AnalyzePage() {
         <div className="space-y-6">
           <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-panel p-4 sm:p-5">
             <div>
-              <div className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{String(detail.data?.run_info?.task || detail.data?.stage || 'Run')}</div>
-              <h2 className="mt-1 break-words text-xl font-semibold">{detail.data?.display_name || detail.data?.name || 'Loading…'}</h2>
+              <div className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{String(selectedRun?.task || selectedRun?.stage || 'Run')}</div>
+              <h2 className="mt-1 break-words text-xl font-semibold">{selectedRun?.display_name || selectedRun?.name || 'Loading…'}</h2>
             </div>
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted">
-              <span>Iteration <strong className="numeric text-foreground">{fmtNumber(detail.data?.telemetry?.iteration, 0)}</strong></span>
+              <span>Iteration <strong className="numeric text-foreground">{fmtNumber(selectedRun?.iteration, 0)}</strong></span>
               <span>Source points <strong className="numeric text-foreground">{fmtNumber(telemetry.data?.source_records ?? records.length, 0)}</strong></span>
             </div>
           </section>

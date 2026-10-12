@@ -24,13 +24,24 @@ const navigation = [
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ascento-sidebar-collapsed') === '1')
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const isOverviewPage = pathname === '/'
   const overview = useQuery({
     queryKey: ['overview'],
     queryFn: api.overview,
-    refetchInterval: 5_000,
-    staleTime: 2_000,
+    enabled: isOverviewPage,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
   })
-  const active = overview.data?.active_run
+  const runs = useQuery({
+    queryKey: ['runs'],
+    queryFn: api.runs,
+    enabled: !isOverviewPage,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  })
+  const active = isOverviewPage
+    ? overview.data?.active_run
+    : runs.data?.runs.find((run) => ['starting', 'running', 'stopping'].includes(run.state))
 
   const toggle = () => {
     setCollapsed((value) => {

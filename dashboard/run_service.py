@@ -175,6 +175,7 @@ class RunService:
             detailed=False,
             include_errors=False,
             include_artifacts=False,
+            fast_telemetry=True,
         )
         return self.annotate(summary, ref.path)
 
@@ -188,6 +189,7 @@ class RunService:
             detailed=False,
             include_errors=False,
             include_artifacts=False,
+            fast_telemetry=True,
         )
         return self.annotate_index(summary, ref.path)
 

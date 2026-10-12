@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import os
 import threading
@@ -67,6 +68,11 @@ _INDEX_CACHE: tuple[float, list[dict]] | None = None
 _OVERVIEW_SERIES_CACHE_TTL_S = 10.0
 _OVERVIEW_SERIES_CACHE_LOCK = threading.Lock()
 _OVERVIEW_SERIES_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_OVERVIEW_CACHE_TTL_S = 12.0
+_OVERVIEW_CACHE_LOCK = threading.Lock()
+_OVERVIEW_REFRESH_LOCK = threading.Lock()
+_OVERVIEW_CACHE: tuple[float, dict] | None = None
+_OVERVIEW_CACHE_GENERATION = 0
 
 app = FastAPI(title="Ascento Control", version="3.0")
 
@@ -205,11 +211,14 @@ def _blender_asset_url(path: Path, root: Path) -> str | None:
 
 
 def _invalidate_summary_cache() -> None:
-    global _SUMMARY_CACHE, _INDEX_CACHE
+    global _SUMMARY_CACHE, _INDEX_CACHE, _OVERVIEW_CACHE, _OVERVIEW_CACHE_GENERATION
     with _SUMMARY_CACHE_LOCK:
         _SUMMARY_CACHE = None
     with _INDEX_CACHE_LOCK:
         _INDEX_CACHE = None
+    with _OVERVIEW_CACHE_LOCK:
+        _OVERVIEW_CACHE = None
+        _OVERVIEW_CACHE_GENERATION += 1
 
 
 def _compact_run(summary: dict) -> dict:
@@ -300,7 +309,7 @@ def _overview_series(run_id: str, max_points: int = 120) -> list[dict]:
             return list(cached[1])
 
     ref = _run(run_id)
-    raw = load_training_records(ref.path, limit=600)
+    raw = load_training_records(ref.path, limit=600, fast=True)
     if len(raw) > max_points:
         raw = _sample_records(raw, max_points)
     records = decorate_records(raw, ref.path)
@@ -531,9 +540,7 @@ def run_index():
     return {"runs": rows}
 
 
-@app.get("/api/overview")
-def overview():
-    """Return everything the landing page needs in one bounded request."""
+def _build_overview_response() -> dict:
     rows = _indexed_summaries()
     active_states = {"starting", "running", "stopping"}
     active = next((row for row in rows if row.get("state") in active_states), None)
@@ -572,6 +579,54 @@ def overview():
     except (KeyError, OSError) as error:
         raise HTTPException(status_code=500, detail=f"failed to build overview: {error}") from error
 
+
+def _refresh_overview_cache() -> None:
+    global _OVERVIEW_CACHE
+    try:
+        with _OVERVIEW_CACHE_LOCK:
+            generation = _OVERVIEW_CACHE_GENERATION
+        response = _build_overview_response()
+        with _OVERVIEW_CACHE_LOCK:
+            if generation == _OVERVIEW_CACHE_GENERATION:
+                _OVERVIEW_CACHE = (time.monotonic(), response)
+    except Exception:
+        logging.exception("background dashboard overview refresh failed")
+    finally:
+        _OVERVIEW_REFRESH_LOCK.release()
+
+
+@app.get("/api/overview")
+def overview():
+    global _OVERVIEW_CACHE
+    with _OVERVIEW_CACHE_LOCK:
+        cached = _OVERVIEW_CACHE
+        age = time.monotonic() - cached[0] if cached else None
+        if cached is not None and age is not None and age < _OVERVIEW_CACHE_TTL_S:
+            return cached[1]
+
+    if cached is not None:
+        if _OVERVIEW_REFRESH_LOCK.acquire(blocking=False):
+            threading.Thread(
+                target=_refresh_overview_cache,
+                name="dashboard-overview-refresh",
+                daemon=True,
+            ).start()
+        return cached[1]
+
+    # Only the first request after startup blocks on a full build. Concurrent
+    # clients wait for that single build instead of repeating filesystem and
+    # telemetry work in parallel.
+    with _OVERVIEW_REFRESH_LOCK:
+        with _OVERVIEW_CACHE_LOCK:
+            cached = _OVERVIEW_CACHE
+            generation = _OVERVIEW_CACHE_GENERATION
+            if cached is not None:
+                return cached[1]
+        response = _build_overview_response()
+        with _OVERVIEW_CACHE_LOCK:
+            if generation == _OVERVIEW_CACHE_GENERATION:
+                _OVERVIEW_CACHE = (time.monotonic(), response)
+        return response
 
 @app.get("/api/runs")
 def runs():

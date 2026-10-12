@@ -315,14 +315,30 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
     return records[-limit:] if limit is not None else records
 
 
-def load_training_records(run_dir: Path, limit: int | None = 2000) -> list[dict[str, Any]]:
-    """Read the densest available history, preserving the full run span."""
+def load_training_records(
+    run_dir: Path,
+    limit: int | None = 2000,
+    *,
+    fast: bool = False,
+) -> list[dict[str, Any]]:
+    """Read training history, optionally preferring cheap live sources.
+
+    Overview polling only needs recent values. Parsing TensorBoard history on
+    every live refresh can make a small status request take tens of seconds, so
+    the fast path uses telemetry JSONL or the bounded trainer-log tail first.
+    Full history remains available to analysis views through the default path.
+    """
     candidates = [
         load_jsonl(run_dir / "telemetry.jsonl", limit=limit),
         load_log_records(run_dir, limit=limit),
-        load_tensorboard_records(run_dir, limit=limit),
     ]
-    records = max(candidates, key=len, default=[])
+    if fast:
+        records = max(candidates, key=len, default=[])
+        if not records:
+            return load_tensorboard_records(run_dir, limit=limit)
+    else:
+        candidates.append(load_tensorboard_records(run_dir, limit=limit))
+        records = max(candidates, key=len, default=[])
     return records[-limit:] if limit is not None else records
 
 

@@ -18,8 +18,8 @@ export function OverviewPage() {
   const overview = useQuery({
     queryKey: ['overview'],
     queryFn: api.overview,
-    refetchInterval: 5_000,
-    staleTime: 2_000,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
   })
 
   const data = overview.data
