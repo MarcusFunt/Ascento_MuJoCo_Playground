@@ -249,6 +249,95 @@ def goal_settle_settled_balance(
     ) * (float(far_gain) + (1.0 - float(far_gain)) * gate)
 
 
+
+
+class GeneralistPendingGoalTimeCost:
+    """Increasing per-attempt time cost; unfinished balancing is not a free strategy.
+
+    The clock restarts only for a new target attempt or an environment reset.
+    A valid settled completion causes the normal retarget event to issue a new
+    attempt. Merely entering the target circle does *not* reset the clock.
+    Values are per-second rates; the reward manager integrates using step_dt.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+        del cfg
+        self._env = env
+        self._elapsed_s = torch.zeros(env.num_envs, device=env.device)
+        self._last_target_xy = world_target_xy(env).clone()
+        self._last_attempt_id = self._attempt_ids(env)
+
+    @staticmethod
+    def _attempt_ids(env: ManagerBasedRlEnv) -> torch.Tensor | None:
+        metrics = getattr(env, "ascento_generalist_episode_metrics", None)
+        ids = metrics.get("attempt_id") if isinstance(metrics, dict) else None
+        if isinstance(ids, torch.Tensor) and ids.shape == (env.num_envs,):
+            return ids.to(device=env.device, dtype=torch.long).clone()
+        return None
+
+    def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+        if env_ids is None:
+            env_ids = slice(None)
+        self._elapsed_s[env_ids] = 0.0
+        self._last_target_xy[env_ids] = world_target_xy(self._env)[env_ids]
+        current_ids = self._attempt_ids(self._env)
+        if current_ids is not None:
+            if self._last_attempt_id is None:
+                self._last_attempt_id = current_ids
+            else:
+                self._last_attempt_id[env_ids] = current_ids[env_ids]
+
+    def __call__(
+        self,
+        env: ManagerBasedRlEnv,
+        base_rate: float = 1.70,
+        ramp_rate: float = 1.30,
+        ramp_seconds: float = 8.0,
+    ) -> torch.Tensor:
+        """Return positive cost; configure with a negative weight.
+
+        Near-target rocking and stationary far-target behavior both keep paying
+        the time cost until a *valid* completion and a fresh target attempt.
+        """
+        if (
+            not all(math.isfinite(x) for x in (base_rate, ramp_rate, ramp_seconds))
+            or base_rate < 0.0
+            or ramp_rate < 0.0
+            or ramp_seconds <= 0.0
+            or not math.isfinite(env.step_dt)
+            or env.step_dt <= 0.0
+        ):
+            raise ValueError("invalid pending-goal time-cost parameters")
+
+        target_xy = world_target_xy(env)
+        changed = torch.linalg.vector_norm(
+            target_xy - self._last_target_xy, dim=1
+        ) > 1.0e-6
+        current_ids = self._attempt_ids(env)
+        if current_ids is not None:
+            active = current_ids >= 0
+            if self._last_attempt_id is None:
+                self._last_attempt_id = current_ids
+            else:
+                changed |= current_ids != self._last_attempt_id
+                self._last_attempt_id.copy_(current_ids)
+        else:
+            active = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
+
+        self._elapsed_s = torch.where(
+            changed | ~active,
+            torch.zeros_like(self._elapsed_s),
+            self._elapsed_s,
+        )
+        self._elapsed_s += float(env.step_dt) * active.to(self._elapsed_s.dtype)
+        self._last_target_xy.copy_(target_xy)
+        return (
+            float(base_rate)
+            + float(ramp_rate)
+            * torch.clamp(self._elapsed_s / float(ramp_seconds), max=1.0)
+        ) * active.to(self._elapsed_s.dtype)
+
+
 class PotentialBasedTargetDistanceReward:
     """Potential-based distance shaping, expressed as a reward-manager rate.
 
