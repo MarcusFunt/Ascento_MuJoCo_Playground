@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Download, Film, RefreshCw } from 'lucide-react'
 import { api } from '../api'
@@ -10,6 +11,8 @@ function dateLabel(value?: string) {
 }
 
 export function BlenderRenderGallery() {
+  const [search, setSearch] = useState('')
+  const [showAll, setShowAll] = useState(false)
   const renders = useQuery({
     queryKey: ['blender-renders'],
     queryFn: api.blenderRenders,
@@ -17,15 +20,21 @@ export function BlenderRenderGallery() {
     staleTime: 60_000,
   })
   const items = renders.data?.renders || []
+  const matches = items.filter((render) => {
+    const text = [render.render_id, render.manifest_path, render.inputs?.source_npz?.task,
+      render.inputs?.policy_checkpoint?.path].filter(Boolean).join(' ').toLowerCase()
+    return text.includes(search.trim().toLowerCase())
+  })
+  const visible = showAll ? matches : matches.slice(0, 4)
 
   return (
     <section className="rounded-xl border border-border bg-panel p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.1em] text-muted"><Film size={14} /> Blender pipeline</div>
-          <h2 className="mt-1 text-xl font-semibold tracking-[-0.02em]">Motion renders</h2>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.1em] text-muted"><Film size={14} /> Video library</div>
+          <h2 className="mt-1 text-xl font-semibold tracking-[-0.02em]">Rendered animations</h2>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-            Render manifests and media served read-only from the WSL-mounted captures/blender directory.
+            Watch recorded behavior here, then switch to replay or learning curves without leaving the workspace.
           </p>
         </div>
         <Button variant="secondary" size="sm" onClick={() => void renders.refetch()} disabled={renders.isFetching}>
@@ -45,9 +54,19 @@ export function BlenderRenderGallery() {
         </p>
       ) : null}
 
-      {items.length ? (
-        <div className="mt-5 grid gap-4 xl:grid-cols-2">
-          {items.map((render) => {
+      {items.length > 0 ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <label className="min-w-0 flex-1 text-xs font-semibold text-muted">
+          Filter recordings
+          <input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setShowAll(false) }}
+            placeholder="Search task, render or checkpoint"
+            className="control-focus mt-1.5 block min-h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground sm:max-w-md" />
+        </label>
+        <span className="text-xs text-muted">{matches.length} of {items.length} recordings</span>
+      </div> : null}
+      {items.length > 0 && matches.length === 0 ? <p className="mt-4 text-sm text-muted">No matching recordings. Try a different search.</p> : null}
+      {matches.length > 0 ? (
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          {visible.map((render) => {
             const capture = render.inputs?.source_npz
             const policy = render.inputs?.policy_checkpoint
             const video = render.outputs?.video
@@ -89,7 +108,11 @@ export function BlenderRenderGallery() {
                       ) : null}
                     </div>
                   </div>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <details className="mt-4 border-t border-border pt-3">
+                    <summary className="control-focus cursor-pointer rounded text-xs font-semibold text-secondary hover:text-foreground">
+                      Capture metadata and provenance
+                    </summary>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <div className="min-w-0">
                       <span className="block text-[10px] font-bold uppercase tracking-[0.08em] text-muted">Source capture SHA-256</span>
                       <code className="mt-1 block break-all text-[11px] text-secondary">{capture?.sha256 || 'Missing'}</code>
@@ -105,12 +128,25 @@ export function BlenderRenderGallery() {
                       <code className="mt-1 block break-all text-[11px] text-secondary">{policy?.sha256 || 'Not applicable / unavailable'}</code>
                     </div>
                   </div>
+                  </details>
                   {render.error ? <p className="mt-3 text-xs text-danger">{render.error}</p> : null}
                 </div>
               </article>
             )
           })}
         </div>
+      ) : null}
+      {!showAll && matches.length > visible.length ? (
+        <button type="button" onClick={() => setShowAll(true)}
+          className="control-focus mt-4 w-full rounded-lg border border-border-strong px-4 py-3 text-sm font-semibold hover:bg-hover">
+          Show all {matches.length} recordings
+        </button>
+      ) : null}
+      {showAll && matches.length > 4 ? (
+        <button type="button" onClick={() => setShowAll(false)}
+          className="control-focus mt-4 rounded-lg border border-border px-4 py-2 text-sm font-semibold hover:bg-hover">
+          Show fewer
+        </button>
       ) : null}
     </section>
   )

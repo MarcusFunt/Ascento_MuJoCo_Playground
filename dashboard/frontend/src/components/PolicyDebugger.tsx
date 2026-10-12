@@ -75,7 +75,7 @@ export function PolicyDebugger({
 
       {!viewer ? (
         <p className="mt-5 rounded-lg border border-border bg-background/35 p-4 text-sm text-secondary">
-          Start the isolated policy viewer above to populate live observations and actions. The trainer is not instrumented by this debugger.
+          Start the isolated checkpoint viewer under Workspace → Visualize to populate observations and actions. These diagnostics are separate from live PPO training.
         </p>
       ) : schemaError ? (
         <p className="mt-5 rounded-lg border border-danger/35 bg-danger/10 p-4 text-sm text-danger">Could not load the live observation schema: {schemaError.message}</p>

@@ -83,7 +83,7 @@ export function TelemetryChart({
   }
 
   return (
-    <section className="rounded-xl border border-border bg-panel p-5">
+    <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-panel p-4 sm:p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="text-[15px] font-semibold">{title}</h3>
