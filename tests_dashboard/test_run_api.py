@@ -79,6 +79,12 @@ def test_created_run_is_immediately_discoverable(monkeypatch, tmp_path):
         "dashboard.run_service.working_tree_state",
         lambda _: WorkingTreeState("abc123", "main", (), ()),
     )
+    # This tests immediate API discoverability, not the separate strict runtime
+    # checkout policy. Keep it runnable on a detached PR checkout.
+    monkeypatch.setattr(
+        "dashboard.run_service.runtime_identity",
+        lambda *_args, **_kwargs: {"device": "cuda:0", "branch": "main", "commit": "abc123"},
+    )
     created = module.create_run(
         module.RunCreateRequest(
             display_name="adaptive-balance-horizons",

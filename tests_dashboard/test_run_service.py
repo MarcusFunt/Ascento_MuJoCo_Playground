@@ -403,7 +403,8 @@ def test_explicit_cpu_request_is_preserved_for_a_managed_run(monkeypatch, tmp_pa
 
     command = captured["command"]
     trainer_args = command[command.index("--") + 1 :]
-    assert trainer_args == ["--device", "cpu"]
+    # The canonical mjlab launcher normalizes CPU to --gpu-ids None.
+    assert trainer_args == ["--gpu-ids", "None"]
     run = service.resolve(created["id"])
     metadata = json.loads((run.path / "run_metadata.json").read_text(encoding="utf-8"))
     assert metadata["runtime"]["device"] == "cpu"

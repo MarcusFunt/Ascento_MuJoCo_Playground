@@ -28,7 +28,20 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
   return body as T
 }
 
+export type ReplayEntry = {
+  name: string
+  source: string | null
+  rrd_url: string | null
+  updated_at: number
+}
+
 export const api = {
+  replays: () => fetchJson<{ replays: ReplayEntry[] }>('/api/replays'),
+  exportReplay: (source: string) =>
+    fetchJson<{ name: string; rrd_url: string; bytes: number }>(
+      '/api/replays/export/' + source.split('/').map(encodeURIComponent).join('/'),
+      { method: 'POST', headers: { 'X-Ascento-Control': '1' } },
+    ),
   blenderRenders: () => fetchJson<{ renders: BlenderRender[]; root: string }>(`/api/blender/renders`),
   overview: () => fetchJson<OverviewResponse>('/api/overview'),
   runs: () => fetchJson<{ runs: RunIndexRow[] }>('/api/runs/index'),

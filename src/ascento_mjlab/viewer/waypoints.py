@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-# MJLab discovers registered tasks during import; initialize it before Ascento MDP imports.
-import mjlab  # noqa: F401
 import torch
 
+# MJLab discovers registered tasks during import; initialize it before Ascento MDP imports.
+import mjlab  # noqa: F401
 from ascento_mjlab.mdp.events import (
     world_target_xy,
     world_target_yaw,

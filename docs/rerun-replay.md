@@ -88,3 +88,23 @@ so it introduces no dependency or GPU data transfer overhead into PPO training.
 
 The current implementation writes a reusable .rrd recording. A dashboard-embedded
 viewer and indexed multi-episode UI are separate follow-up integrations.
+
+
+## Embedded Analyze viewer
+
+The React dashboard embeds the Rerun web viewer directly on Analyze.
+The backend lists recordings under captures/ and generates RRD files on demand
+using POST /api/replays/export/<capture>.npz. Recorded files are served only
+from the dashboard's own origin under /api/replays/files/.
+
+The normal scripts/run_dashboard.sh launcher uses --extra dashboard --extra rerun.
+The frontend pins @rerun-io/web-viewer-react to 0.33.1, matching the Python
+Rerun SDK. Rebuild the frontend after updating the repository.
+
+Choose a capture, generate an RRD if needed, then click Open 3D viewer.
+This is opt-in because the WebAssembly renderer is relatively large.
+The recording is served from the dashboard origin, without a separate viewer
+service or public RRD URL.
+
+The viewer shows persisted kinematic recordings, not live simulation.
+Older NPZ captures can be converted but lack the newer reward and target signals.

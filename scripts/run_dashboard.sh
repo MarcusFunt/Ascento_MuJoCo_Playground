@@ -11,7 +11,7 @@ DIST="${ASCENTO_DASHBOARD_DIST:-$ROOT/dashboard/frontend/dist}"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "Dashboard startup failed: uv is not installed or not on PATH." >&2
-  echo "Install uv, then run: uv sync --frozen --extra dashboard" >&2
+  echo "Install uv, then run: uv sync --frozen --extra dashboard --extra rerun" >&2
   exit 1
 fi
 
@@ -22,6 +22,6 @@ if [[ ! -f "$DIST/index.html" ]]; then
 fi
 
 cd "$ROOT"
-exec uv run --frozen --extra dashboard python -m uvicorn dashboard.app:app \
+exec uv run --frozen --extra dashboard --extra rerun python -m uvicorn dashboard.app:app \
   --host "${ASCENTO_DASHBOARD_HOST:-127.0.0.1}" \
   --port "${ASCENTO_DASHBOARD_PORT:-8000}"
