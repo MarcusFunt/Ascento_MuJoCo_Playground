@@ -71,3 +71,8 @@ AscentoGeneralistLocomotionRlCfg = configure_generalist_normalizer_profile(
     AscentoGeneralistLocomotionRlCfg,
     os.environ.get("ASCENTO_GENERALIST_NORMALIZER_PROFILE", "adaptive").strip().lower(),
 )
+
+
+# Independent experiment logs while retaining the exact PPO hyperparameters.
+AscentoGeneralistGoalSettleV2RlCfg = deepcopy(AscentoGeneralistLocomotionRlCfg)
+AscentoGeneralistGoalSettleV2RlCfg.experiment_name = "ascento_generalist_goal_settle_v2_flat"

@@ -1873,7 +1873,7 @@ class RepeatedRandomWorldTargetSequence:
             target_distance = torch.linalg.vector_norm(
                 asset.data.root_link_pos_w[ids, :2] - world_target_xy(env)[ids], dim=1
             )
-            within_arrival = target_distance <= GENERALIST_TARGET_ARRIVAL_DISTANCE_M
+            within_arrival = target_distance <= target_reached_distance_m
             if self._fixed_cohort_ids is not None:
                 active_target = ~self._gate_like[ids] | self._gate_retargeted[ids]
                 within_arrival &= active_target
