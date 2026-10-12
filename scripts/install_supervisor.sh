@@ -3,10 +3,6 @@ set -Eeuo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CANONICAL_ROOT="/root/Ascento_MuJoCo_Playground"
-if [[ "$REPO_ROOT" != "$CANONICAL_ROOT" ]]; then
-  echo "ERROR: use the canonical WSL checkout at $CANONICAL_ROOT; found $REPO_ROOT" >&2
-  exit 1
-fi
 # Keep this outside the checkout: Linux limits Unix-domain socket paths to
 # 108 bytes, which long WSL-mounted paths (for example, OneDrive checkouts)
 # can exceed.
@@ -30,6 +26,10 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 [[ $# -eq 0 ]] || { usage >&2; exit 2; }
+if [[ "$REPO_ROOT" != "$CANONICAL_ROOT" ]]; then
+  echo "ERROR: use the canonical WSL checkout at $CANONICAL_ROOT; found $REPO_ROOT" >&2
+  exit 1
+fi
 
 [[ "$(uname -s)" == "Linux" ]] || { echo "ERROR: supervisor installation requires Linux/WSL2" >&2; exit 1; }
 [[ -n "$PYTHON_BIN" ]] || { echo "ERROR: python3 is required" >&2; exit 1; }
