@@ -100,7 +100,7 @@ export function OverviewPage() {
               <div className="flex w-full flex-wrap gap-2 sm:w-auto">
                 <Link to="/runs/$runId" params={{ runId: run.id }} className="control-focus inline-flex h-11 items-center gap-2 rounded-lg border border-border-strong bg-raised px-4 text-sm font-semibold hover:bg-hover">Run details</Link>
                 <Link to="/analyze/$runId" params={{ runId: run.id }} className="control-focus inline-flex h-11 items-center gap-2 rounded-lg border border-foreground bg-foreground px-4 text-sm font-semibold text-background hover:bg-[#dfe2e5]">
-                  Analyze <ArrowRight size={15} />
+                  Open workspace <ArrowRight size={15} />
                 </Link>
               </div>
             </div>

@@ -7,20 +7,15 @@ import { CurriculumRail } from '../components/CurriculumRail'
 import { EditRunDialog } from '../components/EditRunDialog'
 import { PageHeader } from '../components/PageHeader'
 import { LiveTrainingPanel } from '../components/LiveTrainingPanel'
-import { PolicyArchitectureCard } from '../components/PolicyArchitectureCard'
-import { PolicyDebugger } from '../components/PolicyDebugger'
 import { StateBadge } from '../components/StateBadge'
-import { ViewerCard } from '../components/ViewerCard'
 import { Button } from '../components/ui/button'
 import { Progress } from '../components/ui/progress'
 import { fmtDate, fmtNumber, fmtPercent, shortCommit } from '../lib/utils'
-import { usePolicyIntrospection } from '../hooks/usePolicyIntrospection'
 
 export function RunDetailPage() {
   const { runId } = useParams({ strict: false }) as { runId: string }
   const [editOpen, setEditOpen] = useState(false)
   const queryClient = useQueryClient()
-  const introspection = usePolicyIntrospection(runId)
   const detail = useQuery({ queryKey: ['run', runId], queryFn: () => api.run(runId), refetchInterval: 10_000 })
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, staleTime: 10_000 })
   const curriculum = useQuery({ queryKey: ['curriculum', runId], queryFn: () => api.curriculum(runId), refetchInterval: 10_000 })
@@ -54,7 +49,7 @@ export function RunDetailPage() {
         description={run.notes || run.name}
         actions={
           <>
-            <Link to="/analyze/$runId" params={{ runId }} className="control-focus inline-flex h-11 items-center gap-2 rounded-lg border border-border-strong bg-raised px-4 text-sm font-semibold hover:bg-hover"><ChartNoAxesCombined size={16} /> Analyze</Link>
+            <Link to="/analyze/$runId" params={{ runId }} hash="monitor" className="control-focus inline-flex h-11 items-center gap-2 rounded-lg border border-foreground bg-foreground px-4 text-sm font-semibold text-background hover:opacity-90"><ChartNoAxesCombined size={16} /> Open workspace</Link>
             <Button onClick={() => setEditOpen(true)}><Pencil size={15} /> Edit</Button>
             {active ? <Button variant="danger" disabled={stop.isPending || run.state === 'stopping'} onClick={() => stop.mutate()}><Square size={14} /> {run.state === 'stopping' ? 'Stopping…' : 'Graceful stop'}</Button> : null}
           </>
@@ -92,34 +87,30 @@ export function RunDetailPage() {
       <div className="space-y-6">
         <LiveTrainingPanel runId={runId} />
         <CurriculumRail curriculum={curriculum.data?.curriculum} />
-        <PolicyArchitectureCard
-          runId={runId}
-          checkpointPath={typeof info.checkpoint_path === 'string' ? info.checkpoint_path : undefined}
-          liveFrame={introspection.displayFrame}
-          runtimeSchema={introspection.displaySchema}
-        />
-        <ViewerCard
-          runId={runId}
-          checkpointPath={typeof info.checkpoint_path === 'string' ? info.checkpoint_path : undefined}
-        />
-        <PolicyDebugger
-          viewer={introspection.viewer}
-          schema={introspection.displaySchema}
-          frame={introspection.displayFrame}
-          liveFrame={introspection.frame}
-          connected={introspection.connected}
-          schemaError={introspection.schemaError as Error | null}
-          captures={introspection.captures}
-          capture={introspection.capture}
-          selectedCaptureId={introspection.selectedCaptureId}
-          selectedFrameIndex={introspection.selectedFrameIndex}
-          selectCapture={introspection.selectCapture}
-          selectFrame={introspection.selectFrame}
-          onManualCapture={introspection.manualCapture}
-          manualCapturePending={introspection.manualCapturePending}
-          manualCaptureError={introspection.manualCaptureError as Error | null}
-          captureLoading={introspection.captureLoading}
-        />
+        <section className="rounded-xl border border-border bg-panel p-4 sm:p-6">
+          <div className="mb-4">
+            <div className="text-xs font-bold uppercase tracking-wider text-muted">Explore this run</div>
+            <h2 className="mt-1 text-xl font-semibold">One workspace for behavior, recordings and analysis</h2>
+            <p className="mt-1 max-w-2xl text-sm text-muted">Choose what you want to investigate without opening separate dashboard tools.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {([
+              { tab: 'monitor', title: 'Live behavior', note: 'Top-down movement, posture and reward' },
+              { tab: 'visualize', title: 'Visualizations', note: 'Animations, Rerun replay and checkpoint viewer' },
+              { tab: 'metrics', title: 'Learning curves', note: 'Reward trends, PPO metrics and curriculum' },
+            ] as const).map((item) => (
+              <Link key={item.tab} to="/analyze/$runId" params={{ runId }} hash={item.tab}
+                className="control-focus flex min-h-24 flex-col justify-center rounded-lg border border-border-strong bg-raised px-4 py-3 transition-colors hover:bg-hover">
+                <span className="text-sm font-semibold">{item.title} →</span>
+                <span className="mt-1 text-xs leading-relaxed text-muted">{item.note}</span>
+              </Link>
+            ))}
+          </div>
+          <Link to="/analyze/$runId" params={{ runId }} hash="debug"
+            className="control-focus mt-4 inline-flex min-h-10 items-center text-sm font-medium text-secondary underline-offset-4 hover:underline">
+            Advanced policy diagnostics and logs →
+          </Link>
+        </section>
 
         <section className="rounded-xl border border-border bg-panel p-4 sm:p-6">
           <div className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Provenance & contracts</div>
