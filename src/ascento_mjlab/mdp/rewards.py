@@ -148,6 +148,107 @@ def world_target_progress_velocity(
     return torch.tanh(closing_speed / speed_scale) * upright_factor * approach_factor
 
 
+
+def _goal_settle_proximity_gate(
+    distance: torch.Tensor, *, inner_m: float, outer_m: float
+) -> torch.Tensor:
+    """C1-smooth transition: 1 at/inside inner, 0 at/outside outer."""
+    if not 0.0 <= inner_m < outer_m:
+        raise ValueError("goal-settle radii must satisfy 0 <= inner < outer")
+    phase = ((float(outer_m) - distance) / (float(outer_m) - float(inner_m))).clamp(0.0, 1.0)
+    return phase.square() * (3.0 - 2.0 * phase)
+
+
+def goal_settle_progress_velocity(
+    env: ManagerBasedRlEnv,
+    speed_scale: float = 0.30,
+    stop_distance_m: float = 0.35,
+    minimum_near_gain: float = 0.80,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Signed travel credit, retaining useful incentive inside the final 15 cm.
+
+    The old distance/stop_distance factor reduced progress to ~0.33 at 11.5 cm.
+    Leave a floor until the target is actually reached; don't pay if stationary.
+    """
+    if speed_scale <= 0 or stop_distance_m <= 0 or not 0.0 <= minimum_near_gain <= 1.0:
+        raise ValueError("invalid goal-settle progress scales")
+    asset: Entity = env.scene[asset_cfg.name]
+    delta = world_target_xy(env) - asset.data.root_link_pos_w[:, :2]
+    distance = torch.linalg.vector_norm(delta, dim=1)
+    direction = delta / distance.clamp_min(1.0e-6).unsqueeze(1)
+    closing = (asset.data.root_link_lin_vel_w[:, :2] * direction).sum(dim=1)
+    closing = torch.where(distance > 1.0e-3, closing, torch.zeros_like(closing))
+    upright_factor = (-asset.data.projected_gravity_b[:, 2]).clamp(0.0, 1.0)
+    near_gain = (distance / float(stop_distance_m)).clamp(
+        min=float(minimum_near_gain), max=1.0
+    )
+    return torch.tanh(closing / float(speed_scale)) * upright_factor * near_gain
+
+
+def goal_settle_speed_penalty(
+    env: ManagerBasedRlEnv,
+    inner_m: float = 0.065,
+    outer_m: float = 0.14,
+    speed_scale: float = 0.30,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Brake when *inside* the goal envelope, not 11-15 cm outside it."""
+    if speed_scale <= 0:
+        raise ValueError("speed_scale must be positive")
+    asset: Entity = env.scene[asset_cfg.name]
+    distance = torch.linalg.vector_norm(
+        asset.data.root_link_pos_w[:, :2] - world_target_xy(env), dim=1
+    )
+    gate = _goal_settle_proximity_gate(distance, inner_m=inner_m, outer_m=outer_m)
+    return gate * asset.data.root_link_lin_vel_b[:, :2].square().sum(dim=1) / (
+        float(speed_scale) ** 2
+    )
+
+
+def goal_settle_final_heading(
+    env: ManagerBasedRlEnv,
+    inner_m: float = 0.15,
+    outer_m: float = 0.35,
+    far_gain: float = 0.20,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Final yaw is most valuable when approaching the final stopping position."""
+    if not 0.0 <= far_gain <= 1.0:
+        raise ValueError("far_gain must be in [0, 1]")
+    asset: Entity = env.scene[asset_cfg.name]
+    distance = torch.linalg.vector_norm(
+        asset.data.root_link_pos_w[:, :2] - world_target_xy(env), dim=1
+    )
+    gate = _goal_settle_proximity_gate(distance, inner_m=inner_m, outer_m=outer_m)
+    return world_target_heading_linear(env, asset_cfg=asset_cfg) * (
+        float(far_gain) + (1.0 - float(far_gain)) * gate
+    )
+
+
+def goal_settle_settled_balance(
+    env: ManagerBasedRlEnv,
+    near_goal_m: float = 0.10,
+    outer_m: float = 0.17,
+    far_gain: float = 0.15,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    obstacle_height_tolerance_m: float | None = None,
+) -> torch.Tensor:
+    """Keep an equilibrium incentive without paying full settle reward far away."""
+    if not 0.0 <= far_gain <= 1.0:
+        raise ValueError("far_gain must be in [0, 1]")
+    asset: Entity = env.scene[asset_cfg.name]
+    distance = torch.linalg.vector_norm(
+        asset.data.root_link_pos_w[:, :2] - world_target_xy(env), dim=1
+    )
+    gate = _goal_settle_proximity_gate(distance, inner_m=near_goal_m, outer_m=outer_m)
+    return settled_balance(
+        env,
+        asset_cfg=asset_cfg,
+        obstacle_height_tolerance_m=obstacle_height_tolerance_m,
+    ) * (float(far_gain) + (1.0 - float(far_gain)) * gate)
+
+
 class PotentialBasedTargetDistanceReward:
     """Potential-based distance shaping, expressed as a reward-manager rate.
 

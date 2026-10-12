@@ -437,3 +437,82 @@ def ascento_generalist_locomotion_env_cfg(play: bool = False, num_envs: int = 51
                 )
     cfg.task_id = "Ascento-Generalist-Locomotion-Flat"
     return cfg
+
+
+
+def ascento_generalist_goal_settle_v2_env_cfg(play: bool = False, num_envs: int = 512):
+    """Experimental approach-to-settle reward/arrival topology; never mutates v1.
+
+    Keep the 42-D actor, 6-action plant and fixed 20/20/60 cohorts unchanged.
+    This task has a distinct ID and must start via actor-only transfer.
+    """
+    cfg = ascento_generalist_locomotion_env_cfg(play=play, num_envs=num_envs)
+    if not play:
+        progress = cfg.rewards["world_target_progress"]
+        cfg.rewards["world_target_progress"] = RewardTermCfg(
+            func=ascento_mdp.rewards.goal_settle_progress_velocity,
+            weight=10.0,
+            params={
+                "speed_scale": 0.30,
+                "stop_distance_m": 0.35,
+                "minimum_near_gain": 0.80,
+                "asset_cfg": progress.params["asset_cfg"],
+            },
+        )
+        speed = cfg.rewards["world_target_speed_penalty"]
+        cfg.rewards["world_target_speed_penalty"] = RewardTermCfg(
+            func=ascento_mdp.rewards.goal_settle_speed_penalty,
+            weight=-2.0,
+            params={
+                "inner_m": 0.065,
+                "outer_m": 0.14,
+                "speed_scale": 0.30,
+                "asset_cfg": speed.params["asset_cfg"],
+            },
+        )
+        heading = cfg.rewards["world_target_heading"]
+        cfg.rewards["world_target_heading"] = RewardTermCfg(
+            func=ascento_mdp.rewards.goal_settle_final_heading,
+            weight=heading.weight,
+            params={
+                "inner_m": 0.15,
+                "outer_m": 0.35,
+                "far_gain": 0.20,
+                **dict(heading.params),
+            },
+        )
+        settled = cfg.rewards["settled_balance"]
+        cfg.rewards["settled_balance"] = RewardTermCfg(
+            func=ascento_mdp.rewards.goal_settle_settled_balance,
+            weight=settled.weight,
+            params={
+                "near_goal_m": 0.10,
+                "outer_m": 0.17,
+                "far_gain": 0.15,
+                **dict(settled.params),
+            },
+        )
+        yaw = cfg.rewards["track_world_target_yaw_rate"]
+        cfg.rewards["track_world_target_yaw_rate"] = RewardTermCfg(
+            func=yaw.func, weight=0.30, params=dict(yaw.params)
+        )
+        # Reward and retarget event agree on the same position, heading and
+        # dwell thresholds. The official evaluation limits remain unchanged.
+        cfg.events["repeated_random_world_targets"].params.update(
+            {
+                "target_reached_distance_m": 0.10,
+                "target_heading_tolerance_rad": 0.20,
+                "target_hold_s": 0.50,
+            }
+        )
+        cfg.rewards["target_arrival_settled_stop"] = RewardTermCfg(
+            func=ascento_mdp.rewards.GeneralistTargetArrivalSettledStopBonus,
+            weight=8.0,
+            params={
+                "hold_s": 0.50,
+                "target_reached_distance_m": 0.10,
+                "max_heading_error_rad": 0.20,
+            },
+        )
+    cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V2-Flat"
+    return cfg

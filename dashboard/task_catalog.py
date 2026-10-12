@@ -44,6 +44,12 @@ _TASKS: tuple[dict[str, Any], ...] = (
         "supports_horizon": False,
     },
     {
+        "id": "Ascento-Generalist-Locomotion-Goal-Settle-V2-Flat",
+        "label": "Goal?settle v2 (experiment)",
+        "description": "Versioned final-approach/braking reward experiment; actor-only transfer required.",
+        "supports_horizon": False,
+    },
+    {
         "id": "Ascento-Locomotion-Gate-Hold-Flat",
         "label": "Locomotion (gate hold)",
         "description": "Locomotion with a held reset target for the gate-like training subset.",
