@@ -6,6 +6,7 @@ import { CurriculumRail } from '../components/CurriculumRail'
 import { BlenderRenderGallery } from '../components/BlenderRenderGallery'
 import { LiveLog } from '../components/LiveLog'
 import { PageHeader } from '../components/PageHeader'
+import { LiveTrainingPanel } from '../components/LiveTrainingPanel'
 import { RerunReplayPanel } from '../components/RerunReplayPanel'
 import { TelemetryChart } from '../components/TelemetryChart'
 import { SelectInput } from '../components/ui/input'
@@ -67,6 +68,9 @@ export function AnalyzePage() {
         }
       />
 
+      {selectedId ? <div className="mb-6">
+        <LiveTrainingPanel runId={selectedId} />
+      </div> : null}
       <div className="mb-6">
         <RerunReplayPanel />
       </div>

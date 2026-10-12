@@ -29,6 +29,7 @@ from dashboard.health import (
     list_dashboard_summaries,
     load_dashboard_records,
 )
+from dashboard.live_training import read_live_frame
 from dashboard.monitor import load_training_records, tail_lines, training_log_path
 from dashboard.replays import export_replay, list_replays, replay_file
 from dashboard.run_service import RunService
@@ -1003,6 +1004,39 @@ def logs(run_id: str, tail: int = 500):
     tail = max(1, min(tail, 5000))
     log_path = training_log_path(ref.path, ARTIFACT_ROOT)
     return {"lines": [line.rstrip("\n") for line in tail_lines(log_path, tail)]}
+
+
+@app.get("/api/runs/{run_id}/live-monitor")
+def live_training_monitor(run_id: str):
+    """Lightweight read-only state from the actual PPO training loop."""
+    return read_live_frame(_run(run_id).path)
+
+
+@app.get("/api/runs/{run_id}/live-monitor/stream")
+async def live_training_monitor_stream(run_id: str, request: Request):
+    """Only transmit changed snapshots; never trigger extra simulation work."""
+    run_path = _run(run_id).path
+
+    async def events():
+        last_key = None
+        while not await request.is_disconnected():
+            frame = read_live_frame(run_path)
+            key = (
+                (frame.get("sequence"), frame.get("sampled_at")) if frame.get("available") else None
+            )
+            if key is not None and key != last_key:
+                last_key = key
+                payload = json.dumps(frame, separators=(",", ":"), allow_nan=False)
+                yield f"id: {frame['sequence']}\nevent: frame\ndata: {payload}\n\n"
+            else:
+                yield ": keepalive\n\n"
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/runs/{run_id}/logs/stream")

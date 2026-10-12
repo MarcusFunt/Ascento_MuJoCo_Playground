@@ -6,6 +6,7 @@ import { api } from '../api'
 import { CurriculumRail } from '../components/CurriculumRail'
 import { EditRunDialog } from '../components/EditRunDialog'
 import { PageHeader } from '../components/PageHeader'
+import { LiveTrainingPanel } from '../components/LiveTrainingPanel'
 import { PolicyArchitectureCard } from '../components/PolicyArchitectureCard'
 import { PolicyDebugger } from '../components/PolicyDebugger'
 import { StateBadge } from '../components/StateBadge'
@@ -89,6 +90,7 @@ export function RunDetailPage() {
       </section>
 
       <div className="space-y-6">
+        <LiveTrainingPanel runId={runId} />
         <CurriculumRail curriculum={curriculum.data?.curriculum} />
         <PolicyArchitectureCard
           runId={runId}
