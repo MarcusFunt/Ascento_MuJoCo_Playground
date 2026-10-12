@@ -251,6 +251,19 @@ def goal_settle_settled_balance(
 
 
 
+def generalist_failure_termination_impulse(env: ManagerBasedRlEnv) -> torch.Tensor:
+    """One-shot episode failure impulse, protecting against deliberate suicide.
+
+    An unfinished-attempt time cost otherwise makes early termination an
+    attractive way to avoid accumulating negative reward. Non-timeout
+    terminations (fallen, excessive velocity, nonfinite state) are failures.
+    Reward-manager scaling by step_dt converts this rate to one impulse.
+    """
+    if not math.isfinite(env.step_dt) or env.step_dt <= 0.0:
+        raise ValueError("env.step_dt must be finite and positive")
+    return env.termination_manager.terminated.to(dtype=torch.float32) / float(env.step_dt)
+
+
 class GeneralistPendingGoalTimeCost:
     """Increasing per-attempt time cost; unfinished balancing is not a free strategy.
 
