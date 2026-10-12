@@ -28,14 +28,33 @@ Must establish task topology versioning, signed target progress at 11.5 cm, brak
 The existing actor-only transfer command is the safe way to produce the treatment initializer:
 
 ```bash
-PYTHONPATH=. .venv/bin/python -m ascento_mjlab.tools.initialize_transfer \
+ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE=0 PYTHONPATH=. \
+  .venv/bin/python -m ascento_mjlab.tools.initialize_transfer \
   --source transfers/ascento_generalist_locomotion_flat/reward_alignment_reward_fix/model_000000.pt \
   --task Ascento-Generalist-Locomotion-Goal-Settle-V2-Flat \
-  --output transfers/ascento_generalist_goal_settle_v2_flat/goal_settle_v2_pilot/model_000000.pt \
+  --output transfers/ascento_generalist_goal_settle_v2_flat/goal_settle_v2_stage0/model_000000.pt \
   --device cpu
 ```
 
 Verify all 13 actor tensors are equal, optimizer state empty, and new task contract differs. Keep both source and treatment transfer immutable.
+
+**Critical managed-launch detail:** The environment overrides used to construct the transfer must also be set when launching the trainer, because the checkpoint's signed event topology includes `ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE`. The managed `--parent-checkpoint` argument is only lineage metadata; *it does not enable model loading on its own*. After merging to a clean synchronized `main`, explicitly pass trainer resume arguments **after** the `--` separator:
+
+```bash
+export ASCENTO_GENERALIST_FIXED_GOAL_MIX_STAGE=0
+export ASCENTO_GENERALIST_OBSTACLE_MODE=0
+scripts/ascento-gpu ascento run start \
+  --task Ascento-Generalist-Locomotion-Goal-Settle-V2-Flat \
+  --display-name goal-settle-v2-pilot --purpose goal-settle-v2 \
+  --parent-checkpoint transfers/ascento_generalist_goal_settle_v2_flat/goal_settle_v2_stage0/model_000000.pt \
+  --envs 512 --iterations 50 --seed 20261012 -- \
+  --agent.resume True --agent.load-run _resume_parent \
+  --agent.load-checkpoint model_000000.pt --agent.save-interval 50
+```
+
+A ten-update transfer-initialized smoke with this exact contract completed on Oct 12 with exit code 0: managed run `20261012_200832_goal-settle-v2-stage0-transfer-10-updates_cea7cdba`, checkpoints 0/5/9, a populated optimizer, and a validated parent link. The older smoke without the resume arguments is **invalid for behavioral comparison**, and a subsequent incompatible parent attempt was rejected before training. Do not silently count either as treatment evidence.
+
+An initial four-scenario physical evaluation of model_9 exceeded a 180-second command timeout; it left only an incomplete scenario-materialization artifact, so it does **not** establish success or failure. No longer pilot should be promoted before a completed physical evaluation.
 
 ## Evaluation compatibility (IMPORTANT)
 

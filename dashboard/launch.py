@@ -59,6 +59,26 @@ def write_status(path: Path, **values: Any) -> None:
     tmp.replace(path)
 
 
+def report_preflight_failure(status_path: Path, log_path: Path, message: str) -> None:
+    """Persist failed launch validation before argparse exits (stderr may be discarded).
+
+    The service has already created the run directory and its initial state.
+    Marking it error prevents a forever-starting phantom run when the detached
+    launcher rejects an incompatible parent checkpoint.
+    """
+    finished_at = datetime.now(timezone.utc).isoformat()
+    write_status(
+        status_path,
+        state="error",
+        launch_error=message,
+        error=message,
+        exit_code=2,
+        finished_at=finished_at,
+    )
+    with log_path.open("a", encoding="utf-8") as log:
+        log.write(f"DASHBOARD_PREFLIGHT_ERROR {message}\n")
+
+
 def write_metadata(path: Path, **values: Any) -> None:
     current: dict[str, Any] = {}
     if path.exists():
@@ -557,6 +577,7 @@ def main() -> int:
             task=args.task,
         )
     except ValueError as error:
+        report_preflight_failure(status_path, log_path, str(error))
         parser.error(str(error))
     command = [
         sys.executable,
