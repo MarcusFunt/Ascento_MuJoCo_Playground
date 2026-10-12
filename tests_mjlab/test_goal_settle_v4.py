@@ -32,10 +32,15 @@ def test_v4_is_isolated_and_preserves_actor_and_goal_completion_abi():
         assert old.func is new.func
         assert old.weight == new.weight
         assert old.params == new.params
-    assert (
-        v3.events["repeated_random_world_targets"].params
-        == v4.events["repeated_random_world_targets"].params
-    )
+    previous_event = v3.events["repeated_random_world_targets"].params
+    next_event = v4.events["repeated_random_world_targets"].params
+    assert next_event["navigation_stage_independent_of_recovery"] is True
+    assert "navigation_stage_independent_of_recovery" not in previous_event
+    assert {
+        key: value
+        for key, value in next_event.items()
+        if key != "navigation_stage_independent_of_recovery"
+    } == previous_event
     assert set(v2.observations["actor"].terms) == set(v4.observations["actor"].terms)
     assert set(v2.actions) == set(v4.actions)
     assert current_task_contract(v2) != current_task_contract(v4)
@@ -93,3 +98,45 @@ def test_real_mjlab_v4_reward_manager_recomposes_step_rewards():
             assert terminated.shape == truncated.shape == (3,)
     finally:
         env.close()
+
+
+def test_v4_navigation_promotion_does_not_depend_on_unlearned_push_recovery():
+    from ascento_mjlab.mdp.events import update_generalist_goal_mix_stage
+
+    inputs = dict(
+        stage=0,
+        gate_recovery_successes=1,
+        gate_episodes=100,
+        short_arrival_successes=88,
+        short_episodes=100,
+        long_arrival_successes=0,
+        long_episodes=0,
+        minimum_attempts=64,
+    )
+    assert update_generalist_goal_mix_stage(**inputs)[0] == 0
+    assert (
+        update_generalist_goal_mix_stage(
+            **inputs,
+            promotion_gate_lcb_threshold=0.0,
+            demotion_gate_lcb_threshold=0.0,
+        )[0]
+        == 1
+    )
+    inputs["short_arrival_successes"] = 10
+    assert (
+        update_generalist_goal_mix_stage(
+            **inputs,
+            promotion_gate_lcb_threshold=0.0,
+            demotion_gate_lcb_threshold=0.0,
+        )[0]
+        == 0
+    )
+    inputs.update(stage=1, short_arrival_successes=90, long_arrival_successes=90, long_episodes=100)
+    assert (
+        update_generalist_goal_mix_stage(
+            **inputs,
+            promotion_gate_lcb_threshold=0.0,
+            demotion_gate_lcb_threshold=0.0,
+        )[0]
+        == 2
+    )

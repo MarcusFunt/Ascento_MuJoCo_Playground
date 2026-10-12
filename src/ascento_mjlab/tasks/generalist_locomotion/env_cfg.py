@@ -592,6 +592,13 @@ def ascento_generalist_goal_settle_v4_env_cfg(play: bool = False, num_envs: int 
     """
     cfg = ascento_generalist_goal_settle_v3_env_cfg(play=play, num_envs=num_envs)
     if not play:
+        # The old gate required >=85% push recovery before *navigation*
+        # targets could grow, even when short-waypoint success exceeded 95%.
+        # Keep the recovery cohort and independent telemetry, but let the
+        # goal-distance curriculum follow navigation competence.
+        cfg.events["repeated_random_world_targets"].params[
+            "navigation_stage_independent_of_recovery"
+        ] = True
         failure = cfg.rewards["failure_termination_impulse"]
         cfg.rewards["failure_termination_impulse"] = RewardTermCfg(
             func=failure.func,
