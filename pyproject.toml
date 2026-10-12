@@ -24,6 +24,7 @@ dashboard = [
 ]
 mcp = ["mcp>=1.0,<2"]
 introspection = ["captum>=0.9,<1"]
+rerun = ["rerun-sdk>=0.29,<0.34", "rerun-loader-mjcf>=1.0.1,<2"]
 
 [project.scripts]
 clip-motion = "ascento_mjlab.tools.clip_motion:main"
@@ -34,6 +35,7 @@ ascento-compare-evaluations = "ascento_mjlab.evaluation.compare:main"
 ascento-replay-eval = "ascento_mjlab.evaluation.replay:main"
 ascento-preflight-evaluator = "ascento_mjlab.evaluation.preflight:main"
 ascento-reward-probe = "ascento_mjlab.tools.reward_probe:main"
+ascento-export-rerun = "ascento_mjlab.tools.export_rerun:main"
 ascento = "ascento_mjlab.cli:main"
 ascento-mcp = "ascento_mjlab.mcp_server:main"
 

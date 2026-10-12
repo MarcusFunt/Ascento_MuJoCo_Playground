@@ -21,7 +21,7 @@ import ascento_mjlab.tasks  # noqa: F401
 from ascento_mjlab.checkpoint_contract import require_current_checkpoint_contracts
 from ascento_mjlab.control_contract import current_action_contract
 from ascento_mjlab.physics import PHYSICS_PROFILE, REWARD_SCHEMA_VERSION
-from ascento_mjlab.robot_cfg import JOINT_NAMES
+from ascento_mjlab.robot_cfg import JOINT_NAMES, ROBOT_XML
 from ascento_mjlab.task_contract import current_task_contract_for_task
 from ascento_mjlab.tasks.locomotion_speed.env_cfg import configure_speed_command_cap
 
@@ -75,6 +75,7 @@ class MotionRecorder(RecorderTerm):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self.frames = []
+        self.reward_term_names = tuple(env.reward_manager.active_terms)
 
     def record_post_step(self) -> None:
         env = self._env
@@ -83,11 +84,43 @@ class MotionRecorder(RecorderTerm):
             "time": env.common_step_counter * env.step_dt,
             "root_pos": robot.data.root_link_pos_w[0].detach().cpu().numpy().copy(),
             "root_quat": robot.data.root_link_quat_w[0].detach().cpu().numpy().copy(),
+            "root_lin_vel_w": robot.data.root_link_lin_vel_w[0].detach().cpu().numpy().copy(),
             "joint_pos": robot.data.joint_pos[0].detach().cpu().numpy().copy(),
             "joint_vel": robot.data.joint_vel[0].detach().cpu().numpy().copy(),
             "effort": robot.data.actuator_force[0].detach().cpu().numpy().copy(),
             "action": env.action_manager.action[0].detach().cpu().numpy().copy(),
         }
+        # The reward manager has already computed this step's reward.  Do not
+        # re-evaluate reward functions here: some are stateful and changing them
+        # would alter training/evaluation behavior.
+        manager = env.reward_manager
+        terms = manager.get_active_iterable_terms(0)
+        names = tuple(name for name, _ in terms)
+        if names != self.reward_term_names:
+            raise RuntimeError("Reward term ordering changed during episode capture")
+        # mjlab 1.6.0 returns each term as (name, [weighted_rate]).
+        # Unwrap the one-element list rather than assuming a scalar.
+        rates = []
+        for _, value in terms:
+            if isinstance(value, (list, tuple)):
+                if len(value) != 1:
+                    raise ValueError("Expected one reward value per term")
+                value = value[0]
+            rates.append(float(value))
+        frame["reward_terms_rate"] = np.asarray(rates, dtype=np.float32)
+        # mjlab 1.6.0 stores reward rate in _step_reward, while _reward_buf
+        # is the actual dt-scaled return given to the policy.
+        frame["reward_total"] = np.asarray(float(manager._reward_buf[0].item()), dtype=np.float32)
+        frame["reward_dt"] = np.asarray(float(env.step_dt), dtype=np.float32)
+        target_state = getattr(env, "ascento_world_target_state", None)
+        if isinstance(target_state, dict) and (
+            "target_xy" in target_state and "target_yaw" in target_state
+        ):
+            frame["target_xy"] = target_state["target_xy"][0].detach().cpu().numpy().copy()
+            frame["target_yaw"] = target_state["target_yaw"][0].detach().cpu().numpy().copy()
+        metrics = getattr(env, "ascento_generalist_episode_metrics", None)
+        if isinstance(metrics, dict) and "attempt_id" in metrics:
+            frame["target_attempt_id"] = metrics["attempt_id"][0].detach().cpu().numpy().copy()
         contacts = []
         for sensor_name in ("left_wheel_contact", "right_wheel_contact"):
             try:
@@ -117,6 +150,12 @@ class MotionRecorder(RecorderTerm):
                 frame["command"] = command[0].detach().cpu().numpy().copy()
                 break
         try:
+            speed_command = env.command_manager.get_command("speed")
+        except (AttributeError, KeyError):
+            speed_command = None
+        if speed_command is not None:
+            frame["speed_command"] = speed_command[0].detach().cpu().numpy().copy()
+        try:
             height_command = env.command_manager.get_command("height")
         except (AttributeError, KeyError):
             height_command = None
@@ -128,6 +167,12 @@ class MotionRecorder(RecorderTerm):
         if not self.frames:
             raise RuntimeError("No frames were captured")
         keys = self.frames[0].keys()
+        for index, frame in enumerate(self.frames):
+            if frame.keys() != keys:
+                raise RuntimeError(
+                    f"Motion capture signal set changed at frame {index}; "
+                    "refusing to export a misaligned episode"
+                )
         arrays = {key: np.stack([frame[key] for frame in self.frames]) for key in keys}
         arrays.update({f"meta_{key}": np.asarray(value) for key, value in metadata.items()})
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -228,6 +273,10 @@ def capture(
                     "physics_profile": PHYSICS_PROFILE.name,
                     "joint_names": json.dumps(JOINT_NAMES),
                     "reward_schema": REWARD_SCHEMA_VERSION,
+                    "capture_schema": "v2",
+                    "reward_term_names": json.dumps(recorder.reward_term_names),
+                    "reward_term_units": "weighted_rate_before_dt",
+                    "robot_xml_sha256": hashlib.sha256(ROBOT_XML.read_bytes()).hexdigest(),
                     "action_contract": current_action_contract()["id"],
                     "task_contract": current_task_contract_for_task(task)["topology_sha256"],
                     "captured_steps": str(captured_steps),
