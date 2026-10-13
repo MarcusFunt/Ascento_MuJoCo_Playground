@@ -68,7 +68,7 @@ _JSONL_LOCK = threading.Lock()
 _JSONL_CACHE_MAX_FILES = 32
 _DISCOVERY_CACHE: dict[Path, tuple[float, list["RunRef"]]] = {}
 _DISCOVERY_LOCK = threading.Lock()
-_DISCOVERY_CACHE_TTL_S = 2.0
+_DISCOVERY_CACHE_TTL_S = 30.0
 
 
 @dataclass(frozen=True)
@@ -264,6 +264,19 @@ def load_tensorboard_records(run_dir: Path, limit: int | None = 2000) -> list[di
     except ImportError:
         return []
 
+    # TensorBoard's compatibility reader falls back to a pure-Python CRC32C
+    # loop when TensorFlow is absent. Use the native extension when available;
+    # it validates the same TFRecord checksums while decoding large histories.
+    try:
+        import google_crc32c
+        from tensorboard.compat.tensorflow_stub import pywrap_tensorflow
+    except ImportError:
+        pass
+    else:
+        if not getattr(pywrap_tensorflow, "_ascento_crc32c_accelerated", False):
+            pywrap_tensorflow.crc32c = google_crc32c.value
+            pywrap_tensorflow._ascento_crc32c_accelerated = True
+
     signatures = []
     for event_file in event_files:
         signature = _tensorboard_signature(event_file)
@@ -440,15 +453,16 @@ def discover_runs(root: Path) -> list[RunRef]:
         if cached and now - cached[0] < _DISCOVERY_CACHE_TTL_S:
             return list(cached[1])
 
+        marker_names = set(RUN_MARKERS)
         candidates: set[Path] = set()
-        if any((root / marker).exists() for marker in RUN_MARKERS):
-            candidates.add(root)
-        for marker in RUN_MARKERS:
-            for path in root.rglob(marker):
-                candidates.add(path.parent.resolve())
-        for pattern in ("events.out.tfevents.*", "model_*.pt"):
-            for path in root.rglob(pattern):
-                candidates.add(path.parent.resolve())
+        for directory, _subdirectories, filenames in os.walk(root, followlinks=False):
+            if any(
+                filename in marker_names
+                or filename.startswith("events.out.tfevents.")
+                or (filename.startswith("model_") and filename.endswith(".pt"))
+                for filename in filenames
+            ):
+                candidates.add(Path(directory).resolve())
         refs = []
         for path in candidates:
             if not _inside(path, root):

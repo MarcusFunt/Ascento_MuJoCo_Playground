@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from dashboard.config import REPO_ROOT
 from dashboard.health import discover_dashboard_runs, run_status_path, summarize_dashboard_run
-from dashboard.monitor import invalidate_discovery_cache
+from dashboard.monitor import RunRef, invalidate_discovery_cache
 from dashboard.provenance import working_tree_state
 from dashboard.runtime_policy import apply_training_device, runtime_identity, training_device
 from dashboard.task_catalog import horizon_task_ids, speed_task_ids, task_ids
@@ -155,15 +155,40 @@ class RunService:
         summary["repository_version"] = classify_run_version(run_dir, self.artifact_root)
         return summary
 
-    def detail(self, run_id: str) -> dict[str, Any]:
+    def detail(
+        self,
+        run_id: str,
+        *,
+        fast_telemetry: bool = False,
+        compact: bool = False,
+    ) -> dict[str, Any]:
         ref = self.resolve(run_id)
         summary = summarize_dashboard_run(
             ref.path,
             self.artifact_root,
             stale_after_seconds=self.stale_after_seconds,
             detailed=True,
+            fast_telemetry=fast_telemetry,
         )
-        return self.annotate(summary, ref.path)
+        result = self.annotate(summary, ref.path)
+        if compact:
+            # The dashboard displays contract status and compatibility reason,
+            # not the full serialized manifest and contract maps.
+            result.pop("experiment_manifest", None)
+            for key in ("task_contract", "action_contract", "plant_contract"):
+                contract = result.get(key)
+                if not isinstance(contract, dict):
+                    continue
+                compact_contract = {
+                    field: contract[field]
+                    for field in ("status", "is_compatible")
+                    if field in contract
+                }
+                compatibility = contract.get("compatibility")
+                if isinstance(compatibility, dict) and compatibility.get("reason"):
+                    compact_contract["compatibility"] = {"reason": compatibility["reason"]}
+                result[key] = compact_contract
+        return result
 
     def progress(self, run_id: str) -> dict[str, Any]:
         """Return a cheap live snapshot without rebuilding detailed history."""
@@ -181,7 +206,10 @@ class RunService:
 
     def progress_index(self, run_id: str) -> dict[str, Any]:
         """Return a cheap live snapshot without full compatibility contracts."""
-        ref = self.resolve(run_id)
+        return self.progress_index_ref(self.resolve(run_id))
+
+    def progress_index_ref(self, ref: RunRef) -> dict[str, Any]:
+        """Summarize an already discovered run without scanning the root again."""
         summary = summarize_dashboard_run(
             ref.path,
             self.artifact_root,
