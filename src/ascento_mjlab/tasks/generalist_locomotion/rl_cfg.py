@@ -88,3 +88,7 @@ AscentoGeneralistGoalSettleV4RlCfg.experiment_name = "ascento_generalist_goal_se
 
 AscentoGeneralistGoalSettleV5RlCfg = deepcopy(AscentoGeneralistLocomotionRlCfg)
 AscentoGeneralistGoalSettleV5RlCfg.experiment_name = "ascento_generalist_goal_settle_v5_flat"
+
+# Separate PPO logs and checkpoint contract for the temporary V6 training gate.
+AscentoGeneralistGoalSettleV6RlCfg = deepcopy(AscentoGeneralistLocomotionRlCfg)
+AscentoGeneralistGoalSettleV6RlCfg.experiment_name = "ascento_generalist_goal_settle_v6_flat"

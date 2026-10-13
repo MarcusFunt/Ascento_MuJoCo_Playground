@@ -652,3 +652,54 @@ def ascento_generalist_goal_settle_v5_env_cfg(play: bool = False, num_envs: int 
         )
     cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V5-Flat"
     return cfg
+
+
+def ascento_generalist_goal_settle_v6_env_cfg(play: bool = False, num_envs: int = 512):
+    """Opt-in TEMPORARY training-only completion envelope.
+
+    The V5 evaluation environment and its strict settled-arrival gate remain
+    untouched. Training gives a one-shot completion slightly sooner when the
+    robot is genuinely nearby, heading correctly, supported on *both* wheels,
+    and sufficiently quiet. This is an ablation, not a promotion.
+    """
+    cfg = ascento_generalist_goal_settle_v5_env_cfg(play=play, num_envs=num_envs)
+    if not play:
+        # Change the reward AND the real retarget event together. Otherwise
+        # the bonus can be harvested without producing curriculum completions.
+        event = cfg.events["repeated_random_world_targets"]
+        event.params.update(
+            {
+                "target_reached_distance_m": 0.12,
+                "target_heading_tolerance_rad": 0.28,
+                "target_hold_s": 0.25,
+                "target_max_tilt_rad": 0.20,
+                "target_split_angular_limits": True,
+            }
+        )
+        bonus = cfg.rewards["target_arrival_settled_stop"]
+        cfg.rewards["target_arrival_settled_stop"] = RewardTermCfg(
+            func=bonus.func,
+            weight=bonus.weight,
+            params={
+                **dict(bonus.params),
+                "target_reached_distance_m": 0.12,
+                "max_heading_error_rad": 0.28,
+                "hold_s": 0.25,
+                "max_tilt_rad": 0.20,
+            },
+        )
+        quality = cfg.rewards["target_settled_quality"]
+        cfg.rewards["target_settled_quality"] = RewardTermCfg(
+            func=quality.func,
+            weight=quality.weight,
+            params={
+                **dict(quality.params),
+                "hold_s": 0.25,
+                "max_target_error_m": 0.15,
+                "max_heading_error_rad": 0.45,
+                "max_tilt_rad": 0.28,
+                "max_planar_speed_mps": 0.14,
+            },
+        )
+    cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V6-Flat"
+    return cfg
