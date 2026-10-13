@@ -1633,6 +1633,8 @@ class RepeatedRandomWorldTargetSequence:
         target_reached_distance_m: float = 0.04,
         target_hold_s: float = 0.35,
         target_heading_tolerance_rad: float = 0.35,
+        target_max_tilt_rad: float = 0.08,
+        target_split_angular_limits: bool = False,
         min_target_distance_m: float = 0.15,
         max_target_distance_m: float = 0.35,
         curriculum_start_min_target_distance_m: float | None = None,
@@ -1703,6 +1705,8 @@ class RepeatedRandomWorldTargetSequence:
             raise ValueError("target_reached_distance_m must be positive")
         if target_hold_s <= 0.0:
             raise ValueError("target_hold_s must be positive")
+        if not math.isfinite(target_max_tilt_rad) or not 0.0 < target_max_tilt_rad <= 0.35:
+            raise ValueError("target_max_tilt_rad must be finite and within (0, 0.35]")
         if (
             not math.isfinite(target_heading_tolerance_rad)
             or not 0.0 < target_heading_tolerance_rad <= math.pi
@@ -1949,6 +1953,8 @@ class RepeatedRandomWorldTargetSequence:
             asset,
             measurement_ids,
             max_heading_error_rad=target_heading_tolerance_rad,
+            max_tilt_rad=target_max_tilt_rad,
+            split_angular_limits=target_split_angular_limits,
         )
         at_target = (distance <= target_reached_distance_m) & settled
         self._settled_at_target_s[measurement_ids] = torch.where(
@@ -2380,11 +2386,19 @@ def _is_settled_for_locomotion(
     ids: torch.Tensor,
     *,
     max_heading_error_rad: float = 0.35,
+    max_tilt_rad: float = 0.08,
+    split_angular_limits: bool = False,
 ) -> torch.Tensor:
-    """Boolean low-motion/support envelope matching ``settled_balance``."""
+    """Boolean low-motion/support envelope; legacy limits are the default."""
     tilt = torch.acos((-asset.data.projected_gravity_b[ids, 2]).clamp(-1.0, 1.0))
     planar_speed = torch.linalg.vector_norm(asset.data.root_link_lin_vel_b[ids, :2], dim=1)
     angular_speed = torch.linalg.vector_norm(asset.data.root_link_ang_vel_b[ids], dim=1)
+    if split_angular_limits:
+        angular_ok = (
+            torch.linalg.vector_norm(asset.data.root_link_ang_vel_b[ids, :2], dim=1) <= 0.25
+        ) & (asset.data.root_link_ang_vel_b[ids, 2].abs() <= 0.25)
+    else:
+        angular_ok = angular_speed <= 0.25
     heading_error = wrapped_angle_difference(
         world_target_yaw(env)[ids], yaw_from_quaternion_wxyz(asset.data.root_link_quat_w[ids])
     ).abs()
@@ -2392,9 +2406,9 @@ def _is_settled_for_locomotion(
     left = env.scene["left_wheel_contact"].data.found[ids].flatten(start_dim=1).any(dim=1)
     right = env.scene["right_wheel_contact"].data.found[ids].flatten(start_dim=1).any(dim=1)
     return (
-        (tilt <= 0.08)
+        (tilt <= max_tilt_rad)
         & (planar_speed <= 0.10)
-        & (angular_speed <= 0.25)
+        & angular_ok
         & (heading_error <= max_heading_error_rad)
         & (height_error <= 0.05)
         & left
