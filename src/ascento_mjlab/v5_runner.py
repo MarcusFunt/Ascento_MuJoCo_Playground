@@ -24,9 +24,9 @@ class AscentoGoalSettleV5Runner(AscentoProvenanceRunner):
         source = os.environ.get(_INITIAL_ACTOR_ENV, "").strip()
         if not source:
             return
-        cfg = self.env.unwrapped.cfg
-        if cfg.task_id != "Ascento-Generalist-Locomotion-Goal-Settle-V5-Flat":
-            raise ValueError(f"{_INITIAL_ACTOR_ENV} is only supported for V5")
+        # This runner class is registered ONLY for the V5 task. Runtime
+        # TrainConfig serialization strips ad-hoc cfg.task_id attributes, so
+        # never depend on that attribute existing in a launched trainer.
         if bool(self.cfg.get("resume", False)):
             raise ValueError(f"{_INITIAL_ACTOR_ENV} cannot be combined with PPO resume")
         lineage = self.initialize_from_compatible_actor(source)

@@ -156,3 +156,57 @@ def test_v5_real_mjlab_step_reward_parity():
             )
     finally:
         env.close()
+
+
+def test_v5_handoff_accepts_serialized_runtime_cfg_without_task_id(tmp_path, monkeypatch):
+    """Regression for managed-launch failure: tyro removes dynamic cfg.task_id."""
+    from dataclasses import asdict
+
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.rl import RslRlVecEnvWrapper
+
+    from ascento_mjlab.provenance_runner import AscentoProvenanceRunner
+    from ascento_mjlab.v5_runner import AscentoGoalSettleV5Runner
+
+    source_task = "Ascento-Generalist-Locomotion-Goal-Settle-V4-Flat"
+    cfg = ascento_generalist_goal_settle_v4_env_cfg(num_envs=3)
+    env = RslRlVecEnvWrapper(
+        ManagerBasedRlEnv(cfg, device="cpu"),
+        clip_actions=load_rl_cfg(source_task).clip_actions,
+    )
+    source_checkpoint = tmp_path / "source.pt"
+    try:
+        source_runner = AscentoProvenanceRunner(env, asdict(load_rl_cfg(source_task)), device="cpu")
+        source_runner.save(str(source_checkpoint))
+    finally:
+        env.close()
+
+    monkeypatch.setenv("ASCENTO_V5_INITIAL_ACTOR_CHECKPOINT", str(source_checkpoint))
+    target_cfg = ascento_generalist_goal_settle_v5_env_cfg(num_envs=3)
+    assert hasattr(target_cfg, "task_id")
+    del target_cfg.task_id
+    target_env = RslRlVecEnvWrapper(
+        ManagerBasedRlEnv(target_cfg, device="cpu"),
+        clip_actions=load_rl_cfg(V5).clip_actions,
+    )
+    target_checkpoint = tmp_path / "target.pt"
+    try:
+        runner = AscentoGoalSettleV5Runner(target_env, asdict(load_rl_cfg(V5)), device="cpu")
+        assert runner.current_learning_iteration == 0
+        runner.save(str(target_checkpoint))
+    finally:
+        target_env.close()
+
+    import hashlib
+
+    src = torch.load(source_checkpoint, map_location="cpu", weights_only=True)
+    target = torch.load(target_checkpoint, map_location="cpu", weights_only=True)
+    for key in src["actor_state_dict"]:
+        assert torch.equal(src["actor_state_dict"][key], target["actor_state_dict"][key])
+    assert target["iter"] == 0
+    lineage = target["infos"]["lineage"]
+    assert lineage["fresh"] == ["critic", "optimizer", "iteration", "environment_state"]
+    assert (
+        lineage["source_checkpoint_sha256"]
+        == hashlib.sha256(source_checkpoint.read_bytes()).hexdigest()
+    )
