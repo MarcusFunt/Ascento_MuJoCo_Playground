@@ -607,3 +607,48 @@ def ascento_generalist_goal_settle_v4_env_cfg(play: bool = False, num_envs: int 
         )
     cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V4-Flat"
     return cfg
+
+
+def ascento_generalist_goal_settle_v5_env_cfg(play: bool = False, num_envs: int = 512):
+    """V5: widen training tilt acceptance, preserving strict evaluation.
+
+    In V4, a robot often parked within 4 cm of its target at about 7 degrees
+    of tilt. Its 4.6-degree training completion threshold never triggered.
+    V5 uses a 9.2-degree event/bonus threshold and a broader differentiable
+    13.8-degree quality envelope while preserving all other completion gates.
+    """
+    cfg = ascento_generalist_goal_settle_v4_env_cfg(play=play, num_envs=num_envs)
+    if not play:
+        completion_tilt_rad = 0.16
+        shaping_tilt_rad = 0.24
+
+        # Real curriculum retarget depends on this event, not reward alone.
+        cfg.events["repeated_random_world_targets"].params["target_max_tilt_rad"] = (
+            completion_tilt_rad
+        )
+        # Match the existing completion bonus XY/yaw angular gates.
+        cfg.events["repeated_random_world_targets"].params["target_split_angular_limits"] = True
+
+        bonus = cfg.rewards["target_arrival_settled_stop"]
+        bonus_params = dict(bonus.params)
+        bonus_params["max_tilt_rad"] = completion_tilt_rad
+        cfg.rewards["target_arrival_settled_stop"] = RewardTermCfg(
+            func=bonus.func, weight=bonus.weight, params=bonus_params
+        )
+
+        quality = cfg.rewards["target_settled_quality"]
+        quality_params = dict(quality.params)
+        quality_params.update(
+            {
+                "max_tilt_rad": shaping_tilt_rad,
+                "max_heading_error_rad": 0.35,
+                "max_planar_speed_mps": 0.12,
+                "max_angular_xy_radps": 0.40,
+                "max_yaw_rate_radps": 0.35,
+            }
+        )
+        cfg.rewards["target_settled_quality"] = RewardTermCfg(
+            func=quality.func, weight=quality.weight, params=quality_params
+        )
+    cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V5-Flat"
+    return cfg
