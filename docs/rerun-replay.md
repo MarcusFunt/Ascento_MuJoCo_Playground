@@ -86,8 +86,8 @@ Captures are intentionally produced for selected single-environment evaluations,
 not for every training environment on each GPU step. The converter runs offline
 so it introduces no dependency or GPU data transfer overhead into PPO training.
 
-The current implementation writes a reusable .rrd recording. A dashboard-embedded
-viewer and indexed multi-episode UI are separate follow-up integrations.
+The exporter writes reusable .rrd recordings; the Analyze page embeds the
+Rerun web viewer and indexes captures under the captures/ directory.
 
 
 ## Embedded Analyze viewer
@@ -108,3 +108,51 @@ service or public RRD URL.
 
 The viewer shows persisted kinematic recordings, not live simulation.
 Older NPZ captures can be converted but lack the newer reward and target signals.
+
+## Reproduce a benchmark scenario and diagnose settling
+
+Ordinary capture_motion playback does not reproduce the benchmark's resolved
+reset, timed world-target commands or applied disturbances. For checkpoint
+comparisons, use the exact-suite evaluator capture command instead:
+
+~~~bash
+cd /root/Ascento_MuJoCo_Playground
+CKPT="logs/rsl_rl/<run>/<task>/<timestamp>/model_16300.pt"
+/root/.cache/ascento-mjlab/cu128/bin/python3 -m ascento_mjlab.tools.capture_benchmark   --suite goal_settle_v5_comprehensive_v1 --checkpoint "$CKPT"   --family precision_short --index 0 --index 1   --output-dir captures/benchmark-v5-model16300 --rrd
+~~~
+
+You may specify a fully-qualified scenario with --scenario-id
+goal_settle_v5_comprehensive_v1/precision_short/000000. Repeat --family and
+--index to select additional matched cases. Explicit selection is required:
+the command never substitutes a stochastic playback case for a missing suite
+case. All scenarios use the same resolved seeds and intervention timings as
+the comprehensive evaluator. The batch-size option controls resource use;
+--batch-size 1 is the conservative default.
+
+Saved NPZ/RRD artifacts use family_index names. Their metadata records the
+full scenario (reset, target commands, disturbance, horizon), suite hash,
+checkpoint hash, robot XML hash and reward term names. The JSON manifest links
+scenario IDs and physical outcome metrics to saved files.
+
+The Rerun view includes synchronized contact flags (left, right, both),
+body tilt, roll/pitch/yaw rates, target/heading error, speed, action-change
+RMS, action second difference and actuator effort RMS. In the same timeline,
+it records each strict evaluator waypoint condition (distance, heading,
+speed, tilt, angular_xy, yaw_rate, both_wheels), the conjunction pass flag,
+the active-target mask and consecutive settling dwell in seconds.
+Recovery conditions are distinct; they include the height constraint,
+a slightly different speed/heading envelope and a separate post-disturbance
+dwell timer.
+
+The evaluator also emits waypoint_max_consecutive_dwell_s and
+waypoint_stop_<condition>_pass_fraction (measured during its final 2-second
+window). These are diagnostic metrics and do not change gate acceptance.
+Individual wheel-contact flags indicate binary sensor contact, not normal
+force. Older captures without exact evaluator diagnostics still export but
+cannot provide those missing series.
+
+Dependencies were installed into the project .venv and its independent
+CUDA-enabled evaluation environment. The default .venv contains CPU-only
+PyTorch and cannot execute CUDA benchmark captures; use the CUDA interpreter
+shown above for actual GPU playback and RRD generation. Installing Rerun does
+not require restarting an already-running PPO training process.
