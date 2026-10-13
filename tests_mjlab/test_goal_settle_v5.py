@@ -66,6 +66,12 @@ def test_v5_contract_preserves_v4_except_envelope():
     assert load_env_cfg(V5, play=True).task_id == V5
     assert load_rl_cfg(V5).experiment_name == "ascento_generalist_goal_settle_v5_flat"
 
+    from mjlab.tasks.registry import load_runner_cls
+
+    from ascento_mjlab.v5_runner import AscentoGoalSettleV5Runner
+
+    assert load_runner_cls(V5) is AscentoGoalSettleV5Runner
+
 
 def test_v5_training_event_accepts_7_degrees_but_rejects_12():
     env = _mock_env(7)

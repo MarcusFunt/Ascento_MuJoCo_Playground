@@ -8,6 +8,7 @@ from ascento_mjlab.horizon_curriculum import (
     VelocityHorizonCurriculumRunner,
 )
 from ascento_mjlab.provenance_runner import AscentoProvenanceRunner
+from ascento_mjlab.v5_runner import AscentoGoalSettleV5Runner
 
 from .balance.env_cfg import ascento_balance_env_cfg
 from .balance.rl_cfg import AscentoBalanceRlCfg
@@ -137,7 +138,7 @@ def _register_tasks() -> None:
         env_cfg=ascento_generalist_goal_settle_v5_env_cfg(),
         play_env_cfg=ascento_generalist_goal_settle_v5_env_cfg(play=True),
         rl_cfg=AscentoGeneralistGoalSettleV5RlCfg,
-        runner_cls=AscentoProvenanceRunner,
+        runner_cls=AscentoGoalSettleV5Runner,
     )
     register_mjlab_task(
         task_id="Ascento-Locomotion-Speed-Flat",
