@@ -22,6 +22,7 @@ from .generalist_locomotion.env_cfg import (
     ascento_generalist_goal_settle_v4_env_cfg,
     ascento_generalist_goal_settle_v5_env_cfg,
     ascento_generalist_goal_settle_v6_env_cfg,
+    ascento_generalist_goal_settle_v7_env_cfg,
     ascento_generalist_locomotion_env_cfg,
 )
 from .generalist_locomotion.rl_cfg import (
@@ -30,6 +31,7 @@ from .generalist_locomotion.rl_cfg import (
     AscentoGeneralistGoalSettleV4RlCfg,
     AscentoGeneralistGoalSettleV5RlCfg,
     AscentoGeneralistGoalSettleV6RlCfg,
+    AscentoGeneralistGoalSettleV7RlCfg,
     AscentoGeneralistLocomotionRlCfg,
 )
 from .jump.env_cfg import ascento_jump_env_cfg
@@ -59,6 +61,7 @@ ASCENTO_TASK_IDS = (
     "Ascento-Generalist-Locomotion-Goal-Settle-V4-Flat",
     "Ascento-Generalist-Locomotion-Goal-Settle-V5-Flat",
     "Ascento-Generalist-Locomotion-Goal-Settle-V6-Flat",
+    "Ascento-Generalist-Locomotion-Goal-Settle-V7-Flat",
     "Ascento-Locomotion-Speed-Flat",
     "Ascento-Locomotion-Gate-Hold-Flat",
     "Ascento-Locomotion-Gate-Hold-Control-Flat",
@@ -148,6 +151,13 @@ def _register_tasks() -> None:
         env_cfg=ascento_generalist_goal_settle_v6_env_cfg(),
         play_env_cfg=ascento_generalist_goal_settle_v6_env_cfg(play=True),
         rl_cfg=AscentoGeneralistGoalSettleV6RlCfg,
+        runner_cls=AscentoGoalSettleV5Runner,
+    )
+    register_mjlab_task(
+        task_id="Ascento-Generalist-Locomotion-Goal-Settle-V7-Flat",
+        env_cfg=ascento_generalist_goal_settle_v7_env_cfg(),
+        play_env_cfg=ascento_generalist_goal_settle_v7_env_cfg(play=True),
+        rl_cfg=AscentoGeneralistGoalSettleV7RlCfg,
         runner_cls=AscentoGoalSettleV5Runner,
     )
     register_mjlab_task(

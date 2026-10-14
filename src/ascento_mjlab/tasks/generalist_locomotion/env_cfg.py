@@ -695,3 +695,34 @@ def ascento_generalist_goal_settle_v6_env_cfg(play: bool = False, num_envs: int 
         )
     cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V6-Flat"
     return cfg
+
+
+def ascento_generalist_goal_settle_v7_env_cfg(play: bool = False, num_envs: int = 512):
+    """Isolated V7: improve precision gradients without relaxing benchmark gates.
+
+    Keep V6 actor/plant ABI; the separate task/reward topology forbids resuming
+    an old critic or optimizer. A 9 cm completion radius is the controlled
+    midpoint between V5's 10 cm and V6's 8 cm, with a distance-dominant,
+    bounded per-attempt quality gradient.
+    """
+    cfg = ascento_generalist_goal_settle_v6_env_cfg(play=play, num_envs=num_envs)
+    if not play:
+        cfg.events["repeated_random_world_targets"].params["target_reached_distance_m"] = 0.09
+        completion = cfg.rewards["target_arrival_settled_stop"]
+        params = dict(completion.params)
+        params["target_reached_distance_m"] = 0.09
+        cfg.rewards["target_arrival_settled_stop"] = RewardTermCfg(
+            func=completion.func, weight=completion.weight, params=params
+        )
+        term = cfg.rewards["target_terminal_precision_quality"]
+        params = dict(term.params)
+        params.update({
+            "max_target_error_m": 0.22,
+            "quality_aggregation": "balanced",
+            "min_quality_for_credit": 0.05,
+        })
+        cfg.rewards["target_terminal_precision_quality"] = RewardTermCfg(
+            func=term.func, weight=term.weight, params=params
+        )
+    cfg.task_id = "Ascento-Generalist-Locomotion-Goal-Settle-V7-Flat"
+    return cfg

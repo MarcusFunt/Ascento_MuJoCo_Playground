@@ -616,7 +616,13 @@ class GeneralistTargetSettledQuality:
         max_angular_xy_radps: float = 0.25,
         max_yaw_rate_radps: float = 0.25,
         asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+        quality_aggregation: str = "product",
+        min_quality_for_credit: float = 0.0,
     ) -> torch.Tensor:
+        if quality_aggregation not in {"product", "balanced"}:
+            raise ValueError("Unknown settled quality aggregation")
+        if not math.isfinite(min_quality_for_credit) or not 0.0 <= min_quality_for_credit < 1.0:
+            raise ValueError("min_quality_for_credit must be in [0,1)")
         limits = (
             hold_s,
             height_tolerance_m,
@@ -663,16 +669,39 @@ class GeneralistTargetSettledQuality:
             start_dim=1
         ).any(dim=1)
 
-        quality = (
-            self._smooth_inside(target_error, max_target_error_m)
-            * self._smooth_inside(heading_error, max_heading_error_rad)
-            * self._smooth_inside(planar_speed, max_planar_speed_mps)
-            * self._smooth_inside(tilt, max_tilt_rad)
-            * self._smooth_inside(angular_xy, max_angular_xy_radps)
-            * self._smooth_inside(yaw_rate, max_yaw_rate_radps)
-            * self._smooth_inside(height_error, height_tolerance_m)
-            * both_supported.to(dtype=asset.data.root_link_pos_w.dtype)
+        position_quality = self._smooth_inside(target_error, max_target_error_m)
+        heading_quality = self._smooth_inside(heading_error, max_heading_error_rad)
+        stability = (
+            self._smooth_inside(planar_speed, max_planar_speed_mps),
+            self._smooth_inside(tilt, max_tilt_rad),
+            self._smooth_inside(angular_xy, max_angular_xy_radps),
+            self._smooth_inside(yaw_rate, max_yaw_rate_radps),
+            self._smooth_inside(height_error, height_tolerance_m),
         )
+        if quality_aggregation == "balanced":
+            # Avoid seven simultaneously small factors making the signal vanish.
+            # Preserve the hard physical envelope, so the additive blend never
+            # rewards an unsafe arrival; prefer distance *smoothly* within it.
+            inside = (
+                (heading_error < max_heading_error_rad)
+                & (planar_speed < max_planar_speed_mps)
+                & (tilt < max_tilt_rad)
+                & (angular_xy < max_angular_xy_radps)
+                & (yaw_rate < max_yaw_rate_radps)
+                & (height_error < height_tolerance_m)
+            )
+            stability_mean = torch.stack(stability).mean(dim=0)
+            quality = (
+                position_quality
+                * (0.5 + 0.5 * heading_quality)
+                * (0.4 + 0.6 * stability_mean)
+                * inside.to(dtype=position_quality.dtype)
+            )
+        else:
+            quality = position_quality * heading_quality
+            for component in stability:
+                quality = quality * component
+        quality = quality * both_supported.to(dtype=quality.dtype)
         remaining_s = torch.clamp(float(hold_s) - self._credited_s, min=0.0)
         remaining_s = torch.where(
             remaining_s <= 1.0e-6, torch.zeros_like(remaining_s), remaining_s
@@ -681,7 +710,8 @@ class GeneralistTargetSettledQuality:
             remaining_s,
             torch.full_like(remaining_s, float(env.step_dt)),
         )
-        credit_s = torch.where((quality > 0.0) & ~changed, credit_s, torch.zeros_like(credit_s))
+        eligible = (quality > 0.0) & (quality >= min_quality_for_credit) & ~changed
+        credit_s = torch.where(eligible, credit_s, torch.zeros_like(credit_s))
         self._credited_s.add_(credit_s)
         self._last_target_xy.copy_(target_xy)
         self._last_target_yaw.copy_(target_yaw)

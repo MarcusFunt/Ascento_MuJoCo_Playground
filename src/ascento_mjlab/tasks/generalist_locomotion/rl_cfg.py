@@ -92,3 +92,7 @@ AscentoGeneralistGoalSettleV5RlCfg.experiment_name = "ascento_generalist_goal_se
 
 AscentoGeneralistGoalSettleV6RlCfg = deepcopy(AscentoGeneralistLocomotionRlCfg)
 AscentoGeneralistGoalSettleV6RlCfg.experiment_name = "ascento_generalist_goal_settle_v6_flat"
+
+
+AscentoGeneralistGoalSettleV7RlCfg = deepcopy(AscentoGeneralistLocomotionRlCfg)
+AscentoGeneralistGoalSettleV7RlCfg.experiment_name = "ascento_generalist_goal_settle_v7_flat"
