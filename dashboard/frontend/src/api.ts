@@ -66,7 +66,42 @@ export type ReplayEntry = {
   updated_at: number
 }
 
+export type DeepCheckpoint = {
+  id: string; run: string; run_label: string; lineage: string; iteration: number
+  path: string; modified_at: number; size_bytes: number; recording_count: number
+}
+export type DeepRecording = {
+  id: string; scenario: string | null; task: string | null
+  frames: number; updated_at: number; rrd_url: string | null
+}
+export type DeepCatalog = {
+  checkpoints: DeepCheckpoint[]
+  recordings: Record<string, DeepRecording[]>
+  live_runs: Array<{ id: string; label: string; iteration: number | null; state: string; stale: boolean }>
+  note: string
+}
+export type DeepStats = {
+  count: number; mean?: number | null; p50?: number | null; p95?: number | null
+  min?: number | null; max?: number | null
+}
+export type DeepEpisode = {
+  checkpoint_id: string; recording_id: string
+  scenario: string | null; task: string | null
+  checkpoint_sha256: string | null; suite_sha256: string | null
+  frames: number; sampled_frames: number; duration_s: number
+  time: (number | null)[]
+  channels: Record<string, (number | null)[] | (number | null)[][]>
+  reward_terms: Record<string, (number | null)[]>
+  stats: Record<string, DeepStats>
+  has_evaluator_signals: boolean; coverage_note: string
+}
+
 export const api = {
+  deepCatalog: () => fetchJson<DeepCatalog>('/api/deep-analysis/catalog'),
+  deepEpisode: (checkpointId: string, recordingId: string) =>
+    fetchJson<DeepEpisode>('/api/deep-analysis/episode?' + new URLSearchParams({
+      checkpoint_id: checkpointId, recording_id: recordingId,
+    }).toString()),
   livePpoLatest: (runId: string) =>
     fetchJson<LivePpoFrame>('/api/runs/' + encodeURIComponent(runId) + '/live-monitor'),
   livePpoStreamUrl: (runId: string) =>

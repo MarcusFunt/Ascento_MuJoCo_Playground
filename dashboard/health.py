@@ -360,10 +360,12 @@ def discover_dashboard_runs(root: Path) -> list[monitor.RunRef]:
     signals = {path: _has_training_signal(path) for path in paths}
     filtered: list[monitor.RunRef] = []
     for ref in refs:
-        path = ref.path.resolve()
+        # RunRef paths were resolved by discover_runs. Path.is_relative_to avoids
+        # thousands of repeated resolve/stat calls while checking nested runs.
+        path = ref.path
         launcher_only = (path / "run_status.json").is_file() and not signals[path]
         has_nested_signal = any(
-            other != path and _inside(other, path) and signals[other]
+            other != path and other.is_relative_to(path) and signals[other]
             for other in paths
         )
         if launcher_only and has_nested_signal:
@@ -770,8 +772,12 @@ def summarize_dashboard_run(
 
 
 def list_dashboard_summaries(
-    root: Path, *, stale_after_seconds: float = 90.0
+    root: Path,
+    *,
+    stale_after_seconds: float = 90.0,
+    refs: list[monitor.RunRef] | None = None,
 ) -> list[dict[str, Any]]:
+    run_refs = refs if refs is not None else discover_dashboard_runs(root)
     return [
         summarize_dashboard_run(
             ref.path,
@@ -781,5 +787,5 @@ def list_dashboard_summaries(
             include_errors=False,
             include_artifacts=False,
         )
-        for ref in discover_dashboard_runs(root)
+        for ref in run_refs
     ]

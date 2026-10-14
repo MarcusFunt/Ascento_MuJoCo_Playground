@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ascento_mjlab.viewer.ipc import CaptureBusyError, ExplanationBusyError
+from dashboard import deep_analysis
 from dashboard.config import load_config, validate_startup
 from dashboard.curriculum import curriculum_for_run
 from dashboard.database import DashboardDatabase
@@ -58,15 +59,19 @@ VIEWER_SERVICE = ViewerService(
 )
 SUPERVISOR = SupervisorClient()
 DATABASE = DashboardDatabase(CONFIG.database_url, CONFIG.repo_root)
+LOGGER = logging.getLogger(__name__)
 
 # Artifact discovery walks a mounted training directory.  Keeping the annotated
 # list briefly avoids making every UI poll repeat that full filesystem scan.
 _SUMMARY_CACHE_TTL_S = 25.0
 _SUMMARY_CACHE_LOCK = threading.Lock()
 _SUMMARY_CACHE: tuple[float, list[dict]] | None = None
-_INDEX_CACHE_TTL_S = 10.0
+_INDEX_CACHE_TTL_S = 30.0
 _INDEX_CACHE_LOCK = threading.Lock()
 _INDEX_CACHE: tuple[float, list[dict]] | None = None
+_INDEX_REFRESH_LOCK = threading.Lock()
+_INDEX_REFRESH_PENDING = False
+_INDEX_CACHE_GENERATION = 0
 _OVERVIEW_SERIES_CACHE_TTL_S = 10.0
 _OVERVIEW_SERIES_CACHE_LOCK = threading.Lock()
 _OVERVIEW_SERIES_CACHE: dict[str, tuple[float, list[dict]]] = {}
@@ -221,11 +226,13 @@ def _blender_asset_url(path: Path, root: Path) -> str | None:
 
 
 def _invalidate_summary_cache() -> None:
-    global _SUMMARY_CACHE, _INDEX_CACHE, _OVERVIEW_CACHE, _OVERVIEW_CACHE_GENERATION
+    global _SUMMARY_CACHE, _INDEX_CACHE, _INDEX_CACHE_GENERATION
+    global _OVERVIEW_CACHE, _OVERVIEW_CACHE_GENERATION
     with _SUMMARY_CACHE_LOCK:
         _SUMMARY_CACHE = None
     with _INDEX_CACHE_LOCK:
         _INDEX_CACHE = None
+        _INDEX_CACHE_GENERATION += 1
     with _OVERVIEW_CACHE_LOCK:
         _OVERVIEW_CACHE = None
         _OVERVIEW_CACHE_GENERATION += 1
@@ -279,37 +286,90 @@ def _compact_run(summary: dict) -> dict:
     }
 
 
-def _indexed_summaries() -> list[dict]:
-    global _INDEX_CACHE
-    with _INDEX_CACHE_LOCK:
-        if _INDEX_CACHE is not None:
-            cached_at, rows = _INDEX_CACHE
-            if time.monotonic() - cached_at < _INDEX_CACHE_TTL_S:
-                return list(rows)
-
+def _build_indexed_summaries() -> list[dict]:
+    refs = discover_dashboard_runs(ARTIFACT_ROOT)
+    refs_by_id = {ref.id: ref for ref in refs}
     summaries = list_dashboard_summaries(
         ARTIFACT_ROOT,
         stale_after_seconds=CONFIG.stale_after_seconds,
+        refs=refs,
     )
-    refs = {ref.id: ref for ref in discover_dashboard_runs(ARTIFACT_ROOT)}
     rows: list[dict] = []
     for summary in summaries:
-        ref = refs.get(summary.get("id"))
+        ref = refs_by_id.get(summary.get("id"))
         if ref is None:
             continue
         RUN_SERVICE.annotate_index(summary, ref.path)
         row = _compact_run(summary)
         if row["state"] in {"starting", "running", "stopping"}:
             try:
-                row = _compact_run(RUN_SERVICE.progress_index(str(row["id"])))
+                row = _compact_run(RUN_SERVICE.progress_index_ref(ref))
             except (KeyError, OSError):
                 pass
         rows.append(row)
         DATABASE.sync_run(row)
+    return rows
 
+
+def _rebuild_index_cache() -> list[dict]:
+    global _INDEX_CACHE
     with _INDEX_CACHE_LOCK:
-        _INDEX_CACHE = (time.monotonic(), rows)
+        generation = _INDEX_CACHE_GENERATION
+    rows = _build_indexed_summaries()
+    with _INDEX_CACHE_LOCK:
+        if generation == _INDEX_CACHE_GENERATION:
+            _INDEX_CACHE = (time.monotonic(), rows)
     return list(rows)
+
+
+def _refresh_index_cache_in_background() -> None:
+    global _INDEX_REFRESH_PENDING
+    try:
+        with _INDEX_REFRESH_LOCK:
+            _rebuild_index_cache()
+    except Exception:
+        LOGGER.exception("Dashboard run-index refresh failed")
+    finally:
+        with _INDEX_CACHE_LOCK:
+            _INDEX_REFRESH_PENDING = False
+
+
+def _schedule_index_cache_refresh() -> None:
+    global _INDEX_REFRESH_PENDING
+    with _INDEX_CACHE_LOCK:
+        if _INDEX_REFRESH_PENDING:
+            return
+        _INDEX_REFRESH_PENDING = True
+    try:
+        threading.Thread(
+            target=_refresh_index_cache_in_background,
+            name="dashboard-run-index-refresh",
+            daemon=True,
+        ).start()
+    except RuntimeError:
+        with _INDEX_CACHE_LOCK:
+            _INDEX_REFRESH_PENDING = False
+        LOGGER.exception("Could not start dashboard run-index refresh")
+
+
+def _indexed_summaries() -> list[dict]:
+    with _INDEX_CACHE_LOCK:
+        cached = _INDEX_CACHE
+        if cached is not None and time.monotonic() - cached[0] < _INDEX_CACHE_TTL_S:
+            return list(cached[1])
+
+    if cached is not None:
+        _schedule_index_cache_refresh()
+        return list(cached[1])
+
+    # Serialize the cold build, then recheck in case another request populated
+    # the cache while this request waited.
+    with _INDEX_REFRESH_LOCK:
+        with _INDEX_CACHE_LOCK:
+            cached = _INDEX_CACHE
+            if cached is not None and time.monotonic() - cached[0] < _INDEX_CACHE_TTL_S:
+                return list(cached[1])
+        return _rebuild_index_cache()
 
 
 def _overview_series(run_id: str, max_points: int = 120) -> list[dict]:
@@ -345,7 +405,7 @@ def _overview_series(run_id: str, max_points: int = 120) -> list[dict]:
 def _curriculum_snapshot(run_id: str) -> tuple[dict, dict | None]:
     """Build curriculum state without loading detailed contracts or GPU diagnostics."""
     ref = _run(run_id)
-    progress = RUN_SERVICE.progress_index(run_id)
+    progress = RUN_SERVICE.progress_index_ref(ref)
     run_info = build_run_info(
         ref.path,
         ARTIFACT_ROOT,
@@ -391,13 +451,15 @@ def _annotated_summaries() -> list[dict]:
 
     # Keep the lock out of the filesystem walk so a health request is never
     # held behind a slow network or mounted-drive scan.
+    refs = discover_dashboard_runs(ARTIFACT_ROOT)
     summaries = list_dashboard_summaries(
         ARTIFACT_ROOT,
         stale_after_seconds=CONFIG.stale_after_seconds,
+        refs=refs,
     )
-    refs = {ref.id: ref for ref in discover_dashboard_runs(ARTIFACT_ROOT)}
+    refs_by_id = {ref.id: ref for ref in refs}
     for summary in summaries:
-        ref = refs.get(summary.get("id"))
+        ref = refs_by_id.get(summary.get("id"))
         if ref is not None:
             RUN_SERVICE.annotate(summary, ref.path)
 
@@ -536,6 +598,20 @@ def system_update(request: Request):
 @app.get("/api/tasks")
 def tasks():
     return {"tasks": task_catalog()}
+
+
+@app.get("/api/deep-analysis/catalog")
+def deep_analysis_catalog():
+    """Checkpoint identity, matching captures, and currently active PPO runs."""
+    return deep_analysis.catalog(ARTIFACT_ROOT, CONFIG.repo_root / "captures", _indexed_summaries())
+
+
+@app.get("/api/deep-analysis/episode")
+def deep_analysis_episode(checkpoint_id: str, recording_id: str):
+    """Read a bounded, checkpoint-verified capture without running an evaluator."""
+    return deep_analysis.episode(
+        CONFIG.repo_root / "captures", ARTIFACT_ROOT, checkpoint_id, recording_id
+    )
 
 
 @app.get("/api/runs/index")
@@ -688,7 +764,7 @@ def compare_runs(run_ids: str):
 @app.get("/api/runs/{run_id}")
 def run_status(run_id: str):
     try:
-        return RUN_SERVICE.detail(run_id)
+        return RUN_SERVICE.detail(run_id, fast_telemetry=True, compact=True)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="training run not found") from error
 

@@ -90,6 +90,18 @@ class MotionRecorder(RecorderTerm):
             "effort": robot.data.actuator_force[0].detach().cpu().numpy().copy(),
             "action": env.action_manager.action[0].detach().cpu().numpy().copy(),
         }
+        # Preserve angular motion for Rerun diagnostics when the backend exposes it.
+        if hasattr(robot.data, "root_link_ang_vel_b"):
+            frame["root_ang_vel_b"] = (
+                robot.data.root_link_ang_vel_b[0].detach().cpu().numpy().copy()
+            )
+        if hasattr(robot.data, "projected_gravity_b"):
+            gravity = robot.data.projected_gravity_b[0]
+            tilt = torch.atan2(
+                torch.linalg.vector_norm(gravity[:2]),
+                -gravity[2].clamp(max=-1.0e-6),
+            )
+            frame["tilt_rad"] = tilt.detach().cpu().numpy().copy()
         # The reward manager has already computed this step's reward.  Do not
         # re-evaluate reward functions here: some are stateful and changing them
         # would alter training/evaluation behavior.

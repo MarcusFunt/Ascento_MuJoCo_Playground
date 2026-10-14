@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import {
   ChartNoAxesCombined,
+  Microscope,
   ChevronLeft,
   ChevronRight,
   Gauge,
@@ -18,6 +19,7 @@ const navigation = [
   { label: 'Overview', to: '/' as const, icon: Gauge },
   { label: 'Runs', to: '/runs' as const, icon: ListTree },
   { label: 'Workspace', to: '/analyze' as const, icon: ChartNoAxesCombined },
+  { label: 'Deep Analysis', to: '/deep-analysis' as const, icon: Microscope },
   { label: 'System', to: '/system' as const, icon: Settings },
 ]
 

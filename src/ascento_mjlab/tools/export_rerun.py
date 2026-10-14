@@ -67,6 +67,52 @@ def validate_capture(data: Any, model: mujoco.MjModel) -> dict[str, Any]:
             if values.shape != (n, width) or not np.isfinite(values).all():
                 raise ValueError(f"Invalid {channel} channel")
             frames[channel] = values
+    # Optional diagnostics, including old recordings with wheel-contact flags.
+    vector_widths = {"contacts": 2, "root_ang_vel_b": 3}
+    for channel, width in vector_widths.items():
+        if channel in data:
+            values = np.asarray(data[channel], dtype=np.float64)
+            if values.shape != (n, width) or not np.isfinite(values).all():
+                raise ValueError(f"Invalid {channel} channel")
+            if channel == "contacts" and not np.isin(values, [0.0, 1.0]).all():
+                raise ValueError("Contact flags must be binary")
+            frames[channel] = values
+    for channel in ("action", "effort"):
+        if channel in data:
+            values = np.asarray(data[channel], dtype=np.float64)
+            if (
+                values.ndim != 2
+                or values.shape[0] != n
+                or values.shape[1] == 0
+                or not np.isfinite(values).all()
+            ):
+                raise ValueError(f"Invalid {channel} channel")
+            frames[channel] = values
+    diagnostic_scalars = (
+        "target_yaw",
+        "tilt_rad",
+        "angular_xy_radps",
+        "yaw_rate_radps",
+        "heading_error_rad",
+        "target_error_m",
+        "planar_speed_mps",
+    )
+    diagnostic_scalars += tuple(
+        key
+        for key in data.keys()
+        if key.startswith("evaluator_stop_")
+        or key.startswith("evaluator_recovery_")
+        or key == "evaluator_recovered"
+    )
+    for channel in diagnostic_scalars:
+        if channel in data:
+            values = np.asarray(data[channel], dtype=np.float64)
+            if values.shape != (n,) or not np.isfinite(values).all():
+                raise ValueError(f"Invalid {channel} channel")
+            if channel.startswith("evaluator_") and not channel.endswith(("_dwell_s",)):
+                if not np.isin(values, [0.0, 1.0]).all():
+                    raise ValueError(f"Expected binary diagnostic flag: {channel}")
+            frames[channel] = values
     if "speed_command" in data:
         values = np.asarray(data["speed_command"], dtype=np.float64)
         if values.shape not in ((n,), (n, 1)) or not np.isfinite(values).all():
@@ -145,6 +191,9 @@ def export_rerun(
                     rrb.Vertical(
                         rrb.Spatial2DView(origin="/spatial", name="World XY"),
                         rrb.TimeSeriesView(origin="/reward", name="Reward components"),
+                        rrb.TimeSeriesView(
+                            origin="/diagnostics", name="Contacts, control & settling"
+                        ),
                     ),
                 ),
                 collapse_panels=True,
@@ -157,6 +206,14 @@ def export_rerun(
         rr.log("spatial/trajectory", rr.LineStrips2D([path_xy]), static=True)
         body_data = mujoco.MjData(model)
         labels = ep.get("reward_term_names", [])
+        diagnostic_names = tuple(
+            sorted(
+                name
+                for name in ep
+                if name.startswith(("evaluator_stop_", "evaluator_recovery_"))
+                or name == "evaluator_recovered"
+            )
+        )
         for index in range(0, ep["count"], stride):
             rr.set_time("sim_time", duration=float(ep["time"][index]))
             mujoco.mj_resetData(model, body_data)
@@ -187,6 +244,65 @@ def export_rerun(
                     "spatial/actual_velocity",
                     rr.Arrows2D(origins=[xy], vectors=[ep["root_lin_vel_w"][index, :2]]),
                 )
+            if "contacts" in ep:
+                contact = ep["contacts"][index]
+                rr.log("diagnostics/contacts/left", rr.Scalars(float(contact[0])))
+                rr.log("diagnostics/contacts/right", rr.Scalars(float(contact[1])))
+                rr.log("diagnostics/contacts/both", rr.Scalars(float(np.all(contact > 0.5))))
+            if "tilt_rad" in ep:
+                rr.log("diagnostics/stability/tilt_rad", rr.Scalars(float(ep["tilt_rad"][index])))
+            else:
+                q = ep["root_quat"][index]
+                body_z_projection = float(1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]))
+                rr.log(
+                    "diagnostics/stability/tilt_rad",
+                    rr.Scalars(float(np.arccos(np.clip(body_z_projection, -1.0, 1.0)))),
+                )
+            if "root_ang_vel_b" in ep:
+                ang = ep["root_ang_vel_b"][index]
+                rr.log("diagnostics/stability/roll_rate_radps", rr.Scalars(float(ang[0])))
+                rr.log("diagnostics/stability/pitch_rate_radps", rr.Scalars(float(ang[1])))
+                rr.log("diagnostics/stability/yaw_rate_radps", rr.Scalars(float(ang[2])))
+            for channel in (
+                "angular_xy_radps",
+                "yaw_rate_radps",
+                "heading_error_rad",
+                "target_error_m",
+                "planar_speed_mps",
+            ):
+                if channel in ep:
+                    rr.log(
+                        f"diagnostics/stability/{channel}", rr.Scalars(float(ep[channel][index]))
+                    )
+            if "action" in ep:
+                action = ep["action"][index]
+                if index > 0:
+                    prior = ep["action"][index - 1]
+                    rate = float(np.sqrt(np.mean(np.square(action - prior))))
+                    rr.log("diagnostics/control/action_change_rms", rr.Scalars(rate))
+                if index > 1:
+                    second_diff = float(
+                        np.sqrt(
+                            np.mean(
+                                np.square(
+                                    action - 2 * ep["action"][index - 1] + ep["action"][index - 2]
+                                )
+                            )
+                        )
+                    )
+                    rr.log(
+                        "diagnostics/control/action_second_difference_rms", rr.Scalars(second_diff)
+                    )
+            if "effort" in ep:
+                rr.log(
+                    "diagnostics/control/actuator_effort_rms",
+                    rr.Scalars(float(np.sqrt(np.mean(np.square(ep["effort"][index]))))),
+                )
+            for channel in diagnostic_names:
+                rr.log(
+                    f"diagnostics/{channel.replace('evaluator_', '').replace('_', '/')}",
+                    rr.Scalars(float(ep[channel][index])),
+                )
             if "reward_total" in ep:
                 rr.log("reward/total_step", rr.Scalars(float(ep["reward_total"][index])))
                 for j, label in enumerate(labels):
@@ -205,6 +321,8 @@ def export_rerun(
         "frames_logged": len(range(0, ep["count"], stride)),
         "reward_terms": len(labels),
         "target": "target_xy" in ep,
+        "contacts": "contacts" in ep,
+        "evaluator_diagnostics": bool(diagnostic_names),
         "model_sha256": model_sha,
     }
 

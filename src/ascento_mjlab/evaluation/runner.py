@@ -39,6 +39,7 @@ from ascento_mjlab.semantic_normalization import (
 from ascento_mjlab.task_contract import current_task_contract
 from ascento_mjlab.tasks.locomotion_speed.env_cfg import configure_speed_command_cap
 
+from .diagnostics import all_conditions, recovery_conditions, stop_conditions
 from .policy import RslRlPolicyAdapter
 from .schema import EpisodeResult, ScenarioSpec
 
@@ -349,9 +350,7 @@ def _apply_commands(
         _apply_world_target_offset(base_env, offset_updates)
     if pose_updates:
         _apply_world_target_pose(base_env, pose_updates)
-    target_commanded = torch.zeros(
-        base_env.num_envs, dtype=torch.bool, device=base_env.device
-    )
+    target_commanded = torch.zeros(base_env.num_envs, dtype=torch.bool, device=base_env.device)
     updated_ids = sorted(offset_ids | pose_ids)
     if updated_ids:
         target_commanded[torch.tensor(updated_ids, device=base_env.device)] = True
@@ -793,9 +792,7 @@ def _run_batch(
     # Waypoint accounting is intentionally separate from the legacy
     # target_arrived metric, which records a single radius crossing.  The v2
     # gate requires sustained arrival at every command and a fresh final stop.
-    waypoint_steps_by_env = [
-        _waypoint_command_steps(scenario) for scenario in scenarios
-    ]
+    waypoint_steps_by_env = [_waypoint_command_steps(scenario) for scenario in scenarios]
     if any(len(steps) != len(set(steps)) for steps in waypoint_steps_by_env):
         raise ValueError("A scenario cannot command two world targets on one step")
     waypoint_count = torch.tensor(
@@ -812,6 +809,20 @@ def _run_batch(
     waypoint_confirmed = torch.zeros(count, dtype=torch.bool, device=dev)
     waypoint_completed_count = torch.zeros(count, dtype=torch.long, device=dev)
     waypoint_dwell_count = torch.zeros(count, dtype=torch.long, device=dev)
+    waypoint_max_dwell_count = torch.zeros(count, dtype=torch.long, device=dev)
+    stop_condition_names = tuple(
+        stop_conditions(
+            target_error=torch.zeros(count, device=dev),
+            heading_error=torch.zeros(count, device=dev),
+            planar_speed=torch.zeros(count, device=dev),
+            tilt=torch.zeros(count, device=dev),
+            angular_xy=torch.zeros(count, device=dev),
+            yaw_rate=torch.zeros(count, device=dev),
+            both_supported=torch.zeros(count, dtype=torch.bool, device=dev),
+        )
+    )
+    stop_condition_counts = torch.zeros((count, len(stop_condition_names)), device=dev)
+    stop_condition_sample_count = torch.zeros(count, device=dev)
     waypoint_last_dwell_time_s = torch.full((count,), float("nan"), device=dev)
     waypoint_final_error = torch.full((count,), 10.0, device=dev)
     waypoint_final_heading_error = torch.full((count,), float(np.pi), device=dev)
@@ -822,7 +833,8 @@ def _run_batch(
     waypoint_window_start = torch.tensor(
         [
             max(scenario.horizon_steps - waypoint_window_steps, steps[-1])
-            if steps else scenario.horizon_steps + 1
+            if steps
+            else scenario.horizon_steps + 1
             for scenario, steps in zip(scenarios, waypoint_steps_by_env, strict=True)
         ],
         dtype=torch.long,
@@ -891,8 +903,7 @@ def _run_batch(
                     waypoint_schedule[step], dtype=torch.long, device=dev
                 )
                 waypoint_completed_count[new_waypoint_ids] += (
-                    waypoint_active[new_waypoint_ids]
-                    & waypoint_confirmed[new_waypoint_ids]
+                    waypoint_active[new_waypoint_ids] & waypoint_confirmed[new_waypoint_ids]
                 ).long()
                 waypoint_active[new_waypoint_ids] = True
                 waypoint_confirmed[new_waypoint_ids] = False
@@ -929,7 +940,7 @@ def _run_batch(
             raw_action = policy.act(observations)
             if not torch.isfinite(raw_action).all():
                 raise RuntimeError("Policy emitted NaN/Inf action during evaluation")
-            if replay_recorder is not None:
+            if replay_recorder is not None and hasattr(replay_recorder, "record"):
                 replay_recorder.record(
                     observations=observations["actor"],
                     teacher_actions=raw_action,
@@ -1088,31 +1099,32 @@ def _run_batch(
             sum_post_target_heading_error_sq += heading_error.square() * post_target_weight
             post_target_samples += post_target_weight
 
-            stable_now = (
-                (tilt <= 0.08)
-                & (planar_speed <= 0.10)
-                & (torch.abs(height - 0.75) <= 0.05)
-                & (angular_xy <= 0.25)
-                & (yaw_rate <= 0.25)
-                & (heading_error <= 0.15)
-                & both_supported
+            recovery_flags = recovery_conditions(
+                tilt=tilt,
+                planar_speed=planar_speed,
+                height=height,
+                angular_xy=angular_xy,
+                yaw_rate=yaw_rate,
+                heading_error=heading_error,
+                both_supported=both_supported,
             )
+            stable_now = all_conditions(recovery_flags)
+            stop_flags = stop_conditions(
+                target_error=target_error,
+                heading_error=heading_error,
+                planar_speed=planar_speed,
+                tilt=tilt,
+                angular_xy=angular_xy,
+                yaw_rate=yaw_rate,
+                both_supported=both_supported,
+            )
+            waypoint_stop_now = torch.zeros_like(active)
             if has_waypoints:
                 # A crossing is not an arrival.  Require an uninterrupted
                 # physical stop at the active target, including the requested
                 # heading and two-wheel support.  Reset the count on every
                 # departure; the final-stop metric uses the count at horizon.
-                waypoint_stop_now = (
-                    active
-                    & waypoint_active
-                    & (target_error <= 0.10)
-                    & (heading_error <= 0.20)
-                    & (planar_speed <= 0.08)
-                    & (tilt <= 0.08)
-                    & (angular_xy <= 0.25)
-                    & (yaw_rate <= 0.25)
-                    & both_supported
-                )
+                waypoint_stop_now = active & waypoint_active & all_conditions(stop_flags)
                 waypoint_dwell_count = torch.where(
                     active & waypoint_active,
                     torch.where(
@@ -1121,6 +1133,17 @@ def _run_batch(
                         torch.zeros_like(waypoint_dwell_count),
                     ),
                     waypoint_dwell_count,
+                )
+                waypoint_max_dwell_count = torch.maximum(
+                    waypoint_max_dwell_count, waypoint_dwell_count
+                )
+                # The final two seconds diagnose which physical stop predicate
+                # blocks the gate. These counters do not affect acceptance.
+                diagnostic_window = active & waypoint_active & (step >= waypoint_window_start)
+                stop_condition_sample_count += diagnostic_window.float()
+                stop_condition_counts += (
+                    torch.stack(tuple(stop_flags.values()), dim=1).float()
+                    * diagnostic_window[:, None].float()
                 )
                 newly_confirmed = (
                     waypoint_stop_now
@@ -1156,9 +1179,7 @@ def _run_batch(
                 waypoint_window_speed_sq += planar_speed.square() * waypoint_window_weight
                 waypoint_window_tilt_sq += tilt.square() * waypoint_window_weight
                 waypoint_window_rocking_sq += angular_xy.square() * waypoint_window_weight
-                waypoint_window_action_rate_sq += (
-                    action_rate_sq * waypoint_window_weight
-                )
+                waypoint_window_action_rate_sq += action_rate_sq * waypoint_window_weight
                 waypoint_window_action_second_difference_sq += (
                     action_second_difference_sq * waypoint_window_weight
                 )
@@ -1423,6 +1444,38 @@ def _run_batch(
                 ) * step_dt
                 recovered |= newly_recovered
 
+            if replay_recorder is not None and hasattr(replay_recorder, "record_step"):
+                reward_values = base_env.reward_manager._step_reward
+                replay_recorder.record_step(
+                    scenarios=scenarios,
+                    step=step,
+                    active=active,
+                    robot=robot,
+                    raw_action=raw_action,
+                    step_rewards=step_rewards,
+                    reward_terms=reward_values,
+                    reward_term_names=reward_term_names,
+                    step_dt=step_dt,
+                    target_xy=world_target_xy(base_env),
+                    target_yaw=world_target_yaw(base_env),
+                    left=left,
+                    right=right,
+                    target_error=target_error,
+                    heading_error=heading_error,
+                    planar_speed=planar_speed,
+                    tilt=tilt,
+                    angular_xy=angular_xy,
+                    yaw_rate=yaw_rate,
+                    waypoint_active=waypoint_active,
+                    waypoint_dwell_count=waypoint_dwell_count,
+                    stop_flags=stop_flags,
+                    stop_now=waypoint_stop_now,
+                    recovery_flags=recovery_flags,
+                    recovery_stable_count=stable_count,
+                    recovered=recovered,
+                    after_disturbance=after_disturbance,
+                )
+
             reached_horizon = active & (episode_steps >= horizon)
             active_done = active & dones.bool()
             non_timeout_done = torch.zeros_like(active_done)
@@ -1685,18 +1738,16 @@ def _run_batch(
                 sum_zero_command_speed_sq / sum_zero_command_speed_count.clamp(min=1.0)
             )
         if has_waypoints:
-            completed_count = waypoint_completed_count + (
-                waypoint_active & waypoint_confirmed
-            ).long()
+            completed_count = (
+                waypoint_completed_count + (waypoint_active & waypoint_confirmed).long()
+            )
             final_stopped = (
                 finished_success
                 & waypoint_active
                 & (waypoint_dwell_count >= waypoint_final_hold_steps)
             )
             sequence_complete = (
-                final_stopped
-                & (waypoint_count > 0)
-                & (completed_count == waypoint_count)
+                final_stopped & (waypoint_count > 0) & (completed_count == waypoint_count)
             )
             # Missing any part of the final window is a failure, rather than
             # dropping that episode from the numeric gate's percentile.
@@ -1728,6 +1779,7 @@ def _run_batch(
                     "waypoint_sequence_complete": sequence_complete.float(),
                     "waypoint_final_stopped": final_stopped.float(),
                     "waypoint_final_dwell_s": waypoint_dwell_count.float() * step_dt,
+                    "waypoint_max_consecutive_dwell_s": waypoint_max_dwell_count.float() * step_dt,
                     "waypoint_last_dwell_time_s": waypoint_last_dwell_time_s,
                     "waypoint_final_error": waypoint_final_error,
                     "waypoint_final_heading_error": waypoint_final_heading_error,
@@ -1772,6 +1824,11 @@ def _run_batch(
                     ),
                 }
             )
+        if has_waypoints:
+            for condition_index, name in enumerate(stop_condition_names):
+                arrays[f"waypoint_stop_{name}_pass_fraction"] = stop_condition_counts[
+                    :, condition_index
+                ] / stop_condition_sample_count.clamp(min=1)
         if is_velocity_task:
             arrays["velocity_tracking_rmse"] = torch.sqrt(sum_velocity_tracking_sq / denom)
             arrays["height_tracking_rmse"] = torch.sqrt(sum_height_tracking_sq / denom)

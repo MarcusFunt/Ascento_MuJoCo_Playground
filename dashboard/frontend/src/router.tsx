@@ -7,6 +7,7 @@ import { OverviewPage } from './pages/OverviewPage'
 const RunsPage = lazy(() => import('./pages/RunsPage').then((module) => ({ default: module.RunsPage })))
 const RunDetailPage = lazy(() => import('./pages/RunDetailPage').then((module) => ({ default: module.RunDetailPage })))
 const AnalyzePage = lazy(() => import('./pages/AnalyzePage').then((module) => ({ default: module.AnalyzePage })))
+const DeepAnalysisPage = lazy(() => import('./pages/DeepAnalysisPage').then((module) => ({ default: module.DeepAnalysisPage })))
 const SystemPage = lazy(() => import('./pages/SystemPage').then((module) => ({ default: module.SystemPage })))
 
 const rootRoute = createRootRoute({
@@ -44,6 +45,12 @@ const analyzeRunRoute = createRoute({
   component: AnalyzePage,
 })
 
+const deepAnalysisRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/deep-analysis',
+  component: DeepAnalysisPage,
+})
+
 const systemRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/system',
@@ -56,6 +63,7 @@ const routeTree = rootRoute.addChildren([
   runDetailRoute,
   analyzeRoute,
   analyzeRunRoute,
+  deepAnalysisRoute,
   systemRoute,
 ])
 

@@ -32,6 +32,7 @@ def apply_checkpoint_curriculum_contract(
         return False
     precision = params.get("precision_anchor_fraction")
     recovery = params.get("recovery_retarget_anchor_fraction")
+    quarter_turn = params.get("quarter_turn_heading_fraction")
     if (
         not isinstance(precision, (int, float))
         or isinstance(precision, bool)
@@ -42,6 +43,15 @@ def apply_checkpoint_curriculum_contract(
         or not 0.0 < float(precision) < 1.0
         or not 0.0 < float(recovery) < 1.0
         or float(precision) + float(recovery) >= 1.0
+        or (
+            quarter_turn is not None
+            and (
+                not isinstance(quarter_turn, (int, float))
+                or isinstance(quarter_turn, bool)
+                or not math.isfinite(float(quarter_turn))
+                or not 0.0 <= float(quarter_turn) <= 1.0
+            )
+        )
     ):
         return False
 
@@ -55,6 +65,8 @@ def apply_checkpoint_curriculum_contract(
                 term_params["precision_anchor_fraction"] = float(precision)
             if "recovery_retarget_anchor_fraction" in term_params:
                 term_params["recovery_retarget_anchor_fraction"] = float(recovery)
+            if quarter_turn is not None and "quarter_turn_heading_fraction" in term_params:
+                term_params["quarter_turn_heading_fraction"] = float(quarter_turn)
             if "gate_like_fraction" in term_params:
                 term_params["gate_like_fraction"] = float(recovery)
             if "curriculum_start_gate_like_fraction" in term_params:
