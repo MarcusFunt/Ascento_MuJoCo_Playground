@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -112,3 +113,29 @@ def test_missing_and_unprovenanced_data_never_borrowed(fixture):
     assert len(catalog["recordings"]) == 1
     with pytest.raises(HTTPException):
         deep_analysis.episode(captures, root, "nonexistent/model_16800.pt", "recorded.npz")
+
+
+def test_docker_mount_maps_explicit_canonical_host_paths(fixture, monkeypatch):
+    root, captures, checkpoint_a, checkpoint_b = fixture
+    host_root = Path("/root/example-ascento-checkout")
+    host_artifact_root = host_root / "logs" / "rsl_rl"
+    monkeypatch.setenv("ASCENTO_CANONICAL_SOURCE_ROOT", str(host_root))
+    foreign_path = host_artifact_root / checkpoint_a.relative_to(root)
+    # Keep the same capture data and swap only its recorded host provenance.
+    source = captures / "recorded.npz"
+    with np.load(source, allow_pickle=False) as captured:
+        payload = {name: captured[name].copy() for name in captured.files}
+    payload["meta_checkpoint"] = np.asarray(str(foreign_path))
+    np.savez_compressed(source, **payload)
+    deep_analysis._CATALOG_CACHE = None
+    catalog = deep_analysis.catalog(root, captures)
+    key = checkpoint_a.relative_to(root).as_posix()
+    assert catalog["checkpoints"]
+    assert len(catalog["recordings"][key]) == 1
+    assert deep_analysis.episode(captures, root, key, "recorded.npz")["frames"] == 1200
+    assert deep_analysis._checkpoint_key(str(foreign_path) + "/../../untrusted", root) is None
+    assert deep_analysis._checkpoint_key(str(host_root / "other" / "model_16800.pt"), root) is None
+    assert (
+        deep_analysis._checkpoint_key(str(checkpoint_b), root)
+        == checkpoint_b.relative_to(root).as_posix()
+    )

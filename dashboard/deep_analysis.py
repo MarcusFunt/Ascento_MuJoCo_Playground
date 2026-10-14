@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import threading
 import time
@@ -64,6 +65,31 @@ def _checkpoints(run_root: Path) -> list[dict]:
     return entries
 
 
+def _checkpoint_key(value: str, run_root: Path) -> str | None:
+    """Map checkpoint provenance to a run-relative ID without trusting a filename.
+
+    The same canonical checkout is mounted at /workspace in Docker but captures
+    recorded outside Docker retain their absolute host path. Only two explicit
+    trusted roots are allowed: the actual runtime artifact root and the canonical
+    source root configured by the deployment.
+    """
+    raw = Path(value)
+    if not raw.is_absolute():
+        return raw.as_posix() if raw.parts and ".." not in raw.parts else None
+    roots = [run_root.resolve()]
+    canonical = os.environ.get("ASCENTO_CANONICAL_SOURCE_ROOT")
+    if canonical:
+        roots.append(Path(canonical) / "logs" / "rsl_rl")
+    for root in roots:
+        try:
+            relative = raw.relative_to(root)
+            if relative.parts and ".." not in relative.parts:
+                return relative.as_posix()
+        except ValueError:
+            continue
+    return None
+
+
 def _capture_index(capture_root: Path, run_root: Path, allowed: set[str]) -> dict[str, list[dict]]:
     recordings: dict[str, list[dict]] = {}
     if not capture_root.is_dir():
@@ -80,14 +106,7 @@ def _capture_index(capture_root: Path, run_root: Path, allowed: set[str]) -> dic
                 if "meta_checkpoint" not in data:
                     continue
                 checkpoint_value = str(data["meta_checkpoint"].item())
-                checkpoint_path = Path(checkpoint_value)
-                if checkpoint_path.is_absolute():
-                    if not checkpoint_path.is_relative_to(run_root):
-                        continue
-                    key = checkpoint_path.relative_to(run_root).as_posix()
-                else:
-                    # Do not infer identities from filenames or iteration alone.
-                    key = checkpoint_path.as_posix()
+                key = _checkpoint_key(checkpoint_value, run_root)
                 if key not in allowed:
                     continue
                 scenario = (
@@ -210,12 +229,7 @@ def episode(capture_root: Path, run_root: Path, checkpoint_id: str, recording_id
         with np.load(capture, allow_pickle=False) as d:
             if "meta_checkpoint" not in d:
                 raise HTTPException(409, "Capture has no checkpoint provenance")
-            raw = Path(str(d["meta_checkpoint"].item()))
-            actual = (
-                raw.relative_to(run_root.resolve()).as_posix()
-                if raw.is_absolute()
-                else raw.as_posix()
-            )
+            actual = _checkpoint_key(str(d["meta_checkpoint"].item()), run_root)
             if actual != checkpoint_id:
                 raise HTTPException(409, "Recording belongs to another checkpoint")
             timestamp = np.asarray(d["time"], dtype=float)
