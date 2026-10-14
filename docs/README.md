@@ -11,6 +11,7 @@ operate them.
 | Train or continue a policy | [Training](training.md) |
 | Capture a motion clip and turn it into a Blender scene | [Motion capture and Blender animation](animation.md) |
 | Replay captured robot poses, trajectories, targets and rewards in Rerun | [Rerun and MJCF replay](rerun-replay.md) |
+| Inspect checkpoints side by side, spatial signals, rewards and live PPO streams | [Deep Analysis workspace](deep-analysis.md) |
 | Monitor actual PPO robot movement and rewards with minimal GPU impact | [Live PPO spatial monitor](live-training-monitor.md) |
 | Navigate live monitoring, replays, animations, metrics, and debugging | [Dashboard workspace](dashboard-workspace.md) |
 | Decide whether a checkpoint passes | [Evaluation](evaluation.md) |

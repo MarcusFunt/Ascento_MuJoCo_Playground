@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ascento_mjlab.viewer.ipc import CaptureBusyError, ExplanationBusyError
+from dashboard import deep_analysis
 from dashboard.config import load_config, validate_startup
 from dashboard.curriculum import curriculum_for_run
 from dashboard.database import DashboardDatabase
@@ -597,6 +598,20 @@ def system_update(request: Request):
 @app.get("/api/tasks")
 def tasks():
     return {"tasks": task_catalog()}
+
+
+@app.get("/api/deep-analysis/catalog")
+def deep_analysis_catalog():
+    """Checkpoint identity, matching captures, and currently active PPO runs."""
+    return deep_analysis.catalog(ARTIFACT_ROOT, CONFIG.repo_root / "captures", _indexed_summaries())
+
+
+@app.get("/api/deep-analysis/episode")
+def deep_analysis_episode(checkpoint_id: str, recording_id: str):
+    """Read a bounded, checkpoint-verified capture without running an evaluator."""
+    return deep_analysis.episode(
+        CONFIG.repo_root / "captures", ARTIFACT_ROOT, checkpoint_id, recording_id
+    )
 
 
 @app.get("/api/runs/index")
