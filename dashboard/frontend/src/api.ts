@@ -74,10 +74,23 @@ export type DeepRecording = {
   id: string; scenario: string | null; task: string | null
   frames: number; updated_at: number; rrd_url: string | null
 }
+export type DeepLiveSource = {
+  id: string; root: string; label: string; lineage: string
+  iteration: number | null; sequence: number | null
+  sampled_at: number | null; age_seconds: number | null
+  state: 'streaming' | 'stale' | 'unavailable'
+  available: boolean; reason: string | null
+}
+export type DeepLiveStatus = {
+  available: false; state: 'stale' | 'unavailable'
+  reason?: string; age_seconds?: number
+}
+
 export type DeepCatalog = {
   checkpoints: DeepCheckpoint[]
   recordings: Record<string, DeepRecording[]>
-  live_runs: Array<{ id: string; label: string; iteration: number | null; state: string; stale: boolean }>
+  live_runs: DeepLiveSource[]
+  recent_live_sources: DeepLiveSource[]
   note: string
 }
 export type DeepStats = {
@@ -98,6 +111,10 @@ export type DeepEpisode = {
 
 export const api = {
   deepCatalog: () => fetchJson<DeepCatalog>('/api/deep-analysis/catalog'),
+  deepLiveLatest: (sourceId: string) =>
+    fetchJson<LivePpoFrame | DeepLiveStatus>('/api/deep-analysis/live/' + encodeURIComponent(sourceId)),
+  deepLiveStreamUrl: (sourceId: string) =>
+    '/api/deep-analysis/live/' + encodeURIComponent(sourceId) + '/stream',
   deepEpisode: (checkpointId: string, recordingId: string) =>
     fetchJson<DeepEpisode>('/api/deep-analysis/episode?' + new URLSearchParams({
       checkpoint_id: checkpointId, recording_id: recordingId,

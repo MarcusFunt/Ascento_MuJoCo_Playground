@@ -45,3 +45,5 @@ same change. In particular, update the CLI inventory with
 Generated run, capture, checkpoint, and evaluation artifacts are intentionally
 ignored by Git. They are evidence for a particular execution, not source
 documentation.
+
+- [Deep Analysis live PPO sources](deep-analysis-live.md) - fresh-data contracts, worktree mounting, SSE reconnect and stale behavior.

@@ -95,7 +95,15 @@ function Landing({catalog,onSelect}:{catalog:DeepCatalog;onSelect:(choice:Choice
       className="mt-2 w-full rounded-lg border border-border bg-raised p-3 text-sm text-foreground">
       <option value="">Choose an active run</option>
       {catalog.live_runs.map(r=><option key={r.id} value={r.id}>{r.label} - {r.state} - step {r.iteration??'?'} - {r.id}</option>)}
-     </select></label>:<div className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted">No non-stale active dashboard run is available. Live samples cannot be fabricated; choose historical analysis instead.</div>}
+     </select></label>:<div className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted">No source is emitting fresh PPO samples right now. The last saved checkpoint and a supervisor evaluation are not live training.</div>}
+   {catalog.recent_live_sources?.length>0&&<div className="mt-5 rounded-xl border border-border p-4">
+    <p className="text-xs font-bold uppercase tracking-wider text-muted">Recent sources (not streaming)</p>
+    {catalog.recent_live_sources.map(r=><div key={r.id} className="mt-3 flex flex-wrap items-start justify-between gap-2 text-xs">
+      <div className="min-w-0"><p className="break-all font-semibold text-secondary">{r.label}</p>
+        <p className="mt-1 text-muted">{r.reason??r.state} - last sample {r.sampled_at?new Date(r.sampled_at*1000).toLocaleString():'unknown'}</p>
+      </div><span className="rounded-md border border-border px-2 py-1 font-mono text-muted">{r.root.toUpperCase()} / {r.state}</span>
+    </div>)}
+   </div>}
   </section>:<div className={'grid gap-4 '+(mode==='compare'?'xl:grid-cols-2':'')}>
    <Chooser catalog={catalog} label="A - Primary checkpoint" checkpoint={a} exclude={b} onChange={setA}/>
    {mode==='compare'&&<Chooser catalog={catalog} label="B - Comparison checkpoint" checkpoint={b} exclude={a} onChange={setB}/>}

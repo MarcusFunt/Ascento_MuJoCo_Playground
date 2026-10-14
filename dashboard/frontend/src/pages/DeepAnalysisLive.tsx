@@ -9,27 +9,52 @@ const tabs:Tab[]=['spatial','signals','rewards','events','statistics','rerun','p
 export function DeepAnalysisLive({runId,catalog}:{runId:string;catalog:DeepCatalog}){
  const [frame,setFrame]=useState<LivePpoFrame|null>(null)
  const [history,setHistory]=useState<LivePpoFrame[]>([])
- const [status,setStatus]=useState<'connecting'|'connected'|'reconnecting'>('connecting')
+ const [status,setStatus]=useState<'connecting'|'connected'|'reconnecting'|'stale'|'unavailable'>('connecting')
+ const [statusMessage,setStatusMessage]=useState('Waiting for actual PPO samples')
+ const [clock,setClock]=useState(Date.now())
  const [envId,setEnvId]=useState<number|null>(null)
  const [tab,setTab]=useState<Tab>('spatial')
  useEffect(()=>{
   let alive=true
   setFrame(null);setHistory([]);setStatus('connecting')
-  void api.livePpoLatest(runId).then(f=>{
-   if(alive&&f.available&&f.source==='actual_ppo_rollout'){setFrame(f);setHistory([f])}
-  }).catch(()=>{})
-  const s=new EventSource(api.livePpoStreamUrl(runId))
+  const timer=window.setInterval(()=>setClock(Date.now()),1000)
+  void api.deepLiveLatest(runId).then(f=>{
+   if(!alive)return
+   if(f.available && 'environments' in f && f.source==='actual_ppo_rollout'){
+    setFrame(f);setHistory([f]);setStatus('connected');setStatusMessage('Fresh PPO telemetry')
+   }else{
+    setStatus('state' in f && f.state==='stale'?'stale':'unavailable')
+    setStatusMessage('reason' in f ? f.reason??'No live PPO frames available' : 'No live PPO frames available')
+   }
+  }).catch(()=>{if(alive){setStatus('reconnecting');setStatusMessage('Waiting for live source connection')}})
+  const s=new EventSource(api.deepLiveStreamUrl(runId))
   s.addEventListener('frame',event=>{
    if(!alive)return
    try{
     const f=JSON.parse((event as MessageEvent<string>).data) as LivePpoFrame
     if(!f.available||f.source!=='actual_ppo_rollout')return
-    setFrame(f);setStatus('connected')
-    setHistory(old=>old.at(-1)?.sequence===f.sequence?old:[...old.slice(-239),f])
-   }catch{setStatus('reconnecting')}
+    if(!Number.isFinite(f.sampled_at) || Date.now()/1000-f.sampled_at>10)return
+    setFrame(prev=>prev&&prev.sampled_at>f.sampled_at?prev:f)
+    setStatus('connected');setStatusMessage('Fresh PPO telemetry')
+    setHistory(old=>{
+      const previous=old.at(-1)
+      if(previous && previous.sampled_at>f.sampled_at)return old
+      if(previous && previous.sampled_at===f.sampled_at && previous.sequence===f.sequence)return old
+      if(previous && (f.sequence<previous.sequence || f.global_step<previous.global_step))return [f]
+      return [...old.slice(-239),f]
+    })
+   }catch{setStatus('reconnecting');setStatusMessage('Malformed streaming frame')}
   })
-  s.onerror=()=>{if(alive)setStatus('reconnecting')}
-  return ()=>{alive=false;s.close()}
+  s.addEventListener('status',event=>{
+   if(!alive)return
+   try{
+    const update=JSON.parse((event as MessageEvent<string>).data) as {state?:string;reason?:string}
+    setStatus(update.state==='stale'?'stale':'unavailable')
+    setStatusMessage(update.reason??'Live PPO telemetry unavailable')
+   }catch{setStatus('unavailable');setStatusMessage('Invalid streaming status')}
+  })
+  s.onerror=()=>{if(alive){setStatus('reconnecting');setStatusMessage('Connection lost, retrying automatically')}}
+  return ()=>{alive=false;s.close();window.clearInterval(timer)}
  },[runId])
  const liveRun=catalog.live_runs.find(r=>r.id===runId)
  const envs=frame?.environments??[]
@@ -40,7 +65,7 @@ export function DeepAnalysisLive({runId,catalog}:{runId:string;catalog:DeepCatal
    if(env.reset||(list.length&&env.episode_step<list.at(-1)!.episode_step))return [env]
    return [...list,env]
   },[])
- const stale=!frame||Date.now()/1000-frame.sampled_at>10
+ const stale=!frame||clock/1000-frame.sampled_at>10
  const latest=current?.target_xy
  const trajectory=samples.map(e=>[e.position_xyz[0],e.position_xyz[1]])
  const series=[{name:'PPO spatial trail',type:'line',showSymbol:false,
@@ -63,8 +88,9 @@ export function DeepAnalysisLive({runId,catalog}:{runId:string;catalog:DeepCatal
  })
  return <div className="space-y-5">
   <div className="rounded-xl border border-info/35 bg-info/5 p-4 text-sm">
-   <p className="font-semibold text-info">Live PPO / {liveRun?.label??runId} / {stale?'No fresh sample':status}</p>
-   <p className="mt-2 text-xs leading-relaxed text-secondary">This is an actual sampled in-memory policy state. It is not a frozen checkpoint, does not launch an evaluator, and is not a real-time MuJoCo rendering stream. Display samples can be dropped without affecting training.</p>
+   <p className="font-semibold text-info">Live PPO / {liveRun?.label??runId} / {stale?'NOT LIVE':status}</p>
+   <p className="mt-1 text-xs font-medium text-secondary">{stale?statusMessage:'Streaming fresh in-memory PPO samples'}{frame&&stale?' - last observation retained below for inspection only':''}</p>
+   <p className="mt-2 text-xs leading-relaxed text-secondary">This is an actual sampled in-memory policy state, never a frozen checkpoint or GPU-intensive simulation stream. Display samples can be dropped without affecting training.</p>
   </div>
   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-panel p-4 text-xs text-secondary">
    <span>Run ID {runId} / PPO global step {frame?.global_step.toLocaleString()??'-'} / capture overhead {fmt(frame?.capture_overhead_ms)} ms</span>

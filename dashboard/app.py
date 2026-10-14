@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ascento_mjlab.viewer.ipc import CaptureBusyError, ExplanationBusyError
-from dashboard import deep_analysis
+from dashboard import deep_analysis, deep_live
 from dashboard.config import load_config, validate_startup
 from dashboard.curriculum import curriculum_for_run
 from dashboard.database import DashboardDatabase
@@ -603,7 +603,21 @@ def tasks():
 @app.get("/api/deep-analysis/catalog")
 def deep_analysis_catalog():
     """Checkpoint identity, matching captures, and currently active PPO runs."""
-    return deep_analysis.catalog(ARTIFACT_ROOT, CONFIG.repo_root / "captures", _indexed_summaries())
+    result = deep_analysis.catalog(ARTIFACT_ROOT, CONFIG.repo_root / "captures")
+    # A run is live only if its real PPO telemetry is fresh; lifecycle states
+    # (including "stopping") must never be substituted for evidence of streaming.
+    result.update(deep_live.discover_live_sources(ARTIFACT_ROOT))
+    return result
+
+
+@app.get("/api/deep-analysis/live/{source_id}")
+def deep_analysis_live_snapshot(source_id: str):
+    return deep_live.current_frame(source_id, ARTIFACT_ROOT)
+
+
+@app.get("/api/deep-analysis/live/{source_id}/stream")
+async def deep_analysis_live_stream(source_id: str, request: Request):
+    return deep_live.streaming_response(source_id, ARTIFACT_ROOT, request)
 
 
 @app.get("/api/deep-analysis/episode")

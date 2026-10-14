@@ -1,0 +1,9 @@
+# Optional, read-only telemetry mount for the V6 training worktree.
+# Include this file in Docker Compose commands only on hosts that have V6.
+# This mount cannot modify training, and does not expose host process controls.
+services:
+  dashboard:
+    volumes:
+      - ${ASCENTO_V6_ARTIFACT_ROOT:-/root/ascento_v6_overnight/logs/rsl_rl}:/workspace/deep-live/v6:ro
+    environment:
+      ASCENTO_DEEP_LIVE_ROOTS: v6=/workspace/deep-live/v6
