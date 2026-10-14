@@ -1,0 +1,7 @@
+# Additional read-only V7 PPO artifact source; include after deep-live-v6 overlay.
+services:
+  dashboard:
+    volumes:
+      - /root/ascento_v7_overnight/logs/rsl_rl:/workspace/deep-live/v7:ro
+    environment:
+      ASCENTO_DEEP_LIVE_ROOTS: v6=/workspace/deep-live/v6;v7=/workspace/deep-live/v7
