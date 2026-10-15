@@ -1,0 +1,8 @@
+# Operator-controlled, read-only supervisor diagnostics for the active V7 run.
+# PPO remains isolated; this overlay only extends the dashboard container.
+services:
+  dashboard:
+    volumes:
+      - /root/ascento_v7_overnight/.maintenance/overnight_v7_20261015:/workspace/deep-live-meta/v7:ro
+    environment:
+      ASCENTO_DEEP_LIVE_METADATA_ROOTS: v7=/workspace/deep-live-meta/v7
