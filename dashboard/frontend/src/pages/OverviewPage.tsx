@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { Activity, ArrowRight, Clock3, Cpu, Gauge, Plus, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import { CurriculumRail } from '../components/CurriculumRail'
+import { ActiveTrainingPanel, useLiveTrainingSummary } from '../components/LiveTrainingSurface'
 import { MetricCard } from '../components/MetricCard'
 import { NewRunDialog } from '../components/NewRunDialog'
 import { PageHeader } from '../components/PageHeader'
@@ -22,6 +23,8 @@ export function OverviewPage() {
     staleTime: 10_000,
   })
 
+  const liveSummary = useLiveTrainingSummary()
+  const hasExternalTraining = !!liveSummary.data?.runs.length
   const data = overview.data
   const run = data?.active_run
   const series = data?.series || []
@@ -34,7 +37,7 @@ export function OverviewPage() {
   const horizon = curriculum?.kind === 'horizon' ? curriculum as HorizonCurriculum : null
 
   if (overview.isLoading) {
-    return <OverviewSkeleton />
+    return <><ActiveTrainingPanel /><OverviewSkeleton /></>
   }
 
   return (
@@ -55,12 +58,14 @@ export function OverviewPage() {
         <div className="mb-6 rounded-xl border border-danger/45 bg-danger/10 p-4 text-sm text-danger">{overview.error.message}</div>
       ) : null}
 
+      <ActiveTrainingPanel />
+
       {!run ? (
         <section className="rounded-xl border border-border bg-panel px-4 py-10 text-center sm:px-6 sm:py-14">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border-strong bg-raised"><Gauge size={22} className="text-secondary" /></div>
-          <h2 className="mt-5 text-2xl font-semibold tracking-[-0.03em]">No active training</h2>
+          <h2 className="mt-5 text-2xl font-semibold tracking-[-0.03em]">{hasExternalTraining ? 'No managed run in this checkout' : 'No active training'}</h2>
           <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-muted">
-            Start a managed run, or inspect the most recent archived work from the Runs page.
+            {hasExternalTraining ? 'The live experiment above runs in an isolated worktree. This section lists runs managed by the primary checkout.' : 'Start a managed run, or inspect the most recent archived work from the Runs page.'}
           </p>
           <div className="mt-6 flex justify-center gap-3">
             <Button variant="primary" onClick={() => setNewRunOpen(true)}><Plus size={16} /> Start training</Button>

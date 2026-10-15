@@ -86,6 +86,19 @@ export type DeepLiveStatus = {
   reason?: string; age_seconds?: number
 }
 
+export type LiveTrainingRun = {
+  id: string; root: string; label: string; state: string; sampled_at: number | null
+  iteration: number | null; mean_reward: number | null
+  reward_trend: Array<{ iteration: number; reward: number }>
+  curriculum_stage: number | null; curriculum_stage_count: number | null
+  training_remaining_seconds: number | null; deadline_remaining_seconds: number | null
+  training_cutoff: string | null; deadline: string | null; metadata_available: boolean
+}
+export type LiveTrainingSummary = {
+  runs: LiveTrainingRun[]
+  gpu: { utilization_percent: number; memory_used_mib: number; memory_total_mib: number; temperature_c: number } | null
+}
+
 export type DeepCatalog = {
   checkpoints: DeepCheckpoint[]
   recordings: Record<string, DeepRecording[]>
@@ -111,6 +124,7 @@ export type DeepEpisode = {
 
 export const api = {
   deepCatalog: () => fetchJson<DeepCatalog>('/api/deep-analysis/catalog'),
+  activeTrainingSummary: () => fetchJson<LiveTrainingSummary>('/api/deep-analysis/active-summary'),
   deepLiveLatest: (sourceId: string) =>
     fetchJson<LivePpoFrame | DeepLiveStatus>('/api/deep-analysis/live/' + encodeURIComponent(sourceId)),
   deepLiveStreamUrl: (sourceId: string) =>

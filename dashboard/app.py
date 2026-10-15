@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ascento_mjlab.viewer.ipc import CaptureBusyError, ExplanationBusyError
-from dashboard import deep_analysis, deep_live
+from dashboard import deep_analysis, deep_live, live_overview
 from dashboard.config import load_config, validate_startup
 from dashboard.curriculum import curriculum_for_run
 from dashboard.database import DashboardDatabase
@@ -608,6 +608,12 @@ def deep_analysis_catalog():
     # (including "stopping") must never be substituted for evidence of streaming.
     result.update(deep_live.discover_live_sources(ARTIFACT_ROOT))
     return result
+
+
+@app.get("/api/deep-analysis/active-summary")
+def deep_analysis_active_summary():
+    """Read-only live PPO status across mounted worktrees."""
+    return live_overview.summary(ARTIFACT_ROOT)
 
 
 @app.get("/api/deep-analysis/live/{source_id}")

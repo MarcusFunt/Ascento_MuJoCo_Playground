@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
@@ -10,9 +10,10 @@ import type { DeepCatalog, DeepCheckpoint, DeepEpisode, DeepRecording } from '..
 import { api } from '../api'
 import { CYAN, AMBER, fmt, type Pair, SpatialCharts, SignalsCharts, RewardsCharts, EventsCharts, StatisticsCharts } from './DeepAnalysisCharts'
 import { DeepAnalysisLive } from './DeepAnalysisLive'
+import { LiveRunCards } from '../components/LiveTrainingSurface'
 
 const RerunWebViewer=lazy(()=>import('../components/RerunWebViewer'))
-type Mode='single'|'compare'|'live'
+type Mode='single'|'compare'
 type Tab='spatial'|'signals'|'rewards'|'events'|'statistics'|'rerun'|'provenance'
 type Choice={mode:'single'|'compare'; a:string; b:string|null}|{mode:'live';runId:string}
 const views: Array<{id:Tab;label:string;icon:typeof Map}>=[
@@ -72,48 +73,28 @@ function Landing({catalog,onSelect}:{catalog:DeepCatalog;onSelect:(choice:Choice
  const [mode,setMode]=useState<Mode>('single')
  const [a,setA]=useState('')
  const [b,setB]=useState('')
- const [liveId,setLiveId]=useState('')
  const ca=catalog.checkpoints.find(c=>c.id===a),cb=catalog.checkpoints.find(c=>c.id===b)
- const okay=mode==='live'?catalog.live_runs.some(r=>r.id===liveId):!!ca&&(mode==='single'||!!cb&&a!==b)
+ const okay=!!ca&&(mode==='single'||!!cb&&a!==b)
  const modes=[
   {id:'single',label:'Single checkpoint',caption:'Inspect one frozen policy and its recordings.',icon:Target},
   {id:'compare',label:'Compare checkpoints',caption:'Two different saved policies with explicit identities.',icon:GitCompareArrows},
-  {id:'live',label:'Live checkpoint / PPO',caption:'Subscribe to actual in-memory training samples.',icon:Radio},
  ] as const
  return <div className="space-y-5">
-  <div className="grid gap-3 lg:grid-cols-3">{modes.map(({id,label,caption,icon:Icon})=><button key={id} type="button"
+  <div className="grid gap-3 sm:grid-cols-2">{modes.map(({id,label,caption,icon:Icon})=><button key={id} type="button"
     aria-pressed={mode===id} onClick={()=>setMode(id)}
     className={'min-h-36 rounded-2xl border p-5 text-left transition-colors '+(mode===id?'border-info/70 bg-info/[.08]':'border-border bg-panel hover:border-border-strong')}>
     <div className="mb-3 flex justify-between"><Icon size={23} className={mode===id?'text-info':'text-secondary'}/>{mode===id&&<CheckCircle2 size={18} className="text-info"/>}</div>
     <h2 className="font-semibold">{label}</h2><p className="mt-2 text-xs leading-relaxed text-secondary">{caption}</p>
    </button>)}</div>
-  {mode==='live'?<section className="rounded-2xl border border-border bg-panel p-5">
-   <h3 className="font-semibold">Select an active training run</h3>
-   <p className="mt-2 text-xs text-secondary">A live run is an in-memory policy, not necessarily identical to its latest saved .pt checkpoint. Streaming requires the existing PPO monitor.</p>
-   {catalog.live_runs.length?<label className="mt-4 block text-xs text-secondary">Source run
-     <select aria-label="Live training source" value={liveId} onChange={e=>setLiveId(e.target.value)}
-      className="mt-2 w-full rounded-lg border border-border bg-raised p-3 text-sm text-foreground">
-      <option value="">Choose an active run</option>
-      {catalog.live_runs.map(r=><option key={r.id} value={r.id}>{r.label} - {r.state} - step {r.iteration??'?'} - {r.id}</option>)}
-     </select></label>:<div className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted">No source is emitting fresh PPO samples right now. The last saved checkpoint and a supervisor evaluation are not live training.</div>}
-   {catalog.recent_live_sources?.length>0&&<div className="mt-5 rounded-xl border border-border p-4">
-    <p className="text-xs font-bold uppercase tracking-wider text-muted">Recent sources (not streaming)</p>
-    {catalog.recent_live_sources.map(r=><div key={r.id} className="mt-3 flex flex-wrap items-start justify-between gap-2 text-xs">
-      <div className="min-w-0"><p className="break-all font-semibold text-secondary">{r.label}</p>
-        <p className="mt-1 text-muted">{r.reason??r.state} - last sample {r.sampled_at?new Date(r.sampled_at*1000).toLocaleString():'unknown'}</p>
-      </div><span className="rounded-md border border-border px-2 py-1 font-mono text-muted">{r.root.toUpperCase()} / {r.state}</span>
-    </div>)}
-   </div>}
-  </section>:<div className={'grid gap-4 '+(mode==='compare'?'xl:grid-cols-2':'')}>
+  <div className={'grid gap-4 '+(mode==='compare'?'xl:grid-cols-2':'')}>
    <Chooser catalog={catalog} label="A - Primary checkpoint" checkpoint={a} exclude={b} onChange={setA}/>
    {mode==='compare'&&<Chooser catalog={catalog} label="B - Comparison checkpoint" checkpoint={b} exclude={a} onChange={setB}/>}
-  </div>}
+  </div>
   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-panel p-4">
    <p className="max-w-3xl text-xs leading-relaxed text-muted">Exact checkpoint provenance is verified before any recording is displayed. Exploration never starts or scores a benchmark.</p>
    <button type="button" disabled={!okay} className="flex items-center gap-2 rounded-lg bg-foreground px-5 py-3 text-sm font-bold text-background disabled:cursor-not-allowed disabled:opacity-40"
     onClick={()=>{
-     if(mode==='live')onSelect({mode:'live',runId:liveId})
-     else if(ca)onSelect({mode, a:ca.id, b:mode==='compare'?cb!.id:null})
+     if(ca)onSelect({mode, a:ca.id, b:mode==='compare'?cb!.id:null})
     }}>Open deep analysis <ArrowRight size={16}/></button>
   </div>
  </div>
@@ -220,7 +201,16 @@ function Recorded({catalog,choice}:{catalog:DeepCatalog;choice:Extract<Choice,{m
 export function DeepAnalysisPage(){
  const catalogQuery=useQuery({queryKey:['deep-catalog'],queryFn:api.deepCatalog,staleTime:20_000,refetchInterval:120_000})
  const [choice,setChoice]=useState<Choice|null>(null)
+ const autoOpened=useRef<string|null>(null)
+ const deepLink=new URLSearchParams(window.location.search).get('live')
  const catalog=catalogQuery.data
+ useEffect(()=>{
+  if(!catalog||!deepLink||autoOpened.current===deepLink)return
+  if(catalog.live_runs.some(r=>r.id===deepLink)){
+   autoOpened.current=deepLink
+   setChoice({mode:'live',runId:deepLink})
+  }
+ },[catalog,deepLink])
  return <div className="space-y-6" data-testid="deep-analysis-page">
   <header className="flex flex-wrap items-start justify-between gap-4">
    <div><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.14em] text-info"><Microscope size={16}/> Read-only research workspace</div>
@@ -238,7 +228,14 @@ export function DeepAnalysisPage(){
   </div>
   {catalogQuery.error?<p role="alert" className="rounded-xl border border-danger/50 p-5 text-danger">Could not load checkpoints: {catalogQuery.error.message}</p>:
    !catalog?<div className="min-h-72 animate-pulse rounded-xl border border-border bg-panel p-8 text-muted">Discovering checkpoint artifacts...</div>:
-   !choice?<Landing catalog={catalog} onSelect={setChoice}/>:
+   !choice?<div className="space-y-8">
+     <LiveRunCards onChoose={runId=>setChoice({mode:'live',runId})}/>
+     <div className="border-t border-border pt-7">
+       <div className="mb-4 text-lg font-semibold">Saved checkpoint analysis</div>
+       <p className="mb-4 text-xs text-secondary">Historical policies and matched captures are distinct from the live, unsaved PPO state above.</p>
+       <Landing catalog={catalog} onSelect={setChoice}/>
+     </div>
+   </div>:
    choice.mode==='live'?<DeepAnalysisLive key={choice.runId} runId={choice.runId} catalog={catalog}/>:
    <Recorded key={choice.a+choice.b} catalog={catalog} choice={choice}/>}
   <footer className="border-t border-border pt-3 text-xs text-muted">{observations} Live PPO data come only from actual monitor samples; they are not frozen checkpoint replays.</footer>
