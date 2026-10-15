@@ -6,3 +6,6 @@ services:
       - /root/ascento_v7_overnight/.maintenance/overnight_v7_20261015:/workspace/deep-live-meta/v7:ro
     environment:
       ASCENTO_DEEP_LIVE_METADATA_ROOTS: v7=/workspace/deep-live-meta/v7
+      # Serve the freshly built canonical frontend without rebuilding the shared
+      # training image; only this read-only dashboard overlay overrides the image.
+      ASCENTO_DASHBOARD_DIST: /workspace/dashboard/frontend/dist
